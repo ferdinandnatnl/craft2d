@@ -18,7 +18,7 @@ export {
     ORE_THRESHOLDS,
     SPAWN_PLAYER,
     ToolType,
-} from "@minecraftjs/shared/constants.js";
+} from "@2dcraft.com/shared/constants.js";
 
 // Get multiplayer bool from url
 export const url = new URL(window.location.href);

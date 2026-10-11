@@ -1,11 +1,11 @@
 import { runtime } from "./runtime.js";
 import JSZip from "jszip";
 import { entityRegistry } from "../entities/entityRegistry.js";
-import { getItem } from "@minecraftjs/shared/item.js";
-import { Items } from "@minecraftjs/shared/items.js";
+import { getItem } from "@2dcraft.com/shared/item.js";
+import { Items } from "@2dcraft.com/shared/items.js";
 import { getFromLdb } from "./indexDB.js";
-import { blockRegistry } from "@minecraftjs/shared/blockRegistry.js";
-import "@minecraftjs/shared/blocks.js";
+import { blockRegistry } from "@2dcraft.com/shared/blockRegistry.js";
+import "@2dcraft.com/shared/blocks.js";
 import { resolveAssetUrl } from "./assetBundle.js";
 import { loadNaturalTexturePack } from "./naturalTexturePack.js";
 

@@ -15,7 +15,7 @@ await Promise.all([
     import("./Assets/entities/entities.js"),
     import("./Assets/entities/TNT.js"),
     import("./Assets/game/inventoryItem.js"),
-    import("@minecraftjs/shared/trees.js"),
+    import("@2dcraft.com/shared/trees.js"),
     import("./Assets/world/dimension.js"),
     import("./Assets/multiplayer/messageHandler.js"),
     import("./Assets/multiplayer/server.js"),

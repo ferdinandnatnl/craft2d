@@ -29,7 +29,6 @@ const htmlApi = {
     backToMenu: menu.backToMenu,
     uploadTexturePack: menu.uploadTexturePack,
     removeTexturePack: menu.removeTexturePack,
-    downloadServer: menu.downloadServer,
     connectToServer: menu.connectToServer,
     gotoQuickConnect: menu.gotoQuickConnect,
     gotoAddServer: menu.gotoAddServer,

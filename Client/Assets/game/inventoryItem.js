@@ -1,7 +1,7 @@
 import { runtime } from "../utils/runtime.js";
-import { InventoryItem as SharedInventoryItem } from "@minecraftjs/shared/inventoryItem.js";
-import { getItem } from "@minecraftjs/shared/item.js";
-import { inventoryRegistry } from "@minecraftjs/shared/inventoryRegistry.js";
+import { InventoryItem as SharedInventoryItem } from "@2dcraft.com/shared/inventoryItem.js";
+import { getItem } from "@2dcraft.com/shared/item.js";
+import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
 import { drawImage, drawRect, drawText } from "../utils/renderer.js";
 import { getSpriteSize, getSpriteUrl } from "../utils/texturePackLoader.js";
 import { getBlock } from "../world/block.js";

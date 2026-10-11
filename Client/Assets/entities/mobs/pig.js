@@ -1,8 +1,8 @@
 import { runtime } from "../../utils/runtime.js";
 import { AI, Mob } from "../mob.js";
 import { Body, BodyPart } from "../../game/body.js";
-import { Items } from "@minecraftjs/shared/items.js";
-import { LootItem, LootTable } from "@minecraftjs/shared/lootTable.js";
+import { Items } from "@2dcraft.com/shared/items.js";
+import { LootItem, LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { Sounds, playPositionalSound, playRandomSoundFromArray } from "../../game/sounds.js";
 import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";

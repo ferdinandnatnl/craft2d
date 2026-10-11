@@ -1,12 +1,12 @@
 import { Drop } from "../drop.js";
 import { AI, Mob } from "../mob.js";
 import { Body, BodyPart } from "../../game/body.js";
-import { Items } from "@minecraftjs/shared/items.js";
-import { LootItem, LootTable } from "@minecraftjs/shared/lootTable.js";
+import { Items } from "@2dcraft.com/shared/items.js";
+import { LootItem, LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { Sounds, playPositionalSound, playRandomSoundFromArray } from "../../game/sounds.js";
 import { Vector2, randomRange } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
-import { Blocks } from "@minecraftjs/shared/blocks.js";
+import { Blocks } from "@2dcraft.com/shared/blocks.js";
 
 export class Sheep extends Mob {
     constructor(

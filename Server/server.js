@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 import { World } from "./Classes/world.js";
 import { createInterface } from "readline";
 import fs from "fs";
-import { BLOCK_SIZE, CHUNK_HEIGHT } from "@minecraftjs/shared/constants.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT } from "@2dcraft.com/shared/constants.js";
 
 const propertiesFile = "server.properties";
 const userCacheFile = "usercache.json";
@@ -30,7 +30,7 @@ const defaultProperties = {
     serverPort: 25565,
     allowNether: true,
     levelName: "world",
-    motd: "A Minecraft JS Server",
+    motd: "A 2dcraft.com Server",
     maxPlayers: 20,
 };
 
@@ -171,7 +171,7 @@ function loadBannedIPs() {
 }
 
 function beforeInit() {
-    serverLog("Welcome to the Minecraft JS server panel!");
+    serverLog("Welcome to the 2dcraft.com server panel!");
     loadProperties();
     loadUserCache();
     loadBannedIPs();
@@ -228,7 +228,7 @@ wss.on("connection", (ws) => {
                             motd: properties.motd,
                             maxPlayers: properties.maxPlayers,
                             onlinePlayers: players.length,
-                            version: "Minecraft JS 1.0",
+                            version: "2dcraft.com 1.0",
                             icon: serverIcon,
                             requestId: data.message?.requestId || null,
                         },

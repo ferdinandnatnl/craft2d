@@ -129,17 +129,6 @@ export function multiplayerButton() {
     showServers();
 }
 
-export function downloadServer() {
-    const link = document.createElement("a");
-    link.href = "server.zip";
-    link.download = "server.zip";
-    document.body.appendChild(link);
-
-    link.click();
-
-    document.body.removeChild(link);
-}
-
 export function updateMusicVolume(value) {
     currentSettings.musicVolume = value;
     musicVolumeLabel.textContent = "Music - " + value + "%";
@@ -349,7 +338,7 @@ export function initializeDefaultTexturePack() {
     const defaultPackId = "default";
 
     const builtIns = [
-        { id: "default", name: "Default", description: "Original Minecraft JS textures", icon: "Assets/sprites/menu/worldPreview.png" },
+        { id: "default", name: "Default", description: "Original 2dcraft.com textures", icon: "Assets/sprites/menu/worldPreview.png" },
         { id: "natural", name: "Natural 32x", description: "Earthy terrain with detailed stone, bark and foliage", icon: "Assets/sprites/materials/terrain-atlas.png" },
     ];
     for (const builtIn of builtIns) {

@@ -1,18 +1,18 @@
 import { runtime } from "../utils/runtime.js";
 import { Entities } from "../entities/entities.js";
 import { InventoryItem } from "./inventoryItem.js";
-import { getItem } from "@minecraftjs/shared/item.js";
-import { Items } from "@minecraftjs/shared/items.js";
+import { getItem } from "@2dcraft.com/shared/item.js";
+import { Items } from "@2dcraft.com/shared/items.js";
 import { Vector2 } from "../utils/classes.js";
 import { BLOCK_SIZE, CHUNK_WIDTH, multiplayer } from "../utils/globals.js";
 import { CANVAS, drawText } from "../utils/renderer.js";
 import { screenshotNearestChunks } from "../utils/screenshotChunks.js";
-import { AllBiomes } from "@minecraftjs/shared/biome.js";
+import { AllBiomes } from "@2dcraft.com/shared/biome.js";
 import { getBlock } from "../world/block.js";
-import { Blocks } from "@minecraftjs/shared/blocks.js";
+import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { activeDimension, gotoDimension } from "../world/dimension.js";
 import { currentSave, saveWorld } from "../world/saving.js";
-import { Structures } from "@minecraftjs/shared/structures.js";
+import { Structures } from "@2dcraft.com/shared/structures.js";
 
 export class Chat {
     constructor() {
@@ -194,7 +194,7 @@ export class Chat {
             true,
         );
         this.message(
-            "Welcome to Minecraft JS! Type /help for commands.",
+            "Welcome to 2dcraft.com! Type /help for commands.",
             "",
             Colors.Green,
         );

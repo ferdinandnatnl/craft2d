@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
-import tooloud from "@minecraftjs/shared/tooloud.js";
+import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, TERRAIN_HEIGHT, RENDER_DISTANCE } from "../utils/globals.js";
 import { getBlock } from "../world/block.js";
 import { getDimension, getDimensionChunks, Dimensions } from "../world/dimension.js";

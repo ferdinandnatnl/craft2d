@@ -23,10 +23,6 @@ function walkFiles(dir, files = []) {
     return files;
 }
 
-function countFiles(dir) {
-    return walkFiles(dir).length;
-}
-
 function packMediaZip() {
     return {
         name: "pack-media-zip",
@@ -72,14 +68,6 @@ function packMediaZip() {
             if (existsSync(photonLicense)) {
                 cpSync(photonLicense, join(dist, "PHOTON-LICENSE.txt"));
             }
-
-            const distFileCount = countFiles(dist);
-            console.log(`[pack-media-zip] dist file count: ${distFileCount}`);
-            if (distFileCount >= 1000) {
-                throw new Error(
-                    `dist has ${distFileCount} files (itch.io limit is ~1000). Reduce loose assets.`
-                );
-            }
         },
     };
 }
@@ -91,7 +79,7 @@ export default defineConfig({
     plugins: [packMediaZip()],
     resolve: {
         alias: {
-            "@minecraftjs/shared": resolve(__dirname, "../Shared"),
+            "@2dcraft.com/shared": resolve(__dirname, "../Shared"),
         },
     },
     build: {

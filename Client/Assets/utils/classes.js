@@ -434,7 +434,7 @@ export function rgbToHex(r, g, b) {
         .padStart(2, "0")}`.toUpperCase();
 }
 
-export { randomRange } from "@minecraftjs/shared/math.js";
+export { randomRange } from "@2dcraft.com/shared/math.js";
 
 export function angleToVector(angle) {
     return new Vector2(Math.cos(angle), Math.sin(angle));

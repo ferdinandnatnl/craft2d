@@ -1,19 +1,19 @@
 import { runtime } from "../utils/runtime.js";
 import { entityRegistry } from "../entities/entityRegistry.js";
-import { inventoryRegistry } from "@minecraftjs/shared/inventoryRegistry.js";
-import { getItem } from "@minecraftjs/shared/item.js";
+import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
+import { getItem } from "@2dcraft.com/shared/item.js";
 import { Sounds, playMessySound, playPositionalSound, playRandomSoundFromArray, removeAudio, stopMessySound } from "../game/sounds.js";
 import { Square, Transform, Vector2, arePropsEqual, randomRange } from "../utils/classes.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, TICK_SPEED, ToolType, multiplayer, updatingBlocks } from "../utils/globals.js";
 import { getSpriteAverageColor, getSpriteSize, getSpriteUrl } from "../utils/texturePackLoader.js";
-import { blockRegistry } from "@minecraftjs/shared/blockRegistry.js";
+import { blockRegistry } from "@2dcraft.com/shared/blockRegistry.js";
 import {
     activeDimension,
     getDimension,
     getDimensionChunks,
 } from "./dimensionState.js";
 import { createParticleEmitter } from "./particleEmitter.js";
-import { treesRegistry } from "@minecraftjs/shared/treesRegistry.js";
+import { treesRegistry } from "@2dcraft.com/shared/treesRegistry.js";
 
 function Blocks() {
     return blockRegistry.Blocks;
@@ -29,7 +29,7 @@ import {
     BlockType,
     SpecialType,
     BlockCategory,
-} from "@minecraftjs/shared/blockType.js";
+} from "@2dcraft.com/shared/blockType.js";
 export { BlockType, SpecialType, BlockCategory };
 
 export function normalizeMetaDataObject(metaData) {

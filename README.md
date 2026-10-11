@@ -1,17 +1,17 @@
 <div align="center">
-  <img src=".github/mcjs.png" alt="MinecraftJS" />
+  <h1>2dcraft.com</h1>
 
   <br />
 
   <p>A JavaScript Minecraft fan game with side-scrolling gameplay and a Three.js 3D cutaway renderer.</p>
   <p><em>"The most complete 2D Minecraft fan game you can play in your browser!"</em></p>
 
-  <p><strong>Play here on Itch.io:</strong> <a href="https://plekiko.itch.io/minecraft-js">plekiko.itch.io/minecraft-js</a></p>
+  <p><strong>Play here:</strong> <a href="https://2dcraft.com">2dcraft.com</a></p>
 
   <br />
 
   <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
-    <img src=".github/readme-clip-1.gif" alt="MinecraftJS gameplay clip" width="600" />
+    <img src=".github/readme-clip-1.gif" alt="2dcraft.com gameplay clip" width="600" />
     <img src=".github/readme-img-1.png" alt="Gameplay screenshot" width="600" />
     <img src=".github/readme-img-3.png" alt="Gameplay screenshot" width="600" />
     <img src=".github/readme-img-2.png" alt="Gameplay screenshot" width="600" />
@@ -51,7 +51,7 @@ The output is written to `Client/dist/`. Preview it with `npm run preview`.
 
 ### Option 2 - Docker
 If you wish to build the project with Docker, you can run:
-`docker build -t minecraftjs .`. You can then run it with `docker run -p 80:80 minecraftjs`, which will host the game on port 80 (simply `localhost`).
+`docker build -t 2dcraft.com .`. You can then run it with `docker run -p 80:80 2dcraft.com`, which will host the game on port 80 (simply `localhost`).
 Please be advised that this is a static build and will not update when you modify the code unless you re-run the build command.
 
 > [!NOTE]

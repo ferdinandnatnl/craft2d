@@ -2,7 +2,7 @@ import { runtime } from "../utils/runtime.js";
 import { Vector2, randomRange, uuidv4 } from "../utils/classes.js";
 import { BLOCK_SIZE } from "../utils/globals.js";
 import { isMediaPacked, resolveAssetUrl } from "../utils/assetBundle.js";
-import { Sounds } from "@minecraftjs/shared/sounds.js";
+import { Sounds } from "@2dcraft.com/shared/sounds.js";
 export { Sounds };
 
 // Base URL for audio files

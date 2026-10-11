@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "type": "module",
     "dependencies": {
-        "@minecraftjs/shared": "file:../Shared",
+        "@2dcraft.com/shared": "file:../Shared",
         "ws": "^8.18.1"
     }
 }

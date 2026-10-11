@@ -2,8 +2,8 @@
  * Dimension ids/state without Blocks/biome imports.
  * Keeps block.js out of the blocks.js init cycle.
  */
-export { Dimensions } from "@minecraftjs/shared/dimensions.js";
-import { Dimensions } from "@minecraftjs/shared/dimensions.js";
+export { Dimensions } from "@2dcraft.com/shared/dimensions.js";
+import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
 
 export let activeDimension = Dimensions.Overworld;
 

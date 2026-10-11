@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { BLOCK_SIZE } from "../utils/globals.js";
 import { getSpriteUrl } from "../utils/texturePackLoader.js";
-import { getItem } from "@minecraftjs/shared/item.js";
+import { getItem } from "@2dcraft.com/shared/item.js";
 import { getBlock } from "../world/block.js";
 import { getHeadPitch, getLimbPitch, getSwimPartPitch } from "./entityPose.js";
 import { skinBox } from "./entityGeometry.js";
