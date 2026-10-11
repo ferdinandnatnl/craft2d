@@ -14,6 +14,10 @@ export class InputHandler {
 
         this.keys = {}; // Tracks whether a key is held down
         this.keysDown = {}; // Tracks single press events
+        this.touchActions = new Set();
+        this.touchActionsPressed = new Set();
+        this.touchActionsReleased = new Set();
+        this.touchMouseReleased = new Set();
         this._pauseConsumedByUI = false;
         keysFromBindings.forEach((key) => {
             this.keys[key] = false;
@@ -137,6 +141,7 @@ export class InputHandler {
     }
 
     _handleMouseDown(event) {
+        if (event.target !== CANVAS) return;
         if (event.button >= 0 && event.button <= 2) {
             if (!this.mouse.buttons[event.button]) {
                 this.mouse.clicked[event.button] = true;
@@ -148,8 +153,40 @@ export class InputHandler {
     _handleMouseUp(event) {
         if (event.button >= 0 && event.button <= 2) {
             this.mouse.buttons[event.button] = false;
-            this.mouse.clicked[event.button] = false;
         }
+    }
+
+    setTouchAction(action, down) {
+        if (down) {
+            if (!this.touchActions.has(action)) this.touchActionsPressed.add(action);
+            this.touchActions.add(action);
+            this.touchActionsReleased.delete(action);
+        } else if (this.touchActions.has(action)) {
+            // Keep a short tap active until the next game frame reads it.
+            this.touchActionsReleased.add(action);
+        }
+    }
+
+    queueTouchClick(button) {
+        this.mouse.clicked[button] = true;
+    }
+
+    setTouchMouseButton(button, down) {
+        this.mouse.buttons[button] = true;
+        if (!down) this.touchMouseReleased.add(button);
+    }
+
+    setPointerPosition(x, y) {
+        this.mouse.position.x = x;
+        this.mouse.position.y = y;
+    }
+
+    clearTouchActions() {
+        this.touchActions.clear();
+        this.touchActionsPressed.clear();
+        this.touchActionsReleased.clear();
+        this.touchMouseReleased.clear();
+        this.mouse.buttons[2] = false;
     }
 
     _handleMouseMove(event) {
@@ -170,6 +207,7 @@ export class InputHandler {
     }
 
     isActionDown(action) {
+        if (this.touchActions.has(action)) return true;
         const keys = this.keyBindings[action];
         if (!keys) return false;
         return keys.some((b) => {
@@ -180,6 +218,7 @@ export class InputHandler {
         });
     }
     isActionPressed(action) {
+        if (this.touchActionsPressed.has(action)) return true;
         const keys = this.keyBindings[action];
         if (!keys) return false;
         for (const b of keys) {
@@ -218,6 +257,11 @@ export class InputHandler {
         for (const key in this.keysDown) {
             this.keysDown[key] = false;
         }
+        this.touchActionsPressed.clear();
+        for (const action of this.touchActionsReleased) this.touchActions.delete(action);
+        this.touchActionsReleased.clear();
+        for (const button of this.touchMouseReleased) this.mouse.buttons[button] = false;
+        this.touchMouseReleased.clear();
     }
 
     // Getters for mouse state (physical buttons; inventory UI uses these)

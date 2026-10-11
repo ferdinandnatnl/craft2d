@@ -4,6 +4,7 @@ import { PauseMenu } from "./pauseMenu.js";
 import { Vector2 } from "../utils/classes.js";
 import { BLOCK_SIZE, INTERACT_DISTANCE, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
+import { updateTouchControls } from "../utils/touchControls.js";
 import { draw, setShaderMode, setRendererMode } from "../utils/renderer.js";
 import {
     getShaderModeLabel,
@@ -149,6 +150,7 @@ export class Game {
     }
 
     updateGame() {
+        updateTouchControls();
         if (!runtime.world) return;
 
         runtime.world.updateEntities();

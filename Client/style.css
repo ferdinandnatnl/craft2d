@@ -40,6 +40,101 @@ body:has(#canvas) {
 
 #canvas {
     z-index: 0;
+    touch-action: none;
+}
+
+#touch-controls {
+    display: none;
+}
+
+@media (pointer: coarse) {
+    #touch-controls {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 5;
+        pointer-events: none;
+        box-sizing: border-box;
+        padding-bottom: env(safe-area-inset-bottom);
+        font-family: "Pixel", sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    .touch-top,
+    .touch-move,
+    .touch-actions {
+        position: absolute;
+        display: flex;
+        gap: 8px;
+        pointer-events: none;
+    }
+
+    .touch-top {
+        top: calc(12px + env(safe-area-inset-top));
+        right: calc(12px + env(safe-area-inset-right));
+    }
+
+    .touch-move {
+        left: calc(12px + env(safe-area-inset-left));
+        bottom: calc(105px + env(safe-area-inset-bottom));
+    }
+
+    .touch-actions {
+        right: calc(12px + env(safe-area-inset-right));
+        bottom: calc(105px + env(safe-area-inset-bottom));
+    }
+
+    .touch-button {
+        width: 54px;
+        height: 54px;
+        padding: 2px;
+        border: 2px solid #aaa;
+        border-radius: 4px;
+        background: rgba(25, 25, 25, 0.8);
+        color: white;
+        font: 15px "Pixel", sans-serif;
+        text-shadow: 1px 1px #000;
+        pointer-events: auto;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+    }
+
+    .touch-button:active,
+    .touch-button.pressed {
+        background: #777;
+        border-color: white;
+    }
+
+    .touch-button:focus-visible {
+        outline: 3px solid white;
+        outline-offset: 2px;
+    }
+
+    .touch-busy .touch-move,
+    .touch-busy .touch-actions,
+    .touch-busy .touch-top,
+    .touch-inventory .touch-move,
+    .touch-inventory .touch-actions,
+    .touch-inventory [data-action="drop"],
+    .touch-inventory [data-action="sprint"] {
+        display: none;
+    }
+
+    @media (max-width: 360px) {
+        .touch-button {
+            width: 48px;
+            height: 48px;
+        }
+    }
+
+    @media (max-width: 600px) and (orientation: landscape) {
+        .touch-move,
+        .touch-actions {
+            bottom: calc(72px + env(safe-area-inset-bottom));
+        }
+    }
 }
 
 #voxel-canvas {
@@ -104,6 +199,9 @@ body.shaders-active #shader-canvas {
     align-items: center;
     justify-content: center;
     width: 48rem;
+    max-width: calc(100% - 2rem);
+    max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
 }
 
 .pause-menu-page.active {

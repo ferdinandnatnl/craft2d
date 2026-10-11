@@ -6,12 +6,13 @@
 body {
     background-image: url("Assets/sprites/misc/End_Poem_background.webp");
     background-size: cover;
-    height: 100vh;
+    height: 100dvh;
     overflow: hidden;
 
     margin: 0;
 
     font-family: "Pixel";
+    overscroll-behavior: none;
 }
 
 .background {
@@ -780,7 +781,72 @@ body {
     font-size: 130%;
     user-select: none;
     cursor: pointer;
+    touch-action: manipulation;
     margin: 0;
+}
+.btn:active {
+    --btn-img: url("Assets/sprites/menu/menu_button_hover.png");
+    --btn-center-img: var(--btn-center-img-hover);
+}
+@media (hover: none) {
+    .btn:hover:not(:active):not(:disabled) {
+        --btn-img: url("Assets/sprites/menu/menu_button.png");
+        --btn-center-img: var(--btn-center-fill);
+    }
+}
+
+@media (pointer: coarse) and (max-width: 900px) {
+    .world-select-container-text,
+    .center-modal {
+        box-sizing: border-box;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+            env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+
+    .world-container {
+        width: calc(100% - 1rem);
+        height: 88px;
+    }
+
+    .world-name,
+    .world-date {
+        font-size: 1.25rem;
+    }
+
+    .world-buttons-container {
+        box-sizing: border-box;
+        width: calc(100% - 2rem);
+        margin: 1rem;
+    }
+
+    .world-buttons-container > div {
+        flex-wrap: wrap;
+    }
+
+    .center-modal {
+        width: 100%;
+        overflow-y: auto;
+    }
+
+    .world-create-top-container {
+        width: 100%;
+        gap: 1rem;
+    }
+
+    .world-create-bottom-container {
+        box-sizing: border-box;
+        flex-wrap: wrap;
+    }
+
+    .options-modal {
+        width: min(32rem, calc(100% - 2rem));
+        overflow-y: auto;
+    }
+
+    .big-text {
+        padding: 1rem;
+        text-align: center;
+    }
 }
 .btn::before {
     content: "";

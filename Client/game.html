@@ -24,6 +24,24 @@
             <canvas id="shader-canvas" aria-hidden="true"></canvas>
             <div id="loading">Loading...</div>
 
+            <div id="touch-controls" aria-label="Touch game controls">
+                <div class="touch-top">
+                    <button type="button" class="touch-button" data-action="sprint" aria-label="Sprint">Run</button>
+                    <button type="button" class="touch-button" data-action="drop" aria-label="Drop item">Drop</button>
+                    <button type="button" class="touch-button" data-action="use" aria-label="Inventory">Bag</button>
+                    <button type="button" class="touch-button" data-action="pause" aria-label="Pause menu">Menu</button>
+                </div>
+                <div class="touch-move">
+                    <button type="button" class="touch-button" data-action="moveLeft" aria-label="Move left">◀</button>
+                    <button type="button" class="touch-button" data-action="moveRight" aria-label="Move right">▶</button>
+                </div>
+                <div class="touch-actions">
+                    <button type="button" class="touch-button" data-action="jump" aria-label="Jump">Jump</button>
+                    <button type="button" class="touch-button" data-action="attack" aria-label="Attack or break">Break</button>
+                    <button type="button" class="touch-button" data-action="place" aria-label="Use item or place block">Use</button>
+                </div>
+            </div>
+
             <div class="chromium-issue-1092080-workaround__overlay"></div>
 
             <div id="pause-menu">

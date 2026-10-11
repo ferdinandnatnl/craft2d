@@ -9,7 +9,10 @@ if (CANVAS && ctx) {
         if (!width || !height) return;
 
         // Preserve the game/UI scale and show more world in the extra space.
-        const scale = Math.max(1920 / width, 1080 / height);
+        const touchLayout = matchMedia("(pointer: coarse)").matches;
+        const scale = touchLayout
+            ? Math.max(720 / width, 760 / height)
+            : Math.max(1920 / width, 1080 / height);
         const renderWidth = Math.round(width * scale);
         const renderHeight = Math.round(height * scale);
         if (CANVAS.width === renderWidth && CANVAS.height === renderHeight) return;

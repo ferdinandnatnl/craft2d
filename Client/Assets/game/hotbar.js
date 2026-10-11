@@ -1,6 +1,7 @@
 import { runtime } from "../utils/runtime.js";
 import { getItem } from "@2dcraft.com/shared/item.js";
 import { input } from "../utils/input.js";
+import { getTouchHudInset } from "../utils/touchControls.js";
 import { CANVAS, drawImage, drawText } from "../utils/renderer.js";
 import { getSpriteUrl, isEqualToOriginal } from "../utils/texturePackLoader.js";
 import { getBlock } from "../world/block.js";
@@ -199,11 +200,12 @@ export class Hotbar {
     }
 
     draw(ctx) {
+        const bottomInset = getTouchHudInset();
         // Draw hotbar
         const hotbar = drawImage({
             url: getSpriteUrl("gui/widgets", isEqualToOriginal("gui/widgets")),
             x: CANVAS.width / 2,
-            y: CANVAS.height - 75,
+            y: CANVAS.height - 75 - bottomInset,
             scale: 3,
             crop: { x: 0, y: 0, width: 182, height: 22 },
         });
@@ -212,7 +214,7 @@ export class Hotbar {
         drawImage({
             url: getSpriteUrl("gui/widgets", isEqualToOriginal("gui/widgets")),
             x: CANVAS.width / 2 - 240 + this.currentSlot * 60,
-            y: CANVAS.height - 78,
+            y: CANVAS.height - 78 - bottomInset,
             scale: 3,
             crop: { x: 0, y: 22, width: 24, height: 24 },
         });
@@ -282,10 +284,11 @@ export class Hotbar {
     }
 
     drawItems() {
+        const bottomInset = getTouchHudInset();
         for (let i = 0; i < this.inventory.items[3].length; i++) {
             const position = {
                 x: CANVAS.width / 2 - 262 + i * 60, // Exact original X position and 60px gap
-                y: CANVAS.height - 76 + 12, // Adjusted to align items with hotbar slots
+                y: CANVAS.height - 76 + 12 - bottomInset, // Adjusted to align items with hotbar slots
             };
             this.drawSlot(this.inventory.items[3][i], position);
         }
@@ -313,7 +316,7 @@ export class Hotbar {
         ctx.globalAlpha = alpha;
 
         const x = CANVAS.width / 2;
-        const y = CANVAS.height - 120;
+        const y = CANVAS.height - 120 - getTouchHudInset();
 
         drawText({
             text: this.displayedItemName,

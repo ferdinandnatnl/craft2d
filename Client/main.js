@@ -1,9 +1,11 @@
 import { runtime } from "./Assets/utils/runtime.js";
 import { Game } from "./Assets/game/game.js";
 import { drawLoadScreen } from "./Assets/utils/renderer.js";
+import { initTouchControls } from "./Assets/utils/touchControls.js";
 
 runtime.game = new Game();
 runtime.world = null;
+initTouchControls();
 
 drawLoadScreen();
 
