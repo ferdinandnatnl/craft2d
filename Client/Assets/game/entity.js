@@ -10,7 +10,7 @@ import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, GRAVITY } from "../utils/globals
 import { camera } from "../utils/renderer.js";
 import { getSpriteAverageColor } from "../utils/texturePackLoader.js";
 import { SpecialType, getBlock } from "../world/block.js";
-import { Dimensions, activeDimension, getDimensionChunks, gotoDimension } from "../world/dimension.js";
+import { Dimensions, activeDimension, enterEnd, getDimensionChunks, gotoDimension, leaveEnd } from "../world/dimension.js";
 import { entityRegistry } from "../entities/entityRegistry.js";
 import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
 
@@ -551,80 +551,58 @@ export class Entity {
     }
 
     portalLogic() {
-        if (this.type !== EntityTypes.Player) return;
+        if (this.type !== EntityTypes.Player || this !== runtime.world.player) return;
+        if (this.portalTravelPending) return;
 
-        let collidingWithPortal = false;
-
-        if (
-            this.filterBlocksByProperty(this.collidingWithBlocks, "specialType")
-                .length > 0
-        ) {
-            if (this.cameThroughPortal) return;
-
-            for (let block of this.collidingWithBlocks) {
-                const blockData = getBlock(block.blockType);
-
-                if (blockData.specialType !== SpecialType.NetherPortal) {
-                    collidingWithPortal = false;
-                    break;
-                }
-
-                collidingWithPortal = true;
-
-                if (this.portalCooldown > 0) {
-                    this.portalCooldown--;
-                    break;
-                }
-
-                if (activeDimension !== Dimensions.Nether) {
-                    const gotoPosition = runtime.world.placePortalInDimension(
-                        Dimensions.Nether,
-                        new Vector2(
-                            block.transform.position.x / 8,
-                            block.transform.position.y,
-                        ),
-                    );
-
-                    gotoDimension(Dimensions.Nether);
-
-                    this.cameThroughPortal = true;
-
-                    this.position.x = gotoPosition.x;
-                    this.position.y = gotoPosition.y;
-
-                    this.portalCooldown = this.maxPortalCooldown;
-
-                    break;
-                } else {
-                    const gotoPosition = runtime.world.placePortalInDimension(
-                        Dimensions.Overworld,
-                        new Vector2(
-                            block.transform.position.x * 8,
-                            block.transform.position.y,
-                        ),
-                    );
-
-                    gotoDimension(Dimensions.Overworld);
-
-                    this.cameThroughPortal = true;
-
-                    this.position.x = gotoPosition.x;
-                    this.position.y = gotoPosition.y;
-
-                    this.portalCooldown = this.maxPortalCooldown;
-
-                    break;
-                }
-            }
-
-            if (!collidingWithPortal) {
-                this.portalCooldown = this.maxPortalCooldown;
-                this.cameThroughPortal = false;
-            }
-        } else {
+        const portal = this.collidingWithBlocks.find(
+            block => [SpecialType.NetherPortal, SpecialType.EndPortal]
+                .includes(getBlock(block.blockType).specialType),
+        );
+        if (!portal) {
             this.portalCooldown = this.maxPortalCooldown;
             this.cameThroughPortal = false;
+            return;
         }
+        if (this.cameThroughPortal) return;
+        if (this.portalCooldown-- > 0) return;
+
+        if (getBlock(portal.blockType).specialType === SpecialType.EndPortal) {
+            if (activeDimension === Dimensions.End) {
+                leaveEnd();
+                return;
+            }
+            if (activeDimension !== Dimensions.Overworld) return;
+            this.portalTravelPending = true;
+            enterEnd().catch(error => {
+                console.error("Could not enter the End", error);
+            }).finally(() => {
+                this.portalCooldown = this.maxPortalCooldown;
+                this.portalTravelPending = false;
+            });
+            return;
+        }
+
+        const fromDimension = activeDimension;
+        const destination = fromDimension === Dimensions.Nether
+            ? Dimensions.Overworld : Dimensions.Nether;
+        const scale = destination === Dimensions.Nether ? 1 / 8 : 8;
+        this.portalTravelPending = true;
+        runtime.world.placePortalInDimension(
+            destination,
+            new Vector2(portal.transform.position.x * scale, portal.transform.position.y),
+        ).then(position => {
+            if (activeDimension !== fromDimension) return;
+            gotoDimension(destination);
+            this.position.x = position.x;
+            this.position.y = position.y;
+            this.velocity = new Vector2();
+            this.cameThroughPortal = true;
+        }).catch(error => {
+            console.error("Could not travel through portal", error);
+        }).finally(() => {
+            this.portalCooldown = this.maxPortalCooldown;
+            this.portalTravelPending = false;
+        });
     }
 
     fireLogic() {
@@ -1059,7 +1037,7 @@ export class Entity {
 
     entityCollision(type = 0) {
         for (let other of this.world.entities) {
-            if (other !== this) {
+            if (other !== this && other.dimension === this.dimension) {
                 if (
                     this.position.x < other.position.x + other.hitbox.x &&
                     this.position.x + this.hitbox.x > other.position.x &&

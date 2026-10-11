@@ -197,6 +197,8 @@ export const SpecialType = Object.freeze({
     TNT: 12,
     NetherPortal: 13,
     Sign: 14,
+    EndPortalFrame: 15,
+    EndPortal: 16,
 });
 
 export const BlockCategory = Object.freeze({

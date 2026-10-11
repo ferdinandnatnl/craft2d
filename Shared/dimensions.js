@@ -3,4 +3,5 @@
 export const Dimensions = Object.freeze({
     Overworld: 0,
     Nether: 1,
+    End: 2,
 });

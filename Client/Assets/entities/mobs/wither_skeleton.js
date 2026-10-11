@@ -37,19 +37,14 @@ export class WitherSkeleton extends Mob {
             isHostile: true,
             lootTable: new LootTable([
                 new LootItem({
-                    itemId: Items.RottenFlesh,
+                    itemId: Items.Bone,
                     maxCount: 2,
-                    subtract: 3,
+                    subtract: 1,
                 }),
                 new LootItem({
-                    itemId: Items.IronIngot,
+                    itemId: Items.Coal,
                     maxCount: 1,
-                    subtract: 20,
-                }),
-                new LootItem({
-                    itemId: Items.Carrot,
-                    maxCount: 1,
-                    subtract: 15,
+                    subtract: 1,
                 }),
             ]),
         });

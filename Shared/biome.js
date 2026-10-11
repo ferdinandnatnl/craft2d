@@ -64,7 +64,7 @@ export class Biome {
 
 export const BiomeMobs = Object.freeze({
     CommonMobs: ["Pig", "Cow", "Sheep"],
-    Googlies: ["Zombie", "Creeper"],
+    Googlies: ["Zombie", "Zombie", "Creeper", "Enderman"],
 });
 
 export const OverworldBiomes = Object.freeze({
@@ -306,7 +306,7 @@ export const NetherBiomes = Object.freeze({
         maxMount: 1,
         waterLevel: 5,
         mobs: [],
-        googlies: [],
+        googlies: ["WitherSkeleton", "WitherSkeleton", "Blaze"],
         maxMobs: 4,
 
         baseBlock: Blocks.Netherrack,
@@ -318,7 +318,38 @@ export const NetherBiomes = Object.freeze({
     }),
 });
 
+export const EndBiomes = Object.freeze({
+    EndIsland: new Biome({
+        name: "The End",
+        topLayer: Blocks.EndStone,
+        secondLayer: Blocks.EndStone,
+        baseBlock: Blocks.EndStone,
+        treeType: [],
+        grassType: [],
+        mobs: [],
+        googlies: ["Enderman"],
+        maxMobs: 2,
+        waterLevel: -110,
+        minTemp: 0,
+        maxTemp: 1,
+        minWet: 0,
+        maxWet: 1,
+        minMount: 0,
+        maxMount: 1,
+    }),
+});
+
 export const AllBiomes = Object.freeze({
     ...OverworldBiomes,
     ...NetherBiomes,
+    ...EndBiomes,
 });
+
+/** Accept both biome keys and display names stored by older world saves. */
+export function resolveBiome(biomeSet, savedBiome) {
+    const name = typeof savedBiome === "string"
+        ? savedBiome : savedBiome?.name;
+    return biomeSet[name] ??
+        Object.values(biomeSet).find((biome) => biome.name === name) ??
+        null;
+}

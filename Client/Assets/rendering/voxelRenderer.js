@@ -366,11 +366,15 @@ export class VoxelRenderer {
         const player=world.player;
         const skylit=player?.getSunLight?.();
         if (lighting && skylit === false) this.ambient.intensity*=0.45;
-        if (dimension !== Dimensions.Overworld) {
+        if (dimension === Dimensions.End) {
+            this.sun.intensity=0.35; this.sun.color.set(0xaaa1c7);
+            this.ambient.intensity=0.9; this.ambient.color.set(0x9a87b5);
+        } else if (dimension !== Dimensions.Overworld) {
             this.sun.intensity=0.25; this.sun.color.set(0xfc7c42);
             this.ambient.intensity=0.75; this.ambient.color.set(0xbb6352);
         } else this.ambient.color.set(day > 0.5 ? 0xc2d7f2 : 0x607dad);
-        this.scene.fog.color.set(day > 0.5 ? 0xb9cbd6 : 0x0d182c);
+        this.scene.fog.color.set(dimension === Dimensions.End ? 0x15101f :
+            day > 0.5 ? 0xb9cbd6 : 0x0d182c);
         this.sources.sort((a,b)=>Math.hypot(a.x-x,-a.y-y)-Math.hypot(b.x-x,-b.y-y));
         this.lights.forEach((light,index)=>{
             const source=lighting && this.sources[index];
@@ -404,7 +408,8 @@ export class VoxelRenderer {
             if (dimension === Dimensions.Overworld) {
                 this.scene.background=this.sky.draw(this.renderer,{width,height,time,seconds,cameraX:camera.x,
                     cameraY:camera.y,surfaceY:(CHUNK_HEIGHT-TERRAIN_HEIGHT)*BLOCK_SIZE,fov:this.camera.fov});
-            } else this.scene.background=new THREE.Color(0x24151a);
+            } else this.scene.background=new THREE.Color(
+                dimension === Dimensions.End ? 0x15101f : 0x24151a);
             this.renderer.render(this.scene,this.camera);
             return true;
         } catch (error) {

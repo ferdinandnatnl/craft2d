@@ -5,6 +5,16 @@ import { Dimensions } from "./dimensions.js";
 import { Structure } from "./structure.js";
 
 export const Structures = Object.freeze({
+    RuinedPortal: new Structure({
+        blocks: [
+            [Blocks.Air, Blocks.Obsidian, Blocks.StructureAir, Blocks.Obsidian, Blocks.Obsidian, Blocks.Air, Blocks.Air],
+            [Blocks.MossyCobblestone, Blocks.Obsidian, Blocks.StructureAir, Blocks.StructureAir, Blocks.Obsidian, Blocks.StructureAir, Blocks.StructureAir],
+            [Blocks.Air, Blocks.Obsidian, Blocks.StructureAir, Blocks.StructureAir, Blocks.StructureAir, Blocks.StructureAir, Blocks.StructureAir],
+            [Blocks.Air, Blocks.Obsidian, Blocks.StructureAir, Blocks.StructureAir, Blocks.Obsidian, Blocks.StructureAir, ChestLoot.RuinedPortal],
+            [Blocks.Cobblestone, Blocks.Obsidian, Blocks.Obsidian, Blocks.Obsidian, Blocks.Obsidian, Blocks.Cobblestone, Blocks.Cobblestone],
+        ],
+        shift: { x: 0, y: 0 },
+    }),
     MobSpawnerSmall: new Structure({
         blocks: [
             [

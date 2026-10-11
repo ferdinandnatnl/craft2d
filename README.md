@@ -43,6 +43,29 @@ The game uses the original texture pack by default. In the pause menu, switch
 Press **F1** to show or hide the HUD. Uploaded texture packs remain supported;
 the optional **Natural 32x** pack is available under Options → Texture Packs.
 
+### Survival progression
+
+Type `/progress` in chat for an in-game guide. In this 2D world, place ten
+obsidian blocks around a 2 × 3 empty center (the corners are optional). Use
+flint and steel on a bottom air block inside the frame, then walk into the
+portal to enter the Nether. Blazes there drop rods, which craft into blaze
+powder. Endermen drop pearls; combine
+one pearl and one blaze powder to make an Eye of Ender. Use an eye to find the
+End shrine, fill its three frames, and enter the End to fight the dragon.
+Explore outer End islands for loot outposts, then use the center portal to
+return home. Newly generated Overworld chunks can also contain ruined portals
+with supplies to repair and light them.
+
+```text
+  O O
+O . . O
+O . . O
+O F . O
+  O O
+```
+
+`O` is obsidian, `.` is air, and `F` is the inside air block to ignite.
+
 To host a multiplayer server, run `node server.js` from the Server directory. By default, this hosts on port 25565.
 
 Production client build:

@@ -2,6 +2,8 @@ import { runtime } from "../utils/runtime.js";
 import { entityRegistry } from "../entities/entityRegistry.js";
 import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
 import { getItem } from "@2dcraft.com/shared/item.js";
+import { Items } from "@2dcraft.com/shared/items.js";
+import { filledEndFrameStart } from "@2dcraft.com/shared/endProgression.js";
 import { Sounds, playMessySound, playPositionalSound, playRandomSoundFromArray, removeAudio, stopMessySound } from "../game/sounds.js";
 import { Square, Transform, Vector2, arePropsEqual, randomRange } from "../utils/classes.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, TICK_SPEED, ToolType, multiplayer, updatingBlocks } from "../utils/globals.js";
@@ -1156,6 +1158,38 @@ export class Block extends Square {
             case SpecialType.Sign:
                 player.openSign(this);
                 break;
+            case SpecialType.EndPortalFrame:
+                this.insertEnderEye(player);
+                break;
+        }
+    }
+
+    insertEnderEye(player) {
+        if (activeDimension !== 0 || this.blockType !== Blocks().EndPortalFrame ||
+            player.getSelectedSlotItem()?.itemId !== Items.EyeOfEnder) return;
+
+        const worldX = this.transform.position.x;
+        const worldY = this.transform.position.y;
+        this.world.setBlockType(this, Blocks().EndPortalFrameFilled);
+        this.world.serverPlaceBlock(this.chunkX, this.x, this.y,
+            Blocks().EndPortalFrameFilled, false, activeDimension);
+        if (!player.abilities.instaBuild) player.removeFromCurrentSlot();
+
+        // Any run of three filled frames activates its center as the portal.
+        const frameX = filledEndFrameStart(worldX, worldY, BLOCK_SIZE,
+            (x, y) => this.world.getBlockAtWorldPosition(x, y)
+                ?.blockType === Blocks().EndPortalFrameFilled);
+        if (frameX !== null) {
+            const portalX = frameX + BLOCK_SIZE;
+            const portalY = worldY - BLOCK_SIZE;
+            const above = this.world.getBlockAtWorldPosition(portalX, portalY);
+            if (above?.blockType !== Blocks().Air) return;
+            this.world.setBlockTypeAtPosition(portalX, portalY, Blocks().EndPortal,
+                false, activeDimension, null, false);
+            const portal = this.world.getBlockAtWorldPosition(portalX, portalY);
+            if (portal) this.world.serverPlaceBlock(portal.chunkX, portal.x,
+                portal.y, Blocks().EndPortal, false, activeDimension);
+            playPositionalSound(new Vector2(portalX, portalY), "portal/trigger.ogg");
         }
     }
 

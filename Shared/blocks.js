@@ -157,6 +157,10 @@ export const Blocks = Object.freeze({
     QuartzBlock: 404,
 
     NetherPortal: 405,
+    EndStone: 408,
+    EndPortalFrame: 409,
+    EndPortalFrameFilled: 410,
+    EndPortal: 411,
 
     Gravel: 406,
     NetherBricks: 407,
@@ -2231,6 +2235,42 @@ export const blockTypes = [
         breakingSound: Sounds.Breaking_Stone,
         toolType: ToolType.Pickaxe,
         dropWithoutTool: false,
+    }),
+    new BlockType({
+        blockId: 408,
+        name: "End Stone",
+        sprite: "end_stone",
+        hardness: 9,
+        toolType: ToolType.Pickaxe,
+        dropWithoutTool: false,
+        breakSound: Sounds.Break_Stone,
+        breakingSound: Sounds.Breaking_Stone,
+    }),
+    new BlockType({
+        blockId: 409,
+        name: "End Portal Frame",
+        sprite: "endframe_side",
+        hardness: -1,
+        specialType: SpecialType.EndPortalFrame,
+        excludeFromCreativeInventory: true,
+    }),
+    new BlockType({
+        blockId: 410,
+        name: "End Portal Frame (Eye)",
+        sprite: "endframe_eye",
+        hardness: -1,
+        specialType: SpecialType.EndPortalFrame,
+        excludeFromCreativeInventory: true,
+    }),
+    new BlockType({
+        blockId: 411,
+        name: "End Portal",
+        sprite: "portal",
+        hardness: -1,
+        collision: false,
+        specialType: SpecialType.EndPortal,
+        excludeFromCreativeInventory: true,
+        lightLevel: 11,
     }),
     //#endregion
 ];

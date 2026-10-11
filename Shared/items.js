@@ -113,6 +113,10 @@ export const Items = Object.freeze({
 
     FlintAndSteel: 2000,
     Flint: 2001,
+    BlazeRod: 2002,
+    BlazePowder: 2003,
+    EnderPearl: 2004,
+    EyeOfEnder: 2005,
 });
 
 export const items = [
@@ -538,6 +542,10 @@ export const items = [
         name: "Flint",
         sprite: "flint",
     }),
+    new Item({ itemId: Items.BlazeRod, name: "Blaze Rod", sprite: "blaze_rod" }),
+    new Item({ itemId: Items.BlazePowder, name: "Blaze Powder", sprite: "blaze_powder" }),
+    new Item({ itemId: Items.EnderPearl, name: "Ender Pearl", sprite: "ender_pearl" }),
+    new Item({ itemId: Items.EyeOfEnder, name: "Eye of Ender", sprite: "ender_eye" }),
     new Item({
         itemId: 20,
         name: "Coal",

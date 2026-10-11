@@ -39,7 +39,12 @@ export class VoxelEntities {
         const species = entity.body.sprite.split("/")[0];
         const quadruped = ["cow", "pig", "sheep"].includes(species);
         const creeper = species === "creeper";
-        if (quadruped) {
+        if (species === "dragon") {
+            material.side = THREE.DoubleSide;
+            const silhouette = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), material);
+            silhouette.position.set(0, 1, 0);
+            group.add(silhouette);
+        } else if (quadruped) {
             const cow = species === "cow", pig = species === "pig";
             const torso = part("torso", [cow ? 12 : 10, 16, 8], cow ? [18, 4] : [28, 8], [0, 0.78, 0]);
             torso.rotation.x = Math.PI / 2;
@@ -120,7 +125,10 @@ export class VoxelEntities {
             }
             record.group.position.set((entity.position.x + entity.hitbox.x / 2) / BLOCK_SIZE,
                 -(entity.position.y + entity.hitbox.y) / BLOCK_SIZE, 0.05);
-            record.group.rotation.y = entity.direction < 0 ? -Math.PI / 2 + 0.18 : Math.PI / 2 - 0.18;
+            record.group.rotation.y = entity.body.sprite.startsWith("dragon/")
+                ? 0 : entity.direction < 0 ? -Math.PI / 2 + 0.18 : Math.PI / 2 - 0.18;
+            if (entity.body.sprite.startsWith("dragon/"))
+                record.group.scale.x = entity.direction < 0 ? -1 : 1;
             const swimAmount = entity.body.swimAmount || 0;
             record.pose.rotation.x = swimAmount * Math.PI / 2;
             const light = lighting ? Math.max(0.08, Math.min(1, (entity.getLightLevel?.() ?? 15) / 15)) : 1;

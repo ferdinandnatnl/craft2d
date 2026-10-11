@@ -17,6 +17,7 @@ import { camera, drawText, isColliding, mouseOverPosition } from "../utils/rende
 import { SpecialType, getBlock } from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { activeDimension, getDimensionChunks, gotoDimension } from "../world/dimension.js";
+import { nearestEndShrineX } from "@2dcraft.com/shared/endProgression.js";
 import { createParticleEmitter } from "../world/particleEmitter.js";
 
 export class Player extends Entity {
@@ -564,6 +565,21 @@ export class Player extends Entity {
         const item = getItem(this.holdItem.itemId);
 
         if (!item) return;
+
+        if (item.itemId === Items.EyeOfEnder) {
+            if (this.hoverBlock?.blockType === Blocks.EndPortalFrame) return;
+            if (activeDimension !== 0) return;
+            const currentX = Math.floor(this.position.x / BLOCK_SIZE);
+            const shrineX = nearestEndShrineX(currentX, (x) => {
+                const chunk = getDimensionChunks(0).get(x * BLOCK_SIZE);
+                return chunk && !chunk.getAllBlocks(Blocks.EndPortalFrame).length &&
+                    !chunk.getAllBlocks(Blocks.EndPortalFrameFilled).length;
+            });
+            const distance = shrineX - currentX;
+            const direction = distance > 0 ? "east" : distance < 0 ? "west" : "here";
+            runtime.game.chat.message(`The Eye points ${direction} toward the stronghold (${Math.abs(distance)} blocks).`);
+            return;
+        }
 
         if (item.projectile) {
             this.throwProjectile(item);

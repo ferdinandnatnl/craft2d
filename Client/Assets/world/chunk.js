@@ -8,8 +8,10 @@ import { BLOCK_SIZE, CAVES_THRESHOLD, CHUNK_HEIGHT, CHUNK_WIDTH, TERRAIN_HEIGHT,
 import { OverworldBiomes } from "@2dcraft.com/shared/biome.js";
 import { Block, getBlock } from "./block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
+import { findNetherPortalFrame } from "@2dcraft.com/shared/netherPortal.js";
 import { Dimensions, activeDimension, getDimension, getDimensionChunks } from "./dimension.js";
 import { Trees } from "@2dcraft.com/shared/trees.js";
+import { END_OUTPOST_X, END_SHRINE_WIDTH, endIslandSurfaceY, isEndShrineChunk } from "@2dcraft.com/shared/endProgression.js";
 
 export class Chunk {
     constructor(
@@ -62,6 +64,9 @@ export class Chunk {
                     true
                 );
 
+                this.blocks[y][x].dimensionIndex = this.dimension;
+                this.walls[y][x].dimensionIndex = this.dimension;
+
                 this.blocks[y][x].setBlockType(Blocks.Air, true);
                 this.walls[y][x].setBlockType(Blocks.Air, true);
 
@@ -81,6 +86,11 @@ export class Chunk {
 
         this.generateArray(); // Initialize blocks
 
+        if (this.dimension === Dimensions.End) {
+            this.generateEndIsland();
+            return;
+        }
+
         if (this.world.generator.specialWorldProps.void) {
             this.generated = true;
 
@@ -98,6 +108,57 @@ export class Chunk {
         }
 
         this.generateHeight(); // Generate terrain height
+    }
+
+    generateEndIsland() {
+        for (let x = 0; x < this.width; x++) {
+            const worldBlockX = this.x / BLOCK_SIZE + x;
+            const surface = endIslandSurfaceY(worldBlockX);
+            if (surface === null) continue;
+            for (let y = surface; y >= Math.max(surface - 6, 0); y--) {
+                this.setBlockType(x, y, Blocks.EndStone);
+            }
+        }
+    }
+
+    generateEndOutpost() {
+        if (this.dimension !== Dimensions.End) return;
+        for (const blockX of [-END_OUTPOST_X, END_OUTPOST_X]) {
+            const localX = blockX - this.x / BLOCK_SIZE;
+            if (localX < 2 || localX >= this.width - 2) continue;
+            const surface = endIslandSurfaceY(blockX);
+            if (surface === null) continue;
+            for (const offset of [-2, -1, 0, 1, 2]) {
+                this.setBlockType(localX + offset, surface, Blocks.StoneBricks);
+            }
+            for (const offset of [-2, 2]) {
+                for (let y = surface + 1; y <= surface + 3; y++) {
+                    this.setBlockType(localX + offset, y, Blocks.StoneBricks);
+                }
+            }
+            this.world.generator.generateChestWithLoot(new LootTable([
+                new LootItem({ itemId: Items.Diamond, maxCount: 4 }),
+                new LootItem({ itemId: Items.GoldenApple, maxCount: 2 }),
+                new LootItem({ itemId: Items.EnderPearl, maxCount: 3 }),
+            ]), blockX * BLOCK_SIZE,
+            (CHUNK_HEIGHT - surface - 2) * BLOCK_SIZE, this);
+        }
+    }
+
+    generateEndShrine() {
+        if (this.dimension !== Dimensions.Overworld ||
+            !isEndShrineChunk(this.x / BLOCK_SIZE)) return;
+
+        const height = Math.max(...Array.from({ length: END_SHRINE_WIDTH },
+            (_, x) => this.getHeight(x)));
+        for (let x = 0; x < END_SHRINE_WIDTH; x++) {
+            // Keep the frames level on uneven ground and above shallow water.
+            for (let y = this.getHeight(x) + 1; y <= height; y++) {
+                this.setBlockType(x, y, Blocks.StoneBricks);
+            }
+            this.setBlockType(x, height + 1, Blocks.EndPortalFrame);
+            this.setBlockType(x, height + 2, Blocks.Air);
+        }
     }
 
     generateVoidBlock() {
@@ -162,8 +223,9 @@ export class Chunk {
 
     applyBufferedBlocks() {
         const chunkX = this.x;
-        if (getDimension().pendingBlocks.has(chunkX)) {
-            const entry = getDimension().pendingBlocks.get(chunkX);
+        const pendingBlocks = getDimension(this.dimension).pendingBlocks;
+        if (pendingBlocks.has(chunkX)) {
+            const entry = pendingBlocks.get(chunkX);
             // Only apply blocks matching this chunk's dimension
             if (entry.dimensionIndex === this.dimension) {
                 entry.blocks.forEach((block) => {
@@ -177,7 +239,7 @@ export class Chunk {
                         );
                     }
                 });
-                getDimension().pendingBlocks.delete(chunkX);
+                pendingBlocks.delete(chunkX);
             }
         }
     }
@@ -279,6 +341,9 @@ export class Chunk {
     spawnMobs(passive = true) {
         if (!runtime.GAMERULES.doMobSpawning) return;
 
+        // The Nether and End have no passive mob phase.
+        if (this.dimension !== Dimensions.Overworld) passive = false;
+
         // If peaceful, don't spawn hostile googlies, but allow passive mobs
         if (this.world && this.world.difficulty === "peaceful" && !passive) {
             this.setMobSpawnTime();
@@ -298,8 +363,34 @@ export class Chunk {
             return;
         }
 
+        let spawned = 0;
         for (let i = 0; i < count; i++) {
-            const randomX = randomRange(0, CHUNK_WIDTH);
+            const randomX = randomRange(0, this.width);
+
+            // The Nether has a solid roof. Find a cave floor near the player's
+            // height instead of placing mobs on top of bedrock.
+            let netherGround = null;
+            if (this.dimension === Dimensions.Nether) {
+                const playerFeet = (this.world.player?.position.y ?? 0) +
+                    (this.world.player?.hitbox.y ?? 0);
+                const candidates = [];
+                for (let y = 1; y < this.height - 3; y++) {
+                    const floor = this.getBlockType(randomX, y);
+                    const above = this.getBlockType(randomX, y + 1);
+                    const head = this.getBlockType(randomX, y + 2);
+                    if (!getBlock(floor)?.collision || !getBlock(above)?.air ||
+                        !getBlock(head)?.air) continue;
+                    const feet = (this.height - y - 1) * BLOCK_SIZE;
+                    if (Math.abs(feet - playerFeet) <= 12 * BLOCK_SIZE) {
+                        candidates.push({ y, feet });
+                    }
+                }
+                if (!candidates.length) continue;
+                netherGround = candidates[randomRange(0, candidates.length)];
+            } else if (this.dimension === Dimensions.End &&
+                this.findGroundLevel(randomX) === 0) {
+                continue;
+            }
 
             const randomEntity = passive
                 ? this.biome.mobs[randomRange(0, this.biome.mobs.length)]
@@ -313,12 +404,20 @@ export class Chunk {
                 { myChunkX: this.x }
             );
 
+            // Chunks may be generated for a destination before it is active.
+            entity.dimension = this.dimension;
             this.entities.push(entity);
+            spawned++;
 
-            setTimeout(() => {
+            if (netherGround) {
+                entity.position.y = netherGround.feet - entity.hitbox.y;
+            } else if (this.dimension === Dimensions.End) {
                 entity.setOnGround();
-            }, 400);
+            } else {
+                setTimeout(() => entity.setOnGround(), 400);
+            }
         }
+        if (spawned === 0) this.setMobSpawnTime();
     }
 
     removeEntityFromChunk(entity) {
@@ -333,9 +432,8 @@ export class Chunk {
     }
 
     setMobSpawnTime() {
-        //game.chat.message("set spawn");
-
-        this.spawnTime = randomRange(mobSpawnDelay.min, mobSpawnDelay.max);
+        this.spawnTime = runtime.passedTime +
+            randomRange(mobSpawnDelay.min, mobSpawnDelay.max);
     }
 
     updateChunk() {
@@ -888,12 +986,19 @@ export class Chunk {
                 }
             }
         } else {
-            if (block.blockType === Blocks.Obsidian) {
-                this.checkForPortalBreak(x, y);
+            let brokenPortalChunks = null;
+            if (block.blockType === Blocks.Obsidian && blockType !== Blocks.Obsidian) {
+                brokenPortalChunks = this.checkForPortalBreak(x, y);
             }
 
             // Regular block placement without extended blocks
             block.setBlockType(blockType);
+            if (brokenPortalChunks?.size) {
+                brokenPortalChunks.add(this.x);
+                for (const chunkX of brokenPortalChunks) {
+                    this.world.uploadChunkToServer(chunkX, this.dimension);
+                }
+            }
 
             linkedBlocks.push({
                 ...this.localToWorldInternal(x, y),
@@ -978,7 +1083,7 @@ export class Chunk {
             const adjX = worldX + dx;
             const adjY = worldY + dy;
             const key = `${adjX},${adjY}`;
-            const block = this.world.getBlockAtWorldPosition(adjX, adjY);
+            const block = this.world.getBlockAtWorldPosition(adjX, adjY, false, this.dimension);
             if (block && block.blockType === Blocks.NetherPortal) {
                 hasAdjacentPortal = true;
                 queue.push({ x: adjX, y: adjY });
@@ -986,16 +1091,19 @@ export class Chunk {
             }
         }
 
-        if (!hasAdjacentPortal) {
-            return;
-        }
+        if (!hasAdjacentPortal) return null;
+
+        const changedChunks = new Set();
 
         // Process queue to break all connected NetherPortal blocks
         while (queue.length > 0) {
             const { x: currX, y: currY } = queue.shift();
 
             // Break the current portal block
-            this.world.getBlockAtWorldPosition(currX, currY).breakBlock();
+            this.world.setBlockTypeAtPosition(
+                currX, currY, Blocks.Air, false, this.dimension, null, false
+            );
+            changedChunks.add(this.world.getChunkXForWorldX(currX));
 
             // Check adjacent blocks for more NetherPortal blocks
             for (const { dx, dy } of directions) {
@@ -1004,474 +1112,50 @@ export class Chunk {
                 const key = `${nextX},${nextY}`;
                 if (visited.has(key)) continue;
 
-                const block = this.world.getBlockAtWorldPosition(nextX, nextY);
+                const block = this.world.getBlockAtWorldPosition(nextX, nextY, false, this.dimension);
                 if (block && block.blockType === Blocks.NetherPortal) {
                     queue.push({ x: nextX, y: nextY });
                     visited.add(key);
                 }
             }
         }
-    }
-
-    checkPortalFrame(worldX, worldY, innerWidth, innerHeight) {
-        // Convert inner dimensions to pixels (world coordinates)
-        const innerWidthPx = innerWidth * BLOCK_SIZE;
-        const innerHeightPx = innerHeight * BLOCK_SIZE;
-
-        // Frame dimensions include 1-block obsidian border on each side
-        const frameWidthPx = innerWidthPx + 2 * BLOCK_SIZE;
-        const frameHeightPx = innerHeightPx + 2 * BLOCK_SIZE;
-
-        // Calculate search range to allow obsidian to be anywhere in the frame
-        // Obsidian could be up to (innerWidth+2) blocks left/right or (innerHeight+2) blocks up/down from the inner area’s top-left
-        const searchRangeX = innerWidthPx + 2 * BLOCK_SIZE;
-        const searchRangeY = innerHeightPx + 2 * BLOCK_SIZE;
-
-        // Check possible portal frame positions around the obsidian block
-        for (
-            let startX = worldX - searchRangeX;
-            startX <= worldX + searchRangeX;
-            startX += BLOCK_SIZE
-        ) {
-            for (
-                let startY = worldY - searchRangeY;
-                startY <= worldY + searchRangeY;
-                startY += BLOCK_SIZE
-            ) {
-                console.log(
-                    `Checking frame at start position (${startX}, ${startY}) for size ${innerWidth}x${innerHeight}`
-                );
-
-                // Validate frame (obsidian borders, allowing the broken obsidian position to be non-obsidian)
-                let isValidFrame = true;
-
-                // Top and bottom borders (horizontal)
-                for (
-                    let wx = startX;
-                    wx < startX + frameWidthPx;
-                    wx += BLOCK_SIZE
-                ) {
-                    const topBlock = this.world.getBlockAtWorldPosition(
-                        wx,
-                        startY
-                    );
-                    const bottomBlock = this.world.getBlockAtWorldPosition(
-                        wx,
-                        startY + innerHeightPx + BLOCK_SIZE
-                    );
-                    // Allow the broken obsidian position to be non-obsidian
-                    const isBrokenTop = wx === worldX && startY === worldY;
-                    const isBrokenBottom =
-                        wx === worldX &&
-                        startY + innerHeightPx + BLOCK_SIZE === worldY;
-                    if (!topBlock) {
-                        console.log(
-                            `Invalid frame: Null block at top (${wx}, ${startY})`
-                        );
-                        isValidFrame = false;
-                        break;
-                    }
-                    if (!bottomBlock) {
-                        console.log(
-                            `Invalid frame: Null block at bottom (${wx}, ${
-                                startY + innerHeightPx + BLOCK_SIZE
-                            })`
-                        );
-                        isValidFrame = false;
-                        break;
-                    }
-                    if (
-                        !isBrokenTop &&
-                        topBlock.blockType !== Blocks.Obsidian
-                    ) {
-                        console.log(
-                            `Invalid frame: Top block at (${wx}, ${startY}) is ${topBlock.blockType}, expected Obsidian`
-                        );
-                        isValidFrame = false;
-                        break;
-                    }
-                    if (
-                        !isBrokenBottom &&
-                        bottomBlock.blockType !== Blocks.Obsidian
-                    ) {
-                        console.log(
-                            `Invalid frame: Bottom block at (${wx}, ${
-                                startY + innerHeightPx + BLOCK_SIZE
-                            }) is ${bottomBlock.blockType}, expected Obsidian`
-                        );
-                        isValidFrame = false;
-                        break;
-                    }
-                }
-
-                // Left and right borders (vertical, excluding corners already checked)
-                if (isValidFrame) {
-                    for (
-                        let wy = startY + BLOCK_SIZE;
-                        wy < startY + innerHeightPx + BLOCK_SIZE;
-                        wy += BLOCK_SIZE
-                    ) {
-                        const leftBlock = this.world.getBlockAtWorldPosition(
-                            startX,
-                            wy
-                        );
-                        const rightBlock = this.world.getBlockAtWorldPosition(
-                            startX + innerWidthPx + BLOCK_SIZE,
-                            wy
-                        );
-                        const isBrokenLeft = startX === worldX && wy === worldY;
-                        const isBrokenRight =
-                            startX + innerWidthPx + BLOCK_SIZE === worldX &&
-                            wy === worldY;
-                        if (!leftBlock) {
-                            console.log(
-                                `Invalid frame: Null block at left (${startX}, ${wy})`
-                            );
-                            isValidFrame = false;
-                            break;
-                        }
-                        if (!rightBlock) {
-                            console.log(
-                                `Invalid frame: Null block at right (${
-                                    startX + innerWidthPx + BLOCK_SIZE
-                                }, ${wy})`
-                            );
-                            isValidFrame = false;
-                            break;
-                        }
-                        if (
-                            !isBrokenLeft &&
-                            leftBlock.blockType !== Blocks.Obsidian
-                        ) {
-                            console.log(
-                                `Invalid frame: Left block at (${startX}, ${wy}) is ${leftBlock.blockType}, expected Obsidian`
-                            );
-                            isValidFrame = false;
-                            break;
-                        }
-                        if (
-                            !isBrokenRight &&
-                            rightBlock.blockType !== Blocks.Obsidian
-                        ) {
-                            console.log(
-                                `Invalid frame: Right block at (${
-                                    startX + innerWidthPx + BLOCK_SIZE
-                                }, ${wy}) is ${
-                                    rightBlock.blockType
-                                }, expected Obsidian`
-                            );
-                            isValidFrame = false;
-                            break;
-                        }
-                    }
-                }
-
-                if (!isValidFrame) continue;
-
-                // Validate inner area (must contain at least one NetherPortal block)
-                let hasPortalBlock = false;
-                for (
-                    let wx = startX + BLOCK_SIZE;
-                    wx <= startX + innerWidthPx;
-                    wx += BLOCK_SIZE
-                ) {
-                    for (
-                        let wy = startY + BLOCK_SIZE;
-                        wy <= startY + innerHeightPx;
-                        wy += BLOCK_SIZE
-                    ) {
-                        const block = this.world.getBlockAtWorldPosition(
-                            wx,
-                            wy
-                        );
-                        if (!block) {
-                            console.log(
-                                `Invalid inner area: Null block at (${wx}, ${wy})`
-                            );
-                            return null; // Null block invalidates the frame
-                        }
-                        if (block.blockType === Blocks.NetherPortal) {
-                            hasPortalBlock = true;
-                        } else if (
-                            block.blockType !== Blocks.Air &&
-                            block.blockType !== Blocks.Fire
-                        ) {
-                            console.log(
-                                `Invalid inner area: Block at (${wx}, ${wy}) is ${block.blockType}, expected NetherPortal, Air, or Fire`
-                            );
-                            return null; // Non-portal/air/fire block invalidates the frame
-                        }
-                    }
-                }
-
-                if (!hasPortalBlock) {
-                    console.log(
-                        `Invalid inner area: No NetherPortal blocks found in frame at (${startX}, ${startY})`
-                    );
-                    continue;
-                }
-
-                console.log(
-                    `Valid portal frame found at (${startX}, ${startY}), size: ${innerWidth}x${innerHeight}`
-                );
-                // Return inner area bounds for breaking portal blocks
-                return {
-                    minX: startX + BLOCK_SIZE,
-                    maxX: startX + innerWidthPx,
-                    minY: startY + BLOCK_SIZE,
-                    maxY: startY + innerHeightPx,
-                };
-            }
-        }
-
-        console.log(
-            `No valid portal frame found for size ${innerWidth}x${innerHeight}`
-        );
-        return null;
+        return changedChunks;
     }
 
     checkForPortal(x, y) {
-        // Convert local chunk coordinates to world coordinates (pixel-based)
         const worldX = this.x + x * BLOCK_SIZE;
         const worldY = y * BLOCK_SIZE;
-
-        // Restrict portal creation to Overworld and Nether
         if (
             this.dimension !== Dimensions.Overworld &&
             this.dimension !== Dimensions.Nether
         ) {
             return;
         }
+        const frame = findNetherPortalFrame(
+            worldX / BLOCK_SIZE,
+            worldY / BLOCK_SIZE,
+            (column, row) => this.world.getBlockAtWorldPosition(
+                column * BLOCK_SIZE, row * BLOCK_SIZE, false, this.dimension
+            )?.blockType,
+            { air: [Blocks.Air, Blocks.StructureAir], fire: Blocks.Fire, obsidian: Blocks.Obsidian }
+        );
+        if (!frame) return;
 
-        // Minimum and maximum inner portal dimensions (in blocks)
-        const minInnerWidth = 2;
-        const minInnerHeight = 3;
-        const maxInnerWidth = 32;
-        const maxInnerHeight = 32;
-
-        // Check for a valid portal frame of any size within min/max bounds
-        for (
-            let innerWidth = minInnerWidth;
-            innerWidth <= maxInnerWidth;
-            innerWidth++
-        ) {
-            for (
-                let innerHeight = minInnerHeight;
-                innerHeight <= maxInnerHeight;
-                innerHeight++
-            ) {
-                const portalFound = this.checkPortalOrientation(
-                    worldX,
-                    worldY,
-                    innerWidth,
-                    innerHeight
+        const changedChunks = new Set();
+        for (let row = frame.top + 1; row < frame.bottom; row++) {
+            for (let column = frame.left + 1; column < frame.right; column++) {
+                const x = column * BLOCK_SIZE;
+                this.world.setBlockTypeAtPosition(
+                    x, row * BLOCK_SIZE, Blocks.NetherPortal,
+                    false, this.dimension, null, false
                 );
-                if (portalFound) {
-                    // Light the portal by setting inner air/fire blocks to NetherPortal
-                    const { minX, maxX, minY, maxY } = portalFound;
-                    for (let wx = minX; wx <= maxX; wx += BLOCK_SIZE) {
-                        for (let wy = minY; wy <= maxY; wy += BLOCK_SIZE) {
-                            const block = this.world.getBlockAtWorldPosition(
-                                wx,
-                                wy
-                            );
-                            if (block) {
-                                if (
-                                    block.blockType === Blocks.Air ||
-                                    block.blockType === Blocks.Fire
-                                ) {
-                                    this.world.setBlockTypeAtPosition(
-                                        wx,
-                                        wy,
-                                        Blocks.NetherPortal,
-                                        false,
-                                        this.dimension,
-                                        null,
-                                        false
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    // Play portal sound effect
-                    playPositionalSound(
-                        new Vector2(worldX, worldY),
-                        "portal/trigger.ogg"
-                    );
-
-                    return; // Exit after lighting the first valid portal
-                }
+                changedChunks.add(this.world.getChunkXForWorldX(x));
             }
         }
-    }
-
-    checkPortalOrientation(worldX, worldY, innerWidth, innerHeight) {
-        // Convert inner dimensions to pixels (world coordinates)
-        const innerWidthPx = innerWidth * BLOCK_SIZE;
-        const innerHeightPx = innerHeight * BLOCK_SIZE;
-
-        // Frame dimensions include 1-block obsidian border on each side
-        const frameWidthPx = innerWidthPx + 2 * BLOCK_SIZE;
-        const frameHeightPx = innerHeightPx + 2 * BLOCK_SIZE;
-
-        // Calculate search range to allow fire to be in the inner area or one block adjacent
-        const searchRangeX = innerWidthPx + BLOCK_SIZE; // Fire can be in inner area or one block outside
-        const searchRangeY = innerHeightPx + BLOCK_SIZE;
-
-        // Check possible portal frame positions around the fire block
-        for (
-            let startX = worldX - searchRangeX;
-            startX <= worldX + searchRangeX;
-            startX += BLOCK_SIZE
-        ) {
-            for (
-                let startY = worldY - searchRangeY;
-                startY <= worldY + searchRangeY;
-                startY += BLOCK_SIZE
-            ) {
-                // Check if fire is in or adjacent to the inner area
-                const innerMinX = startX + BLOCK_SIZE;
-                const innerMaxX = startX + innerWidthPx;
-                const innerMinY = startY + BLOCK_SIZE;
-                const innerMaxY = startY + innerHeightPx;
-                const isFireInInnerArea =
-                    worldX >= innerMinX &&
-                    worldX <= innerMaxX &&
-                    worldY >= innerMinY &&
-                    worldY <= innerMaxY;
-                const isFireAdjacent =
-                    (worldX === innerMinX - BLOCK_SIZE &&
-                        worldY >= innerMinY &&
-                        worldY <= innerMaxY) || // Left
-                    (worldX === innerMaxX + BLOCK_SIZE &&
-                        worldY >= innerMinY &&
-                        worldY <= innerMaxY) || // Right
-                    (worldY === innerMinY - BLOCK_SIZE &&
-                        worldX >= innerMinX &&
-                        worldX <= innerMaxX) || // Top
-                    (worldY === innerMaxY + BLOCK_SIZE &&
-                        worldX >= innerMinX &&
-                        worldX <= innerMaxX); // Bottom
-
-                if (!isFireInInnerArea && !isFireAdjacent) {
-                    continue;
-                }
-
-                // Validate frame (obsidian borders, corners can be any block)
-                let isValidFrame = true;
-
-                // Top and bottom borders (horizontal, excluding corners)
-                for (
-                    let wx = startX + BLOCK_SIZE;
-                    wx < startX + frameWidthPx - BLOCK_SIZE;
-                    wx += BLOCK_SIZE
-                ) {
-                    const topBlock = this.world.getBlockAtWorldPosition(
-                        wx,
-                        startY
-                    );
-                    const bottomBlock = this.world.getBlockAtWorldPosition(
-                        wx,
-                        startY + innerHeightPx + BLOCK_SIZE
-                    );
-                    if (!topBlock) {
-                        isValidFrame = false;
-                        break;
-                    }
-                    if (!bottomBlock) {
-                        isValidFrame = false;
-                        break;
-                    }
-                    if (topBlock.blockType !== Blocks.Obsidian) {
-                        isValidFrame = false;
-                        break;
-                    }
-                    if (bottomBlock.blockType !== Blocks.Obsidian) {
-                        isValidFrame = false;
-                        break;
-                    }
-                }
-
-                // Left and right borders (vertical, excluding corners)
-                if (isValidFrame) {
-                    for (
-                        let wy = startY + BLOCK_SIZE;
-                        wy < startY + innerHeightPx + BLOCK_SIZE;
-                        wy += BLOCK_SIZE
-                    ) {
-                        const leftBlock = this.world.getBlockAtWorldPosition(
-                            startX,
-                            wy
-                        );
-                        const rightBlock = this.world.getBlockAtWorldPosition(
-                            startX + innerWidthPx + BLOCK_SIZE,
-                            wy
-                        );
-                        if (!leftBlock) {
-                            isValidFrame = false;
-                            break;
-                        }
-                        if (!rightBlock) {
-                            isValidFrame = false;
-                            break;
-                        }
-                        if (leftBlock.blockType !== Blocks.Obsidian) {
-                            isValidFrame = false;
-                            break;
-                        }
-                        if (rightBlock.blockType !== Blocks.Obsidian) {
-                            isValidFrame = false;
-                            break;
-                        }
-                    }
-                }
-
-                if (!isValidFrame) continue;
-
-                // Validate inner area (air or fire)
-                let isValidInner = true;
-                for (
-                    let wx = startX + BLOCK_SIZE;
-                    wx <= startX + innerWidthPx;
-                    wx += BLOCK_SIZE
-                ) {
-                    for (
-                        let wy = startY + BLOCK_SIZE;
-                        wy <= startY + innerHeightPx;
-                        wy += BLOCK_SIZE
-                    ) {
-                        const block = this.world.getBlockAtWorldPosition(
-                            wx,
-                            wy
-                        );
-                        if (!block) {
-                            isValidInner = false;
-                            break;
-                        }
-                        if (
-                            block.blockType !== Blocks.Air &&
-                            block.blockType !== Blocks.Fire
-                        ) {
-                            isValidInner = false;
-                            break;
-                        }
-                    }
-                    if (!isValidInner) break;
-                }
-
-                if (isValidInner) {
-                    // Return inner area bounds for portal lighting
-                    return {
-                        minX: startX + BLOCK_SIZE,
-                        maxX: startX + innerWidthPx,
-                        minY: startY + BLOCK_SIZE,
-                        maxY: startY + innerHeightPx,
-                    };
-                }
-            }
+        for (const chunkX of changedChunks) {
+            this.world.uploadChunkToServer(chunkX, this.dimension);
         }
-
-        return null;
+        playPositionalSound(new Vector2(worldX, worldY), "portal/trigger.ogg");
     }
 
     localToWorldInternal(x, y) {

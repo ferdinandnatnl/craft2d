@@ -3,6 +3,12 @@ import { LootItem, LootTable } from "./lootTable.js";
 import { Blocks } from "./blocks.js";
 
 export const ChestLoot = Object.freeze({
+    RuinedPortal: new LootTable([
+        new LootItem({ blockId: Blocks.Obsidian, maxCount: 2 }),
+        new LootItem({ itemId: Items.FlintAndSteel, maxCount: 1 }),
+        new LootItem({ itemId: Items.Flint, maxCount: 2, subtract: 1 }),
+        new LootItem({ itemId: Items.GoldIngot, maxCount: 3, subtract: 2 }),
+    ]),
     Spawner: new LootTable([
         new LootItem({
             itemId: Items.MusicDisc13,

@@ -13,6 +13,8 @@ import { activeDimension, dimensions } from "./dimension.js";
 import { loadChunk } from "./saving.js";
 import { Structures } from "@2dcraft.com/shared/structures.js";
 import { terrainHeightAt } from "@2dcraft.com/shared/terrainHeight.js";
+import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
+import { isRuinedPortalChunk } from "@2dcraft.com/shared/ruinedPortal.js";
 
 export class WorldGenerator {
     constructor(world) {
@@ -317,8 +319,8 @@ export class WorldGenerator {
             } else {
                 const chunk = dimension.chunks.get(chunkX);
                 if (chunk.spawnTime && chunk.spawnTime <= runtime.passedTime) {
-                    chunk.spawnMobs(runtime.day);
                     chunk.spawnTime = 0;
+                    chunk.spawnMobs(runtime.day);
                 }
             }
 
@@ -336,7 +338,7 @@ export class WorldGenerator {
         }
     }
 
-    generateStructure(structure, x, y) {
+    generateStructure(structure, x, y, dimensionIndex = activeDimension) {
         const structureData = Structures[structure];
         if (!structureData) return;
 
@@ -373,7 +375,7 @@ export class WorldGenerator {
                 const blockUserY = originBlockY + j;
                 const blockY = this.world.userBlockYToWorld(blockUserY);
 
-                if (!chunk) chunk = this.world.getChunkForX(blockX);
+                if (!chunk) chunk = this.world.getChunkForX(blockX, dimensionIndex);
 
                 if (blockType instanceof LootTable) {
                     this.generateChestWithLoot(
@@ -473,7 +475,8 @@ export class WorldGenerator {
 
         if (this.specialWorldProps.flat)
             biome = dimension.biomeSet.Plains || biome;
-        if (this.forceToBiome != null) biome = this.forceToBiome;
+        if (this.forceToBiome != null && dimensionIndex === Dimensions.Overworld)
+            biome = this.forceToBiome;
         if (!biome) {
             biome =
                 dimension.biomeSet.Plains ||
@@ -529,6 +532,16 @@ export class WorldGenerator {
     postProcessChunk(chunk) {
         if (!chunk) return;
 
+        if (chunk.dimension === Dimensions.End) {
+            if (!chunk.generated) chunk.generateEndOutpost();
+            if (!chunk.generated && !this.specialWorldProps.noMobs &&
+                Math.abs(chunk.x / (CHUNK_WIDTH * BLOCK_SIZE)) <= 2) {
+                chunk.spawnMobs(false);
+            }
+            chunk.generated = true;
+            return;
+        }
+
         if (this.specialWorldProps.void) {
             chunk.applyBufferedBlocks();
             return;
@@ -553,6 +566,8 @@ export class WorldGenerator {
 
             chunk.generateBedrock();
 
+            chunk.generateEndShrine();
+
             chunk.generated = true;
         }
     }
@@ -569,8 +584,10 @@ export class WorldGenerator {
                 chunkIndex,
                 0,
             );
+            const ruinedPortal = dimensionIndex === Dimensions.Overworld &&
+                isRuinedPortalChunk(this.world.seed, chunkIndex);
 
-            if (structureNoiseValue > 10) {
+            if (structureNoiseValue > 10 || ruinedPortal) {
                 const allStructureNames = Object.keys(Structures);
                 const candidates = allStructureNames.filter((name) => {
                     const structure = Structures[name];
@@ -580,8 +597,9 @@ export class WorldGenerator {
                     );
                 });
 
-                const underground = Math.random() < 0.5;
+                const underground = ruinedPortal ? false : Math.random() < 0.5;
                 const filteredCandidates = candidates.filter((name) => {
+                    if (name === "RuinedPortal") return ruinedPortal;
                     const structure = Structures[name];
                     const correctDimension =
                         dimensionIndex === structure.dimension;
@@ -593,10 +611,8 @@ export class WorldGenerator {
 
                 if (filteredCandidates.length === 0) return;
 
-                const randomName =
-                    filteredCandidates[
-                        randomRange(0, filteredCandidates.length)
-                    ];
+                const randomName = ruinedPortal ? "RuinedPortal" :
+                    filteredCandidates[randomRange(0, filteredCandidates.length)];
                 const structure = Structures[randomName];
 
                 const structureX =
@@ -625,7 +641,7 @@ export class WorldGenerator {
                     structureY = surfaceAirY * BLOCK_SIZE;
                 }
 
-                this.generateStructure(randomName, structureX, structureY);
+                this.generateStructure(randomName, structureX, structureY, dimensionIndex);
             }
         });
     }

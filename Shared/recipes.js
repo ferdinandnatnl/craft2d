@@ -432,6 +432,20 @@ export const recipes = [
         ],
         output: new InventoryItem({ itemId: Items.FlintAndSteel, count: 1 }),
     }),
+    // Blaze rods and ender pearls connect Nether exploration to the End.
+    new Recipe({
+        type: RecipeType.Shapeless,
+        input: new RecipeItem({ itemId: Items.BlazeRod }),
+        output: new InventoryItem({ itemId: Items.BlazePowder, count: 2 }),
+    }),
+    new Recipe({
+        type: RecipeType.Shapeless,
+        input: [
+            new RecipeItem({ itemId: Items.BlazePowder }),
+            new RecipeItem({ itemId: Items.EnderPearl }),
+        ],
+        output: new InventoryItem({ itemId: Items.EyeOfEnder, count: 1 }),
+    }),
     //#endregion
 
     //#region Diamond Tools

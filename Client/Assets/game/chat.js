@@ -10,7 +10,7 @@ import { screenshotNearestChunks } from "../utils/screenshotChunks.js";
 import { AllBiomes } from "@2dcraft.com/shared/biome.js";
 import { getBlock } from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
-import { activeDimension, gotoDimension } from "../world/dimension.js";
+import { Dimensions, activeDimension, enterEnd, gotoDimension } from "../world/dimension.js";
 import { currentSave, saveWorld } from "../world/saving.js";
 import { Structures } from "@2dcraft.com/shared/structures.js";
 
@@ -194,7 +194,7 @@ export class Chat {
             true,
         );
         this.message(
-            "Welcome to craft2d.com! Type /help for commands.",
+            "Welcome to craft2d.com! Type /progress for an adventure guide.",
             "",
             Colors.Green,
         );
@@ -232,6 +232,7 @@ export class Chat {
                 usage: "<time (1 - 7.5)> or set day",
             },
             { name: "help", args: [] },
+            { name: "progress", args: [] },
             { name: "structure", args: ["structure"] },
             { name: "locatebiome", args: ["biome"] },
             { name: "seed", args: [] },
@@ -517,6 +518,9 @@ export class Chat {
             case "help":
                 this.printHelp();
                 break;
+            case "progress":
+                this.printProgress();
+                break;
             case "structure":
                 this.structure(messageArray);
                 break;
@@ -547,7 +551,8 @@ export class Chat {
             case "gamerule":
                 this.gameRule(messageArray);
                 break;
-            case "dim" || "dimension":
+            case "dim":
+            case "dimension":
                 this.dimension(messageArray);
                 break;
             case "setblock":
@@ -715,6 +720,10 @@ export class Chat {
             gotoDimension(0);
         } else if (dimension === "nether" || dimension === "1") {
             gotoDimension(1);
+        } else if (dimension === "end" || dimension === "2") {
+            enterEnd().catch(() => {
+                this.message("Could not enter the End.", "", Colors.Red);
+            });
         } else {
             this.message("Invalid dimension.");
         }
@@ -1020,6 +1029,32 @@ export class Chat {
                     : "");
             this.message(`/${command.name} ${args}`, "", Colors.Aqua);
         });
+    }
+
+    printProgress() {
+        this.message("Adventure guide:", "", Colors.LightPurple);
+        if (activeDimension === Dimensions.End) {
+            const dragonAlive = runtime.world.entities.some(
+                entity => entity.name === "Ender Dragon" && entity.dimension === Dimensions.End,
+            );
+            this.message(dragonAlive
+                ? "Defeat the dragon to open the center exit."
+                : "The center exit leads home.", "", Colors.Aqua);
+            this.message("Bridge to outer islands for outpost loot.", "", Colors.Aqua);
+            return;
+        }
+        if (activeDimension === Dimensions.Nether) {
+            this.message("Defeat blazes for rods; craft blaze powder.", "", Colors.Aqua);
+            this.message("Return home for ender pearls and the End shrine.", "", Colors.Aqua);
+            return;
+        }
+        this.message("1. Frame a 2 x 3 air gap with 10 obsidian.", "", Colors.Aqua);
+        this.message("2. Ignite the bottom inside block; walk in.", "", Colors.Aqua);
+        this.message("3. Nether: defeat blazes for rods.", "", Colors.Aqua);
+        this.message("4. Craft blaze powder; hunt endermen for pearls.", "", Colors.Aqua);
+        this.message("5. Craft eyes. Use one to find the End shrine.", "", Colors.Aqua);
+        this.message("6. Fill its three frames; enter the End.", "", Colors.Aqua);
+        this.message("7. Defeat the dragon.", "", Colors.Aqua);
     }
 
     message(message, sender = "", color = Colors.White, force = false) {

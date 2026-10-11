@@ -2,8 +2,8 @@ import { runtime } from "../utils/runtime.js";
 import { Colors } from "../game/chat.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { Vector2 } from "../utils/classes.js";
-import { CHUNK_HEIGHT, CHUNK_WIDTH, SPAWN_PLAYER, multiplayer } from "../utils/globals.js";
-import { AllBiomes } from "@2dcraft.com/shared/biome.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, SPAWN_PLAYER, multiplayer } from "../utils/globals.js";
+import { resolveBiome } from "@2dcraft.com/shared/biome.js";
 import { getBlock } from "./block.js";
 import { Chunk } from "./chunk.js";
 import { Dimensions, activeDimension, dimensions, getDimension, gotoDimension } from "./dimension.js";
@@ -432,7 +432,7 @@ export async function loadWorld(save) {
     }, 500);
 }
 
-export async function loadChunk(
+export function loadChunk(
     x,
     chunk,
     dimensionIndex = Dimensions.Overworld,
@@ -445,9 +445,15 @@ export async function loadChunk(
         ? dimension.chunks.get(chunk.previousChunk)
         : null;
 
-    const biomeName =
-        chunk.biome && chunk.biome.name ? chunk.biome.name : chunk.biome;
-    const biome = AllBiomes[biomeName];
+    // Server chunks only contain blocks and walls. Their biome comes from the
+    // shared seed, while local saves include the biome name.
+    const biome = chunk.biome == null
+        ? runtime.world.generator.calculateChunkBiome(
+            x / (CHUNK_WIDTH * BLOCK_SIZE), dimensionIndex)
+        : resolveBiome(dimension.biomeSet, chunk.biome);
+    if (!biome) {
+        throw new Error(`Unknown biome in dimension ${dimensionIndex}: ${chunk.biome?.name ?? chunk.biome}`);
+    }
 
     const constructedChunk = new Chunk(
         runtime.world,
@@ -456,6 +462,7 @@ export async function loadChunk(
         biome,
         previousChunk,
         true,
+        dimensionIndex,
     );
 
     constructedChunk.generateArray();

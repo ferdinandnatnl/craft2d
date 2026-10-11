@@ -7,7 +7,7 @@ export class World {
         this.dimensions = [
             new Dimension("Overworld"),
             new Dimension("Nether"),
-            new Dimension("Eather"),
+            new Dimension("The End"),
         ];
     }
 
@@ -44,6 +44,14 @@ export class World {
             this.dimensions.push(
                 new Dimension(world.dimensions[i].name, chunks)
             );
+        }
+
+        // Older multiplayer saves may contain only Overworld and Nether.
+        while (this.dimensions.length < 3) {
+            this.dimensions.push(new Dimension("The End"));
+        }
+        if (this.dimensions[2]?.name === "Eather") {
+            this.dimensions[2].name = "The End";
         }
 
         return true;

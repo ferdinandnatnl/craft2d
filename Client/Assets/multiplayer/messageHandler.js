@@ -130,7 +130,9 @@ export function processMessage(data) {
             break;
         case "uploadChunk":
             console.log("Received chunk:", message);
-            loadChunk(message.x, message.chunk);
+            loadChunk(message.x, message.chunk,
+                typeof message.dimensionIndex === "number"
+                    ? message.dimensionIndex : 0);
             break;
         case "seed":
             console.log("Received seed:", message);
@@ -243,13 +245,16 @@ export function processMessage(data) {
             break;
 
         case "summonDrop":
-            runtime.world.summonEntity(
+            const drop = runtime.world.summonEntity(
                 Drop,
                 message.position,
                 message.props,
                 false,
                 message.UUID,
             );
+            if (typeof message.dimension === "number") {
+                drop.dimension = message.dimension;
+            }
             break;
 
         default:

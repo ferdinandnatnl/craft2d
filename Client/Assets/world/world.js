@@ -9,10 +9,10 @@ import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, ENTITY_UPDATE_DISTANCE, TICK_SPE
 import { camera } from "../utils/renderer.js";
 import { SpecialType, getBlock } from "./block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
-import { activeDimension, dimensions } from "./dimension.js";
+import { Dimensions, activeDimension, dimensions } from "./dimension.js";
 import { WorldGenerator } from "./generator.js";
 import { removeParticleEmitter } from "./particleEmitter.js";
-import { saveChunk } from "./saving.js";
+import { loadChunk, saveChunk } from "./saving.js";
 
 export class World {
     constructor() {
@@ -89,6 +89,7 @@ export class World {
                 else entity.update();
                 return;
             }
+            if (entity.dimension !== activeDimension) return;
             if (
                 entity.position.x >= cameraFarX &&
                 entity.position.x <= cameraNearX
@@ -137,6 +138,27 @@ export class World {
 
     async startGenerator(dimensionIndex = activeDimension) {
         return this.generator.generateWorld(dimensionIndex);
+    }
+
+    async prepareEndDimension() {
+        const newChunks = [];
+        const chunkSize = CHUNK_WIDTH * BLOCK_SIZE;
+        for (let index = -1; index <= 1; index++) {
+            const x = index * chunkSize;
+            if (this.getChunkForX(x, Dimensions.End)) continue;
+            const serverChunk = multiplayer
+                ? await this.getChunkFromServer(x, Dimensions.End)
+                : null;
+            if (serverChunk) {
+                await loadChunk(x, serverChunk, Dimensions.End);
+            } else {
+                const neighbor = this.generator.getNeighborBiomeData(
+                    index, 0, Dimensions.End);
+                this.generator.generateChunk(index, x, neighbor, Dimensions.End);
+                newChunks.push(x);
+            }
+        }
+        return newChunks;
     }
 
     getDimension(index = activeDimension) {
@@ -362,8 +384,36 @@ export class World {
         return false;
     }
 
-    placePortalInDimension(dimension, position) {
+    async placePortalInDimension(dimension, position) {
         const range = 8;
+        const chunkSize = CHUNK_WIDTH * BLOCK_SIZE;
+        const minChunk = this.getChunkXForWorldX(position.x - range * BLOCK_SIZE);
+        const maxChunk = this.getChunkXForWorldX(position.x + range * BLOCK_SIZE);
+        const createdChunks = [];
+
+        // Destination chunks must exist before the player moves. Otherwise the
+        // frame is only buffered and the player can arrive inside solid terrain.
+        for (let chunkX = minChunk; chunkX <= maxChunk; chunkX += chunkSize) {
+            if (this.getChunkForX(chunkX, dimension)) continue;
+            const serverChunk = multiplayer
+                ? await this.getChunkFromServer(chunkX, dimension)
+                : null;
+            if (serverChunk) {
+                await loadChunk(chunkX, serverChunk, dimension);
+            } else {
+                const index = chunkX / chunkSize;
+                const neighbor = this.generator.getNeighborBiomeData(index, Math.floor(position.x / chunkSize), dimension);
+                this.generator.generateChunk(index, chunkX, neighbor, dimension);
+                createdChunks.push(chunkX);
+            }
+        }
+        if (createdChunks.length) this.generator.generateStructures(dimension);
+        for (const chunkX of createdChunks) {
+            this.generator.postProcessChunk(this.getChunkForX(chunkX, dimension));
+        }
+
+        let nearestPortal = null;
+        let nearestDistance = Infinity;
 
         for (let x = -range; x <= range; x++) {
             const chunk = this.getChunkForX(
@@ -373,10 +423,54 @@ export class World {
 
             if (chunk) {
                 const portals = chunk.getAllBlocks(Blocks.NetherPortal);
-                if (portals.length > 0) {
-                    return portals[portals.length - 1].transform.position;
+                for (const portal of portals) {
+                    const below = this.getBlockAtWorldPosition(
+                        portal.transform.position.x,
+                        portal.transform.position.y + BLOCK_SIZE,
+                        false,
+                        dimension,
+                    );
+                    if (below?.blockType !== Blocks.Obsidian) continue;
+                    const dx = portal.transform.position.x - position.x;
+                    const dy = portal.transform.position.y - position.y;
+                    if (Math.abs(dx) > range * BLOCK_SIZE) continue;
+                    const distance = dx * dx + dy * dy;
+                    if (distance < nearestDistance) {
+                        nearestPortal = portal;
+                        nearestDistance = distance;
+                    }
                 }
             }
+        }
+        if (nearestPortal) {
+            if (multiplayer) {
+                for (const chunkX of createdChunks) await this.uploadChunkToServer(chunkX, dimension);
+            }
+            const portal = nearestPortal.transform.position;
+            return new Vector2(portal.x + BLOCK_SIZE / 2, portal.y + BLOCK_SIZE - this.player.hitbox.y);
+        }
+
+        // Keep the frame away from the bedrock roof and the world floor.
+        position = new Vector2(
+            Math.floor(position.x / BLOCK_SIZE) * BLOCK_SIZE,
+            Math.max(BLOCK_SIZE * 4, Math.min(position.y, (CHUNK_HEIGHT - 7) * BLOCK_SIZE)),
+        );
+
+        // Carve a small exit on both sides of the frame and give it a solid
+        // floor. Nether terrain can otherwise seal the new portal in rock.
+        for (let x = -2; x <= 5; x++) {
+            for (let y = -2; y <= 3; y++) {
+                this.setBlockTypeAtPosition(
+                    position.x + x * BLOCK_SIZE,
+                    position.y + y * BLOCK_SIZE,
+                    Blocks.Air, false, dimension, null, false,
+                );
+            }
+            this.setBlockTypeAtPosition(
+                position.x + x * BLOCK_SIZE,
+                position.y + BLOCK_SIZE * 4,
+                Blocks.Cobblestone, false, dimension, null, false,
+            );
         }
 
         for (let i = 0; i < 4; i++) {
@@ -418,18 +512,6 @@ export class World {
             );
         }
 
-        for (let i = 0; i < 6; i++) {
-            this.setBlockTypeAtPosition(
-                position.x + i * BLOCK_SIZE - BLOCK_SIZE,
-                position.y + BLOCK_SIZE * 5,
-                Blocks.Cobblestone,
-                false,
-                dimension,
-                null,
-                false,
-            );
-        }
-
         for (let y = 1; y < 4; y++) {
             for (let x = 1; x < 3; x++) {
                 this.setBlockTypeAtPosition(
@@ -444,10 +526,16 @@ export class World {
             }
         }
 
-        return new Vector2(
-            position.x + BLOCK_SIZE * 1.5,
-            position.y + BLOCK_SIZE * 3,
-        );
+        const chunksToUpload = new Set(createdChunks);
+        for (let x = -2; x <= 5; x++) {
+            const chunkX = this.getChunkXForWorldX(position.x + x * BLOCK_SIZE);
+            chunksToUpload.add(chunkX);
+        }
+        if (multiplayer) {
+            for (const chunkX of chunksToUpload) await this.uploadChunkToServer(chunkX, dimension);
+        }
+
+        return new Vector2(position.x + BLOCK_SIZE * 1.5, position.y + BLOCK_SIZE * 4 - this.player.hitbox.y);
     }
 
     /**
@@ -643,7 +731,12 @@ export class World {
         if (multiplayer) {
             runtime.server.send({
                 type: "summonDrop",
-                message: { UUID: uuid, position: position, props: props },
+                message: {
+                    UUID: uuid,
+                    position: position,
+                    props: props,
+                    dimension: drop.dimension,
+                },
                 sender: this.player?.UUID,
             });
         }

@@ -2,8 +2,11 @@ import { runtime } from "../utils/runtime.js";
 import { entityRegistry } from "../entities/entityRegistry.js";
 import { ORE_THRESHOLDS, multiplayer } from "../utils/globals.js";
 import { Noise } from "@2dcraft.com/shared/noise.js";
-import { NetherBiomes, OverworldBiomes } from "@2dcraft.com/shared/biome.js";
+import { EndBiomes, NetherBiomes, OverworldBiomes } from "@2dcraft.com/shared/biome.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
+import { END_SHRINE_X, endEntryWorldY, endExitPortalWorldY } from "@2dcraft.com/shared/endProgression.js";
+import { Vector2 } from "../utils/classes.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT } from "../utils/globals.js";
 import {
     Dimensions,
     activeDimension,
@@ -183,6 +186,19 @@ setDimensions([
         fastLava: true,
         noWater: true,
     }),
+    new Dimension({
+        name: "The End",
+        biomeSet: EndBiomes,
+        backgroundGradient: {
+            dayColor: "#15101f",
+            nightColor: "#08060e",
+            sunsetColor: "#15101f",
+            midnightColor: "#08060e",
+        },
+        alwaysDay: true,
+        baseLightLevel: 12,
+        noWater: true,
+    }),
 ]);
 
 export function gotoDimension(dimension) {
@@ -207,4 +223,52 @@ export function gotoDimension(dimension) {
     });
 
     setActiveDimension(dimension);
+    if (dimension === Dimensions.End) ensureEnderDragon();
+}
+
+export function ensureEnderDragon() {
+    if (activeDimension !== Dimensions.End || !runtime.world?.player) return;
+    if (runtime.world.entities.some(entity => entity.name === "Ender Dragon" &&
+        entity.dimension === Dimensions.End)) return;
+    const exitY = endExitPortalWorldY();
+    const center = runtime.world.getBlockAtWorldPosition(0, exitY, false, Dimensions.End);
+    if (!center || center.blockType === Blocks.EndPortal) return;
+    const Dragon = entityRegistry.Entities?.EnderDragon;
+    if (Dragon) runtime.world.summonEntity(Dragon,
+        new Vector2(12 * BLOCK_SIZE, 39 * BLOCK_SIZE));
+}
+
+export async function enterEnd() {
+    const newChunks = await runtime.world.prepareEndDimension();
+    if (activeDimension !== Dimensions.End) gotoDimension(Dimensions.End);
+    const player = runtime.world.player;
+    if (player) {
+        player.position = new Vector2(-8 * BLOCK_SIZE,
+            endEntryWorldY(-8));
+        player.velocity = new Vector2();
+        player.portalCooldown = player.maxPortalCooldown;
+        player.cameThroughPortal = true;
+    }
+    for (const x of newChunks) {
+        runtime.world.generator.postProcessChunk(
+            runtime.world.getChunkForX(x, Dimensions.End));
+    }
+    if (multiplayer) {
+        for (const x of newChunks) await runtime.world.uploadChunkToServer(x, Dimensions.End);
+    }
+    ensureEnderDragon();
+}
+
+export function leaveEnd() {
+    if (activeDimension !== Dimensions.End) return;
+    const returnX = (END_SHRINE_X - 4) * BLOCK_SIZE;
+    const returnY = (CHUNK_HEIGHT -
+        runtime.world.generator.getTerrainHeight(END_SHRINE_X - 4, Dimensions.Overworld) - 3) * BLOCK_SIZE;
+    gotoDimension(Dimensions.Overworld);
+    if (runtime.world.player) {
+        runtime.world.player.position = new Vector2(returnX, returnY);
+        runtime.world.player.velocity = new Vector2();
+        runtime.world.player.cameThroughPortal = true;
+        runtime.world.player.portalCooldown = runtime.world.player.maxPortalCooldown;
+    }
 }
