@@ -1,11 +1,14 @@
 /**
  * World-selection entry — load media pack, then menu modules and HTML bridges.
  */
+import { inject } from "@vercel/analytics";
 import {
     applyPackedMediaStyles,
     loadMediaBundle,
 } from "./Assets/utils/assetBundle.js";
 import { createBootLoader } from "./bootLoader.js";
+
+inject();
 
 const boot = createBootLoader();
 await loadMediaBundle({ onProgress: (p) => boot.setProgress(p) });
