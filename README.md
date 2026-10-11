@@ -34,6 +34,10 @@ To statically catch missing imports / undefined names (the usual ESM migration f
 
 Run `npm test` in the Client directory for rendering and interaction-grid regressions.
 
+Opening the app starts gameplay in the selected world, or creates a world on the
+first visit. Use **Save and Quit to Worlds** in the pause menu to select or create
+worlds, join multiplayer, or open Options.
+
 The game uses the original texture pack by default. In the pause menu, switch
 **Renderer** between **3D** and **Classic**, or turn **Cinematic** shading off.
 Press **F1** to show or hide the HUD. Uploaded texture packs remain supported;

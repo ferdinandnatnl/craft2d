@@ -315,6 +315,35 @@ body {
     z-index: 1;
 }
 
+#world-select-container .world-buttons-container {
+    width: calc(100% - 2rem);
+}
+
+#world-select-container .world-buttons-container > div {
+    flex-wrap: wrap;
+}
+
+#world-select-container .world-buttons-container .btn {
+    flex: 1 1 8rem;
+    max-width: none;
+}
+
+#world-select-container .world-container {
+    max-width: calc(100% - 2rem);
+}
+
+#world-select-container .world-data-container {
+    min-width: 0;
+}
+
+#world-select-container .world-name,
+#world-select-container .world-date {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .big-text {
     font-family: "Pixel";
     font-size: 2rem;

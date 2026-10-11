@@ -15,3 +15,5 @@ Server/banned-ips.json
 Server/usercache.json
 Server/world
 Server/server.log
+.vercel
+.env*

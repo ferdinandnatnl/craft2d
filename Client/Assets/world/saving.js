@@ -9,18 +9,21 @@ import { Chunk } from "./chunk.js";
 import { Dimensions, activeDimension, dimensions, getDimension, gotoDimension } from "./dimension.js";
 import { downloadWorldSave } from "../../buttonUtils.js";
 
-export const AUTOSAVE_INTERVAL = 300000;
+export const AUTOSAVE_INTERVAL = 60000;
 
 setInterval(() => {
     autoSave();
 }, AUTOSAVE_INTERVAL);
 
-export function autoSave() {
-    if (runtime.world.generator.loadingWorld) return;
-    if (multiplayer) return;
-    saveWorld(false);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") autoSave();
+});
+window.addEventListener("pagehide", autoSave);
 
-    runtime.game.chat.message("World auto-saved successfully!", "", Colors.Green);
+export function autoSave() {
+    if (multiplayer || !runtime.world?.player || !runtime.hotbar ||
+        runtime.world.generator.loadingWorld) return;
+    saveWorld(false);
 }
 
 export let currentSave = {
@@ -156,12 +159,9 @@ export function saveWorld(message = true, toFile = false) {
         worlds = [worldData];
     }
 
-    if (message)
-        runtime.game.chat.message("World saved successfully!", "", Colors.Green);
-
     try {
-        localStorage.setItem("worlds", JSON.stringify(worlds));
         localStorage.setItem(id, saveData);
+        localStorage.setItem("worlds", JSON.stringify(worlds));
     } catch (error) {
         console.error("Failed to save world: ", error);
         runtime.game.chat.message(
@@ -171,6 +171,9 @@ export function saveWorld(message = true, toFile = false) {
         );
         return;
     }
+
+    if (message)
+        runtime.game.chat.message("World saved successfully!", "", Colors.Green);
 }
 
 export function saveChunk(chunk) {

@@ -74,7 +74,7 @@ export class World {
         if (runtime.time > 3.5 && runtime.time < 6.5) runtime.day = false;
         else runtime.day = true;
         if (!runtime.GAMERULES.doDaylightCycle) return;
-        runtime.time += dayNightSpeed;
+        runtime.time += runtime.day ? dayNightSpeed / 2 : dayNightSpeed;
     }
 
     updateEntities(tick = false) {
