@@ -204,7 +204,7 @@ export class Chat {
             Colors.Green,
         );
         this.message(
-            "Donations are appreciated to support development. :)",
+            "Follow @ferdinandnatnl on Twitter.",
             "",
             Colors.Green,
         );
