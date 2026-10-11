@@ -14,21 +14,54 @@ import { input } from "./input.js";
 import { getSpriteSize, getSpriteUrl } from "./texturePackLoader.js";
 import {
     activeDimension,
+    Dimensions,
     getDimension,
     getDimensionChunks,
 } from "../world/dimension.js";
 import { CANVAS, ctx, r } from "./canvas.js";
+import { ShaderRenderer } from "./shaderRenderer.js";
+import { SkyRenderer } from "./skyRenderer.js";
+import { BackgroundTerrain } from "./backgroundTerrain.js";
+import { drawSceneLighting, drawLocalLighting } from "./sceneLighting.js";
+import { TerrainDepth } from "./terrainDepth.js";
+import { WaterSurface } from "./waterSurface.js";
+import { VoxelRenderer } from "../rendering/voxelRenderer.js";
 
 export { CANVAS, ctx, r };
+const skyRenderer = new SkyRenderer();
+const backgroundTerrain = new BackgroundTerrain();
+const terrainDepth = new TerrainDepth();
+const waterSurface = new WaterSurface();
+const voxelRenderer = new VoxelRenderer(document.getElementById("voxel-canvas"));
+let rendererMode = "voxel";
+let shaderMode = "photon";
+let voxelActive = false;
+
+const shaderRenderer = new ShaderRenderer(
+    CANVAS,
+    document.getElementById("shader-canvas"),
+);
+
+export function setShaderMode(mode) {
+    shaderMode = mode;
+    shaderRenderer.setMode(rendererMode === "canvas" ? mode : "off");
+    return mode;
+}
+
+export function setRendererMode(mode) {
+    rendererMode = mode === "canvas" ? "canvas" : "voxel";
+    shaderRenderer.setMode(rendererMode === "canvas" ? shaderMode : "off");
+    return rendererMode;
+}
 
 runtime.drawingChunkBorders = false;
 runtime.drawCameraOverlay = false;
 runtime.drawHeightOverlay = false;
 runtime.drawDebugMouseBlockOverlay = false;
 runtime.drawFileSizeOverlay = false;
-runtime.drawFpsOverlay = true;
+runtime.drawFpsOverlay = false;
 runtime.drawHitbox = false;
-runtime.drawCoordinatesOverlay = true;
+runtime.drawCoordinatesOverlay = false;
 
 runtime.cursorInRange = false;
 
@@ -41,6 +74,37 @@ runtime.camera = camera;
 
 export function drawBackground() {
     const dimension = getDimension(activeDimension);
+
+    if (activeDimension === Dimensions.Overworld) {
+        const biomes = new Map();
+        skyRenderer.draw(ctx, {
+            width: CANVAS.width,
+            height: CANVAS.height,
+            time: runtime.time,
+            seconds: runtime.passedTime,
+            cameraX: camera.x,
+            cameraY: camera.y,
+            surfaceY: (CHUNK_HEIGHT - TERRAIN_HEIGHT) * BLOCK_SIZE,
+        });
+        backgroundTerrain.draw(ctx, {
+            width: CANVAS.width,
+            height: CANVAS.height,
+            cameraX: camera.x,
+            cameraY: camera.y,
+            surfaceY: (CHUNK_HEIGHT - TERRAIN_HEIGHT) * BLOCK_SIZE,
+            time: runtime.time,
+            seed: runtime.world?.seed,
+            biomeAt: (x) => {
+                const index = Math.floor(x / (CHUNK_WIDTH * BLOCK_SIZE));
+                if (!biomes.has(index)) {
+                    biomes.set(index, runtime.world?.getChunkForX(x)?.biome
+                        || runtime.world?.generator.calculateChunkBiome(index));
+                }
+                return biomes.get(index);
+            },
+        });
+        return;
+    }
 
     // Calculate the color stops based on time
     const dayColor = dimension.backgroundGradient.dayColor;
@@ -122,10 +186,26 @@ export function drawParticleEmitters() {
 export function draw(chunks, frames) {
     fps = frames;
 
+    voxelActive = rendererMode === "voxel" && voxelRenderer.render(runtime.world, camera, {
+        width: CANVAS.width, height: CANVAS.height, dimension: activeDimension,
+        time: runtime.time, seconds: runtime.passedTime,
+        lighting: runtime.game.settings.lighting, effects: shaderMode !== "off",
+    });
+    document.body.classList.toggle("voxel-active", voxelActive);
+    const classicShader = voxelActive ? "off" : shaderMode;
+    if (shaderRenderer.mode !== classicShader) shaderRenderer.setMode(classicShader);
+    if (voxelActive) ctx.clearRect(0, 0, CANVAS.width, CANVAS.height);
+    else {
     drawBackground();
     drawChunks(chunks);
+    terrainDepth.prepare(runtime.world, camera, CANVAS.width, CANVAS.height);
+    terrainDepth.draw(ctx, camera);
+    if (shaderRenderer.mode !== "off" && activeDimension === Dimensions.Overworld) {
+        drawSceneLighting(ctx, runtime.world, camera, runtime.time, CANVAS.width, CANVAS.height);
+    }
+    }
 
-    if (runtime.world.player && !runtime.game.pauseMenu?.getActive() && !runtime.world.player.isDead) {
+    if (!runtime.hideHud && runtime.world.player && !runtime.game.pauseMenu?.getActive() && !runtime.world.player.isDead) {
         drawBreakAndPlaceCursor(runtime.cursorInRange);
         drawDestroyStage();
     }
@@ -133,6 +213,14 @@ export function draw(chunks, frames) {
     drawParticleEmitters();
 
     drawEntities();
+
+    if (!voxelActive && shaderRenderer.mode !== "off") {
+        waterSurface.draw(ctx, terrainDepth, camera, runtime.passedTime);
+        if (runtime.game.settings.lighting) {
+            drawLocalLighting(ctx, runtime.world, terrainDepth, camera, runtime.time,
+                runtime.passedTime, CANVAS.width, CANVAS.height);
+        }
+    }
 
     afterDraw();
 
@@ -161,6 +249,8 @@ export function drawLoadScreen() {
                 CANVAS.height / 2,
             );
     }
+
+    shaderRenderer.render();
 }
 
 export function drawEntities() {
@@ -175,7 +265,13 @@ export function drawEntities() {
             ) <=
             RENDER_DISTANCE * 2 * BLOCK_SIZE * CHUNK_WIDTH
         ) {
-            entity.draw(ctx, camera);
+            if (voxelActive && entity.body) {
+                entity.drawFire?.();
+                entity.drawOverride?.();
+            } else {
+                if (!voxelActive) terrainDepth.drawEntityShadow(ctx, entity, camera);
+                entity.draw(ctx, camera);
+            }
         } else {
             if (entity.despawn) {
                 const chunk = getDimensionChunks(activeDimension).get(
@@ -273,6 +369,7 @@ export function drawLate(chunk) {
 }
 
 export function afterDraw() {
+    if (runtime.hideHud && !runtime.game.chat.inChat && !runtime.world.player?.windowOpen) return;
     if (runtime.world.player && !runtime.world.player.isDead) {
         drawUI();
         if (!runtime.game.pauseMenu?.getActive()) drawCursor();

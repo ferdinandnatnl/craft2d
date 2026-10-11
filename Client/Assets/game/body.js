@@ -4,6 +4,7 @@ import { BLOCK_SIZE, ToolType } from "../utils/globals.js";
 import { drawImage } from "../utils/renderer.js";
 import { getSpriteSize, getSpriteUrl, isEqualToOriginal } from "../utils/texturePackLoader.js";
 import { getBlock } from "../world/block.js";
+import { blendSwimming, getSwimPartPitch } from "../rendering/entityPose.js";
 
 export class Body {
     constructor({
@@ -16,6 +17,8 @@ export class Body {
         this.flipCorrection = flipCorrection;
         this.parts = parts;
         this.opacity = 1;
+        this.swimAmount = 0;
+        this.swimPhase = 0;
 
         this.flashingColor = null;
 
@@ -138,12 +141,26 @@ export class Body {
         }, duration * 1000);
     }
 
+    updateSwimming(active) {
+        const deltaTime = Math.max(0, Math.min(runtime.deltaTime || 0, 0.1));
+        this.swimAmount = blendSwimming(this.swimAmount, active, deltaTime);
+        if (this.swimAmount > 0) this.swimPhase = (this.swimPhase + deltaTime * 6) % (Math.PI * 2);
+    }
+
     draw(ctx, direction, lookDirection, holdItem) {
         const sortedParts = Object.values(this.parts).sort(
             (a, b) => a.zIndex - b.zIndex,
         );
 
+        ctx.save();
         ctx.globalAlpha = this.opacity;
+        if (this.swimAmount > 0) {
+            const centerX = this.position.x + BLOCK_SIZE * 0.2;
+            const centerY = this.position.y + BLOCK_SIZE * 0.9;
+            ctx.translate(centerX, centerY);
+            ctx.rotate(direction * Math.PI / 2 * this.swimAmount);
+            ctx.translate(-centerX, -centerY);
+        }
 
         for (const part of sortedParts) {
             part.position = {
@@ -155,6 +172,12 @@ export class Body {
                     BLOCK_SIZE * (part.offset.x / 64),
                 y: this.position.y + BLOCK_SIZE * (part.offset.y / 64),
             };
+            let rotation = part.rotation;
+            if (this.swimAmount > 0 && !part.isSwinging) {
+                const side = part.zIndex < 0 ? -1 : 1;
+                const swimRotation = getSwimPartPitch(part.id, this.swimPhase) * 180 / Math.PI * direction * side;
+                rotation += (swimRotation - rotation) * this.swimAmount;
+            }
             part.draw(
                 ctx,
                 lookDirection,
@@ -163,10 +186,11 @@ export class Body {
                 this.brightness,
                 this.image,
                 direction,
+                rotation,
             );
         }
 
-        ctx.globalAlpha = 1;
+        ctx.restore();
     }
 
     swing() {
@@ -310,6 +334,7 @@ export class BodyPart {
         brightness = 1,
         image,
         direction,
+        rotation = this.rotation,
     ) {
         const img = this.loadSprite(image);
 
@@ -336,7 +361,7 @@ export class BodyPart {
             shouldFlip = direction < 0;
         }
 
-        const finalRotation = this.rotation;
+        const finalRotation = rotation;
 
         // Apply the rotation and flipping
         this.applyRotationAndFlip(ctx, finalRotation, shouldFlip);

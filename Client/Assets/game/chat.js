@@ -204,11 +204,6 @@ export class Chat {
             Colors.Green,
         );
         this.message(
-            "This project is open source and available on GitHub.",
-            "",
-            Colors.Green,
-        );
-        this.message(
             "Donations are appreciated to support development. :)",
             "",
             Colors.Green,
@@ -231,7 +226,11 @@ export class Chat {
             { name: "spawnpoint", args: ["x", "y"] },
             { name: "summon", args: ["entity", "x", "y", "count"] },
             { name: "kill", args: [] },
-            { name: "time", args: ["time"] },
+            {
+                name: "time",
+                args: ["time"],
+                usage: "<time (1 - 7.5)> or set day",
+            },
             { name: "help", args: [] },
             { name: "structure", args: ["structure"] },
             { name: "locatebiome", args: ["biome"] },
@@ -276,6 +275,14 @@ export class Chat {
 
             const argType = command.args[argIndex - 1];
             const prefix = parts[argIndex]?.toLowerCase() || "";
+
+            if (
+                commandName === "time" &&
+                argIndex === 2 &&
+                parts[1]?.toLowerCase() === "set"
+            ) {
+                return ["day"].filter((time) => time.startsWith(prefix));
+            }
 
             switch (argType) {
                 case "category.item":
@@ -343,7 +350,9 @@ export class Chat {
                 case "dimension":
                     return ["overworld", "nether", "0", "1"];
                 case "time":
-                    return ["1", "3", "5", "7.5"];
+                    return ["set", "1", "3", "5", "7.5"].filter((time) =>
+                        time.startsWith(prefix),
+                    );
                 case "block":
                     const blockSuggestions = Object.keys(Blocks).filter(
                         (block) => block.toLowerCase().startsWith(prefix),
@@ -764,14 +773,26 @@ export class Chat {
 
     setTime(messageArray) {
         if (!messageArray[1]) {
-            this.invalidCommand("/time <time (1 - 7.5)>");
+            this.invalidCommand("/time <time (1 - 7.5)> or /time set day");
+            return;
+        }
+
+        if (messageArray[1].toLowerCase() === "set") {
+            if (messageArray[2]?.toLowerCase() !== "day") {
+                this.invalidCommand("/time set day");
+                return;
+            }
+
+            runtime.time = 1;
+            runtime.day = true;
+            this.cheatMessage("Time set to day.");
             return;
         }
 
         const newTime = parseFloat(messageArray[1]);
 
         if (isNaN(newTime)) {
-            this.invalidCommand("/time <time (1 - 7.5)>");
+            this.invalidCommand("/time <time (1 - 7.5)> or /time set day");
             return;
         }
 
@@ -993,9 +1014,10 @@ export class Chat {
 
         this.message("Available Commands:", "", Colors.LightPurple);
         commands.forEach((command) => {
-            const args = command.args.length
-                ? command.args.map((arg) => `<${arg}>`).join(" ")
-                : "";
+            const args = command.usage ??
+                (command.args.length
+                    ? command.args.map((arg) => `<${arg}>`).join(" ")
+                    : "");
             this.message(`/${command.name} ${args}`, "", Colors.Aqua);
         });
     }

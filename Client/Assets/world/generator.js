@@ -12,6 +12,7 @@ import { Chunk } from "./chunk.js";
 import { activeDimension, dimensions } from "./dimension.js";
 import { loadChunk } from "./saving.js";
 import { Structures } from "@minecraftjs/shared/structures.js";
+import { terrainHeightAt } from "@minecraftjs/shared/terrainHeight.js";
 
 export class WorldGenerator {
     constructor(world) {
@@ -449,6 +450,12 @@ export class WorldGenerator {
         return storage;
     }
 
+    getTerrainHeight(worldX, dimensionIndex = activeDimension) {
+        return terrainHeightAt(worldX,
+            (index) => this.calculateChunkBiome(index, dimensionIndex),
+            dimensions[dimensionIndex].noiseMaps, this.specialWorldProps.flat);
+    }
+
     calculateChunkBiome(chunkIndex, dimensionIndex = activeDimension) {
         const dimension = dimensions[dimensionIndex];
         const { temperature, wetness, mountains } = dimension.noiseMaps;
@@ -507,8 +514,9 @@ export class WorldGenerator {
             CHUNK_WIDTH,
             biome,
             oldChunkData,
+            false,
+            dimensionIndex,
         );
-        newChunk.dimension = dimensionIndex;
         dimension.chunks.set(chunkX, newChunk);
     }
 

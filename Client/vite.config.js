@@ -65,9 +65,12 @@ function packMediaZip() {
                 ).toFixed(1)} MB)`
             );
 
-            const menuText = resolve(__dirname, "menu_text.json");
-            if (existsSync(menuText)) {
-                cpSync(menuText, join(dist, "menu_text.json"));
+            const photonLicense = resolve(
+                __dirname,
+                "Assets/utils/PHOTON-LICENSE.txt",
+            );
+            if (existsSync(photonLicense)) {
+                cpSync(photonLicense, join(dist, "PHOTON-LICENSE.txt"));
             }
 
             const distFileCount = countFiles(dist);
@@ -100,6 +103,7 @@ export default defineConfig({
             input: {
                 main: resolve(__dirname, "index.html"),
                 game: resolve(__dirname, "game.html"),
+                worlds: resolve(__dirname, "worlds.html"),
                 structureCreator: resolve(__dirname, "structureCreator.html"),
             },
         },
@@ -115,4 +119,3 @@ export default defineConfig({
         include: ["jszip", "tooloud"],
     },
 });
-

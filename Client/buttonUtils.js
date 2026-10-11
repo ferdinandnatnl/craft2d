@@ -1,4 +1,4 @@
-// Shared button utilities for menus (both title screen and all in-game menus)
+// Shared button utilities for world selection and in-game menus
 
 import { resolveAssetUrl } from "./Assets/utils/assetBundle.js";
 

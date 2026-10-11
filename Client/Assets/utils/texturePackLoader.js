@@ -7,6 +7,7 @@ import { getFromLdb } from "./indexDB.js";
 import { blockRegistry } from "@minecraftjs/shared/blockRegistry.js";
 import "@minecraftjs/shared/blocks.js";
 import { resolveAssetUrl } from "./assetBundle.js";
+import { loadNaturalTexturePack } from "./naturalTexturePack.js";
 
 export let texturePackZip = null;
 export let texturePackFiles = null;
@@ -142,9 +143,16 @@ export async function loadTexturePack() {
     // Load vanilla textures first
     await loadVanillaTextures();
 
-    if (currentPackKey === "default") {
+    if (["default", "classic", "natural"].includes(currentPackKey)) {
         texturePackZip = null;
         texturePackFiles = null;
+        if (currentPackKey === "natural") {
+            try {
+                texturePackFiles = await loadNaturalTexturePack();
+            } catch (error) {
+                console.warn("Natural textures could not load; using Classic textures.", error);
+            }
+        }
         runtime.isTexturePackLoaded = true;
         return;
     }

@@ -3,7 +3,7 @@
 
   <br />
 
-  <p>A 2D Minecraft fan game written entirely in JavaScript using no engines or frameworks!</p>
+  <p>A JavaScript Minecraft fan game with side-scrolling gameplay and a Three.js 3D cutaway renderer.</p>
   <p><em>"The most complete 2D Minecraft fan game you can play in your browser!"</em></p>
 
   <p><strong>Play here on Itch.io:</strong> <a href="https://plekiko.itch.io/minecraft-js">plekiko.itch.io/minecraft-js</a></p>
@@ -31,6 +31,13 @@ To get set up, run `npm install` in the Shared, Client, and Server directories.
 From the Client directory, run `npm run dev` to start the Vite dev server on `localhost:3000` (hot module reload for the client).
 
 To statically catch missing imports / undefined names (the usual ESM migration failures), run `npm run lint` in the Client directory.
+
+Run `npm test` in the Client directory for rendering and interaction-grid regressions.
+
+The game uses the original texture pack by default. In the pause menu, switch
+**Renderer** between **3D** and **Classic**, or turn **Cinematic** shading off.
+Press **F1** to show or hide the HUD. Uploaded texture packs remain supported;
+the optional **Natural 32x** pack is available under Options → Texture Packs.
 
 To host a multiplayer server, run `node server.js` from the Server directory. By default, this hosts on port 25565.
 

@@ -1,5 +1,5 @@
 /**
- * Title-screen entry — load media pack, then menu modules and HTML bridges.
+ * World-selection entry — load media pack, then menu modules and HTML bridges.
  */
 import {
     applyPackedMediaStyles,
@@ -19,8 +19,6 @@ initButtonCenterImages();
 const htmlApi = {
     playButtonSound,
     downloadWorldSave,
-    setRandomText: menu.setRandomText,
-    playGame: menu.playGame,
     multiplayerButton: menu.multiplayerButton,
     gotoOptions: menu.gotoOptions,
     playSelectedWorld: menu.playSelectedWorld,
@@ -46,6 +44,7 @@ const htmlApi = {
     backToWorldSelection: menu.backToWorldSelection,
     applySelectedSkin: menu.applySelectedSkin,
     toggleLighting: menu.toggleLighting,
+    cycleShader: menu.cycleShader,
     showTexturePacks: menu.showTexturePacks,
     gotoControls: menu.gotoControls,
     showSkins: menu.showSkins,
@@ -61,4 +60,5 @@ const htmlApi = {
 };
 
 Object.assign(window, htmlApi);
+menu.showMenu();
 boot.hide();

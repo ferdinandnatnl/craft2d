@@ -4,11 +4,25 @@ export const ctx = CANVAS ? CANVAS.getContext("2d") : null;
 export var r = document.querySelector(":root");
 
 if (CANVAS && ctx) {
-    CANVAS.width = 1600;
-    CANVAS.height = 900;
-    ctx.imageSmoothingEnabled = false;
-    ctx.webkitImageSmoothingEnabled = false;
-    ctx.mozImageSmoothingEnabled = false;
+    const resizeCanvas = () => {
+        const { width, height } = CANVAS.getBoundingClientRect();
+        if (!width || !height) return;
+
+        // Preserve the game/UI scale and show more world in the extra space.
+        const scale = Math.max(1920 / width, 1080 / height);
+        const renderWidth = Math.round(width * scale);
+        const renderHeight = Math.round(height * scale);
+        if (CANVAS.width === renderWidth && CANVAS.height === renderHeight) return;
+
+        CANVAS.width = renderWidth;
+        CANVAS.height = renderHeight;
+        ctx.imageSmoothingEnabled = false;
+        ctx.webkitImageSmoothingEnabled = false;
+        ctx.mozImageSmoothingEnabled = false;
+    };
+
+    resizeCanvas();
+    new ResizeObserver(resizeCanvas).observe(CANVAS);
 }
 
 if (r) {

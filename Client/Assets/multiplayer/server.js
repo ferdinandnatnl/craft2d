@@ -206,10 +206,10 @@ export function sendMultiplayerLeaveSync(closeSocket = false) {
 
 window.sendMultiplayerLeaveSync = sendMultiplayerLeaveSync;
 
-window.leaveGameToTitle = function () {
+window.leaveGameToWorlds = function () {
     if (!multiplayer) {
         if (typeof saveWorld === "function") saveWorld(false);
-        window.location.href = "index.html";
+        window.location.href = "worlds.html";
         return;
     }
 
@@ -218,7 +218,7 @@ window.leaveGameToTitle = function () {
 
     sendMultiplayerLeaveSync(true);
     setTimeout(() => {
-        window.location.href = "index.html";
+        window.location.href = "worlds.html";
     }, 120);
 };
 

@@ -296,6 +296,7 @@ export class Player extends Entity {
         this.hoverBlockLogic();
         this.breakingAndPlacingLogic();
         this.updateEntity();
+        this.updateSwimmingAnimation();
         this.flyingToggleLogic();
         this.collisionLogic();
         this.toggleLogic();
@@ -359,7 +360,7 @@ export class Player extends Entity {
     }
 
     isFacingLeft() {
-        return this.lookDirection < -90 || this.lookDirection > 90;
+        return this.direction < 0;
     }
 
     isLegacySkin() {
@@ -400,6 +401,8 @@ export class Player extends Entity {
     }
 
     multiplayerReceivePlayerState(data) {
+        const movementX = data.position.x - this.position.x;
+        if (movementX !== 0) this.direction = Math.sign(movementX);
         this.position = data.position;
 
         this.holdItem = new InventoryItem(data.holdItem);
@@ -415,6 +418,12 @@ export class Player extends Entity {
             });
 
             this.lookDirection = data.lookDirection;
+            if (Number.isFinite(data.swimAmount)) {
+                this.body.swimAmount = Math.max(0, Math.min(1, data.swimAmount));
+            }
+            if (Number.isFinite(data.swimPhase)) {
+                this.body.swimPhase = data.swimPhase % (Math.PI * 2);
+            }
             this.applyLimbTextures();
         }
     }
@@ -443,6 +452,8 @@ export class Player extends Entity {
                 });
             });
             data.lookDirection = this.lookDirection;
+            data.swimAmount = this.body.swimAmount;
+            data.swimPhase = this.body.swimPhase;
         }
 
         runtime.server.send({
@@ -1831,6 +1842,15 @@ export class Player extends Entity {
         this.addFoodExhaustion(input.isActionDown("sprint") ? 0.4 : 0.2);
     }
 
+    updateSwimmingAnimation() {
+        const torsoY = this.position.y + this.hitbox.y / 2;
+        const inWater = this.swimming && this.collidingWithBlocks.some((block) =>
+            block.blockType === Blocks.Water && block.transform.position.y <= torsoY,
+        );
+        const moving = Math.abs(this.velocity.x) > 5 || this.velocity.y < -5;
+        this.body.updateSwimming(inWater && moving && !this.abilities.flying);
+    }
+
     handleSwimming() {
         if (this.wasSwimming && !this.swimming) {
             // Exited Fluid
@@ -1981,6 +2001,7 @@ export function createPlayerBody() {
                 rotationOrigin: { x: 5, y: 4 },
                 sways: true,
                 mainArm: true,
+                swayPhase: Math.PI,
                 holdOrigin: { x: 6, y: 35 },
             }),
             rightArm: new BodyPart({
@@ -1989,6 +2010,7 @@ export function createPlayerBody() {
                 rotationOrigin: { x: 5, y: 4 },
                 zIndex: -2,
                 sways: true,
+                swayPhase: Math.PI,
             }),
             leftLeg: new BodyPart({
                 spriteCrop: limbs.leftLeg,

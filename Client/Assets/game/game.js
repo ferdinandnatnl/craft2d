@@ -4,7 +4,12 @@ import { PauseMenu } from "./pauseMenu.js";
 import { Vector2 } from "../utils/classes.js";
 import { BLOCK_SIZE, INTERACT_DISTANCE, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
-import { draw } from "../utils/renderer.js";
+import { draw, setShaderMode, setRendererMode } from "../utils/renderer.js";
+import {
+    getShaderModeLabel,
+    nextShaderMode,
+    normalizeShaderMode,
+} from "../utils/shaderModes.js";
 import { activeDimension, getDimensionChunks } from "../world/dimension.js";
 import { loadWorldFromLocalStorage } from "../world/saving.js";
 import { World } from "../world/world.js";
@@ -18,10 +23,13 @@ export class Game {
             musicVolume: 100,
             sfxVolume: 100,
             lighting: true,
+            shader: "photon",
+            renderer: "voxel",
             username: "Player",
         };
         this.chat = new Chat();
         this.pauseMenu = new PauseMenu();
+        this.loadSettings();
     }
 
     waitForTexturePack() {
@@ -38,15 +46,70 @@ export class Game {
     }
 
     loadSettings() {
-        const settingsString = localStorage.getItem("settings");
-        if (settingsString) {
-            const loaded = JSON.parse(settingsString);
-            this.settings.lighting = loaded.lighting !== false;
-            this.settings.username = loaded.username || "Player";
-            this.settings.musicVolume =
-                loaded.musicVolume ?? (loaded.music === false ? 0 : 100);
-            this.settings.sfxVolume =
-                loaded.sfxVolume ?? (loaded.sfx === false ? 0 : 100);
+        let loaded = {};
+        try {
+            const savedSettings = JSON.parse(
+                localStorage.getItem("settings") || "{}",
+            );
+            if (savedSettings && typeof savedSettings === "object") {
+                loaded = savedSettings;
+            }
+        } catch (error) {
+            console.warn("Could not read saved settings; using defaults.", error);
+        }
+
+        this.settings.lighting = loaded.lighting !== false;
+        this.settings.username = loaded.username || "Player";
+        this.settings.musicVolume =
+            loaded.musicVolume ?? (loaded.music === false ? 0 : 100);
+        this.settings.sfxVolume =
+            loaded.sfxVolume ?? (loaded.sfx === false ? 0 : 100);
+        this.settings.shader = normalizeShaderMode(loaded.shader);
+        this.settings.renderer = setRendererMode(loaded.renderer);
+        setShaderMode(this.settings.shader);
+        this.updateShaderButtonLabel();
+    }
+
+    cycleShader() {
+        this.settings.shader = nextShaderMode(this.settings.shader);
+        setShaderMode(this.settings.shader);
+        this.updateShaderButtonLabel();
+
+        try {
+            const parsedSettings = JSON.parse(
+                localStorage.getItem("settings") || "{}",
+            );
+            const savedSettings =
+                parsedSettings && typeof parsedSettings === "object"
+                    ? parsedSettings
+                    : {};
+            localStorage.setItem(
+                "settings",
+                JSON.stringify({ ...savedSettings, shader: this.settings.shader }),
+            );
+        } catch (error) {
+            console.warn("Could not save the shader setting.", error);
+        }
+    }
+
+    updateShaderButtonLabel() {
+        const rendererButton = document.getElementById("pause-renderer-btn");
+        if (rendererButton) rendererButton.textContent = "Renderer - " + (this.settings.renderer === "canvas" ? "Classic" : "3D");
+        const button = document.getElementById("pause-shader-btn");
+        if (button) {
+            button.textContent =
+                "Shaders - " + getShaderModeLabel(this.settings.shader);
+        }
+    }
+
+    cycleRenderer() {
+        this.settings.renderer = setRendererMode(this.settings.renderer === "voxel" ? "canvas" : "voxel");
+        this.updateShaderButtonLabel();
+        try {
+            const saved = JSON.parse(localStorage.getItem("settings") || "{}");
+            localStorage.setItem("settings", JSON.stringify({ ...saved, renderer: this.settings.renderer }));
+        } catch (error) {
+            console.warn("Could not save the renderer setting.", error);
         }
     }
 

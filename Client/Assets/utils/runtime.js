@@ -25,9 +25,10 @@ export const runtime = {
     drawHeightOverlay: false,
     drawDebugMouseBlockOverlay: false,
     drawFileSizeOverlay: false,
-    drawFpsOverlay: true,
+    drawFpsOverlay: false,
     drawHitbox: false,
-    drawCoordinatesOverlay: true,
+    drawCoordinatesOverlay: false,
+    hideHud: false,
     camera: null,
     getBlock: null,
 };

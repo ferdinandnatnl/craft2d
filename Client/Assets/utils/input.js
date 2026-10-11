@@ -132,7 +132,7 @@ export class InputHandler {
         }
         if (key in this.keys) {
             this.keys[key] = false;
-            this.keysDown[key] = false;
+            // Keep a short tap queued until the game frame consumes it.
         }
     }
 

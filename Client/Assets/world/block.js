@@ -1011,6 +1011,7 @@ export class Block extends Square {
 
     setState(index) {
         const sprite = getBlock(this.blockType).states[index];
+        this.spriteName = sprite;
         this.setSprite(getSpriteUrl("blocks/" + sprite));
     }
 
@@ -1757,6 +1758,7 @@ export class Block extends Square {
         }
 
         const sprite = getSpriteUrl("blocks/" + blockSprite);
+        this.spriteName = blockSprite;
 
         this.spriteSize = getSpriteSize("blocks/" + blockSprite).width;
 

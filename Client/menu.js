@@ -5,9 +5,12 @@ import { deleteFromLdb, getFromLdb, ldb } from "./Assets/utils/indexDB.js";
 import { DEBUG_ACTIONS, DEFAULT_KEY_BINDINGS, GAMEPLAY_ACTIONS, REBINDABLE_ACTIONS, getActionLabel, getKeyDisplayName, loadKeyBindings, saveKeyBindings } from "./Assets/utils/keyBindings.js";
 import { downloadWorldSave } from "./buttonUtils.js";
 import { resolveAssetUrl } from "./Assets/utils/assetBundle.js";
+import {
+    getShaderModeLabel,
+    nextShaderMode,
+    normalizeShaderMode,
+} from "./Assets/utils/shaderModes.js";
 
-export const randomTextElement = document.querySelector(".splash");
-export const menuContainer = document.querySelector(".menu-container");
 export const worldsContainer = document.querySelector(".world-select");
 export const worldContainer = document.querySelector(".world-container");
 export const worldCreateContainer = document.querySelector("#world-create-container");
@@ -28,8 +31,6 @@ export const worldPlayButton = document.getElementById("play-selected-btn");
 export const removeWorldButton = document.getElementById("remove-world-btn");
 export const downloadWorldButton = document.getElementById("download-world-btn");
 export const uploadWorldButton = document.getElementById("upload-world-btn");
-export const footer = document.querySelector(".footer");
-export const panorama = document.querySelector(".panorama");
 
 // Server-related elements
 export const serverSelectContainer = document.querySelector(
@@ -62,6 +63,7 @@ export const musicVolumeLabel = document.getElementById("music-volume-label");
 export const sfxVolumeSlider = document.getElementById("sfx-volume-slider");
 export const sfxVolumeLabel = document.getElementById("sfx-volume-label");
 export const lightingToggleButton = document.getElementById("lighting-toggle-btn");
+export const shaderToggleButton = document.getElementById("shader-toggle-btn");
 export const difficultyToggleButton = document.getElementById("difficulty-toggle-btn");
 export const usernameInput = document.querySelector("#username-input");
 export const usernameFooter = document.querySelector("#username-footer");
@@ -72,7 +74,6 @@ export let selectedServerId = null;
 export let tempServerName = "New Server";
 export let tempServerIP = "";
 export let tempQuickConnectIP = "";
-export let randomTexts = [];
 
 export let lastPingTime = 0;
 export let cachedServerStatuses = [];
@@ -81,6 +82,8 @@ export let currentSettings = {
     musicVolume: 100,
     sfxVolume: 100,
     lighting: true,
+    shader: "photon",
+    renderer: "voxel",
     username: "",
 };
 
@@ -112,20 +115,6 @@ export const formatMap = {
     m: "text-decoration: line-through;",
     r: "", // Reset formatting
 };
-
-fetch("menu_text.json")
-    .then((response) => response.json())
-    .then((data) => {
-        randomTexts = data.random_text;
-        setRandomText();
-    })
-    .catch((error) => {});
-
-export function setRandomText() {
-    const randomPick =
-        randomTexts[Math.floor(Math.random() * randomTexts.length)];
-    randomTextElement.textContent = randomPick;
-}
 
 export const musicTracks = [
     "Mutation",
@@ -179,6 +168,12 @@ export function toggleLighting() {
             (selectedDifficulty === "peaceful" ? "Peaceful" : "Easy");
 }
 
+export function cycleShader() {
+    currentSettings.shader = nextShaderMode(currentSettings.shader);
+    shaderToggleButton.textContent =
+        "Shaders - " + getShaderModeLabel(currentSettings.shader);
+}
+
 export function saveSettings() {
     const submittedUsername = usernameInput.value?.trim();
 
@@ -206,6 +201,8 @@ export function loadSettings() {
             settings.musicVolume ?? (settings.music === false ? 0 : 100);
         currentSettings.sfxVolume =
             settings.sfxVolume ?? (settings.sfx === false ? 0 : 100);
+        currentSettings.shader = normalizeShaderMode(settings.shader);
+        currentSettings.renderer = settings.renderer === "canvas" ? "canvas" : "voxel";
     }
 
     if (musicVolumeSlider) {
@@ -219,6 +216,8 @@ export function loadSettings() {
     }
     lightingToggleButton.textContent =
         "Lighting - " + (currentSettings.lighting ? "On" : "Off");
+    shaderToggleButton.textContent =
+        "Shaders - " + getShaderModeLabel(currentSettings.shader);
 
     setUsernameFooter(currentSettings.username);
 
@@ -264,13 +263,6 @@ export function showTexturePacks() {
     if (selectedTexturePack === "default") {
         removeTexturePackButton.disabled = true;
     }
-}
-
-export function playGame() {
-    menuContainer.style.display = "none";
-    worldSelectContainer.style.display = "flex";
-    footer.style.display = "none";
-    populateWorlds();
 }
 
 export function playRandomMusic() {
@@ -356,20 +348,16 @@ export function initializeDefaultTexturePack() {
         JSON.parse(localStorage.getItem("texturePackList")) || [];
     const defaultPackId = "default";
 
-    if (!texturePackList.some((pack) => pack.id === defaultPackId)) {
-        const defaultPack = {
-            id: defaultPackId,
-            name: "Default",
-            dateAdded: new Date().toISOString(),
-            icon: "Assets/sprites/menu/worldPreview.png",
-            description: "Default Minecraft JS texture pack",
-        };
-        texturePackList.push(defaultPack);
-        localStorage.setItem(
-            "texturePackList",
-            JSON.stringify(texturePackList)
-        );
+    const builtIns = [
+        { id: "default", name: "Default", description: "Original Minecraft JS textures", icon: "Assets/sprites/menu/worldPreview.png" },
+        { id: "natural", name: "Natural 32x", description: "Earthy terrain with detailed stone, bark and foliage", icon: "Assets/sprites/materials/terrain-atlas.png" },
+    ];
+    for (const builtIn of builtIns) {
+        const existing = texturePackList.find((pack) => pack.id === builtIn.id);
+        if (existing) Object.assign(existing, builtIn);
+        else texturePackList.push({ ...builtIn, dateAdded: new Date().toISOString() });
     }
+    localStorage.setItem("texturePackList", JSON.stringify(texturePackList));
 
     const currentPack =
         localStorage.getItem("currentTexturePack") || defaultPackId;
@@ -423,7 +411,7 @@ export function selectTexturePack(id, selectedElement) {
     }
     selectedTexturePack = id;
 
-    removeTexturePackButton.disabled = id === "default";
+    removeTexturePackButton.disabled = ["default", "classic", "natural"].includes(id);
 
     localStorage.setItem("currentTexturePack", id);
 }
@@ -1268,7 +1256,7 @@ export async function fetchSkinDataUrl(username) {
 }
 
 export async function removeTexturePack() {
-    if (!selectedTexturePack || selectedTexturePack === "default") return;
+    if (!selectedTexturePack || ["default", "classic", "natural"].includes(selectedTexturePack)) return;
 
     const oldSelectedPack = selectedTexturePack;
 
@@ -1306,9 +1294,7 @@ export async function getTexturePackData(id) {
 
 export function gotoWorldCreate() {
     worldCreateContainer.style.display = "flex";
-    menuContainer.style.display = "none";
     worldSelectContainer.style.display = "none";
-    footer.style.display = "none";
 }
 
 export function createNewWorld() {
@@ -2268,35 +2254,14 @@ export function resetControlsToDefault() {
 }
 
 export function showMenu() {
-    menuContainer.style.display = "flex";
-    panorama.style.display = "block";
-    worldSelectContainer.style.display = "none";
-    footer.style.display = "block";
-    texturePackSelectContainer.style.display = "none";
-    serverSelectContainer.style.display = "none";
-    addServerContainer.style.display = "none";
-    quickConnectContainer.style.display = "none";
-    optionsContainer.style.display = "none";
-    if (skinsSelectContainer) skinsSelectContainer.style.display = "none";
-    worldCreateContainer.style.display = "none";
-
-    // Reset selected states
-    selectedWorld = null;
-    selectedServerId = null;
-    selectedTexturePack = null;
-
-    // Button states
-    worldPlayButton.disabled = true;
-    removeWorldButton.disabled = true;
-    downloadWorldButton.disabled = true;
-    removeServerButton.disabled = true;
-    connectButton.disabled = true;
+    hideMenu();
+    worldSelectContainer.style.display = "flex";
+    populateWorlds();
 }
 
 export function hideMenu() {
-    menuContainer.style.display = "none";
     worldSelectContainer.style.display = "none";
-    footer.style.display = "none";
+    worldCreateContainer.style.display = "none";
     texturePackSelectContainer.style.display = "none";
     serverSelectContainer.style.display = "none";
     addServerContainer.style.display = "none";

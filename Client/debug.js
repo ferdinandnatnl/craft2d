@@ -18,6 +18,7 @@ export function handleDebugging() {
 
 export function handleDebugInput() {
     if (runtime.world.player && !runtime.world.player.canMove) return; // e.g. pause menu open
+    if (input.isActionPressed("toggleHud")) runtime.hideHud = !runtime.hideHud;
     if (input.isActionPressed("debugChunkBorders")) toggleChunkBorders();
     if (input.isActionPressed("debugCamera")) toggleCamera();
     if (input.isActionPressed("debugHitbox")) toggleHitbox();

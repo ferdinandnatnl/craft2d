@@ -6,9 +6,9 @@
     margin: 0;
 }
 
-body {
+body:has(#canvas) {
     width: 100%;
-    height: 100vh;
+    height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -16,10 +16,13 @@ body {
     cursor: var(--drawMouse);
 
     flex-direction: column;
-    background: #000;
+    background: #10171e;
+    overscroll-behavior: none;
 }
 
-#canvas {
+#canvas,
+#shader-canvas,
+#voxel-canvas {
     image-rendering: crisp-edges; /* Firefox */
     image-rendering: -moz-crisp-edges; /* Firefox */
     image-rendering: -webkit-optimize-contrast; /* Safari */
@@ -28,14 +31,39 @@ body {
     image-rendering: optimizeSpeed; /* Optional fallback for older browsers */
 
     position: fixed;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    /* Fit in viewport while keeping 1600:900 ratio (letterboxing) */
-    width: min(100vw, 100vh * 1600 / 900);
-    height: min(100vh, 100vw * 900 / 1600);
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
 
     user-select: none;
+}
+
+#canvas {
+    z-index: 0;
+}
+
+#voxel-canvas {
+    display: none;
+    pointer-events: none;
+    z-index: 0;
+    image-rendering: auto;
+}
+
+body.voxel-active #voxel-canvas { display: block; }
+body.voxel-active #canvas { z-index: 2; opacity: 1; }
+
+#shader-canvas {
+    display: none;
+    z-index: 1;
+    pointer-events: none;
+}
+
+body.shaders-active #canvas {
+    opacity: 0;
+}
+
+body.shaders-active #shader-canvas {
+    display: block;
 }
 
 #loading {

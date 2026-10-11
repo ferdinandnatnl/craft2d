@@ -775,6 +775,11 @@ export class Entity {
         this.applyDrag(stepDeltaTime);
         this.clampHorizontalVelocity();
 
+        // Keep the last facing at rest, including collision-free flight.
+        if (!this.forceDirection && this.velocity.x !== 0) {
+            this.direction = Math.sign(this.velocity.x);
+        }
+
         if (this.noCollision) {
             this.calculateForce();
             this.position.x += this.velocity.x * stepDeltaTime;
@@ -784,8 +789,6 @@ export class Entity {
 
         const leftCollision = this.checkLeftCollision(nextPositionX);
         const rightCollision = this.checkRightCollision(nextPositionX);
-
-        if (!this.forceDirection) this.direction = this.velocity.x < 0 ? -1 : 1;
 
         let steppedUp = false;
 

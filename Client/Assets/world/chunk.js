@@ -3,7 +3,7 @@ import { Entities } from "../entities/entities.js";
 import { Items } from "@minecraftjs/shared/items.js";
 import { LootItem, LootTable } from "@minecraftjs/shared/lootTable.js";
 import { playPositionalSound } from "../game/sounds.js";
-import { Vector2, lerpEaseInOut, randomRange } from "../utils/classes.js";
+import { Vector2, randomRange } from "../utils/classes.js";
 import { BLOCK_SIZE, CAVES_THRESHOLD, CHUNK_HEIGHT, CHUNK_WIDTH, TERRAIN_HEIGHT, mobSpawnDelay } from "../utils/globals.js";
 import { OverworldBiomes } from "@minecraftjs/shared/biome.js";
 import { Block, getBlock } from "./block.js";
@@ -18,7 +18,8 @@ export class Chunk {
         width = 8,
         biome = OverworldBiomes.Plains,
         previousChunk = null,
-        generated = false
+        generated = false,
+        dimension = Dimensions.Overworld
     ) {
         this.world = world;
         this.biome = biome;
@@ -30,7 +31,7 @@ export class Chunk {
         this.height = CHUNK_HEIGHT;
         this.generated = generated;
 
-        this.dimension = Dimensions.Overworld;
+        this.dimension = dimension;
 
         this.entities = [];
         this.update = [];
@@ -152,141 +153,7 @@ export class Chunk {
     }
 
     getHeight(x) {
-        const worldX = this.x / BLOCK_SIZE + x;
-        const heightNoise = this.biome.heightNoise;
-        const dimension = getDimension(this.dimension);
-        const noiseMaps = dimension.noiseMaps;
-
-        const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-        const lerp = (a, b, t) => a + (b - a) * t;
-        const normalizeNoise = (value, noise) => {
-            const min = noise.min - noise.intensity;
-            const max = noise.min + noise.intensity;
-            if (max === min) return 0.5;
-            return clamp((value - min) / (max - min), 0, 1);
-        };
-
-        // Determine left and right neighbor chunks.
-        // Only use leftChunk if its x is less than this.x.
-        let leftChunk = null;
-        if (
-            this.previousChunk &&
-            this.previousChunk.x < this.x &&
-            this.previousChunk.biome.heightNoise !== heightNoise
-        ) {
-            leftChunk = this.previousChunk;
-        }
-
-        // Look up the right neighbor chunk.
-        const rightChunkX = this.x + CHUNK_WIDTH * BLOCK_SIZE;
-        let rightChunk = getDimensionChunks(activeDimension).get(rightChunkX);
-        if (
-            rightChunk &&
-            rightChunk.x > this.x &&
-            rightChunk.biome.heightNoise === heightNoise
-        ) {
-            // If the biome is the same, we don't need blending.
-            rightChunk = null;
-        }
-
-        // Determine blend factors based on how far the block is from the chunk edges.
-        let leftBlend = 0;
-        if (leftChunk) {
-            // Near the left edge, blend factor is high (1 at edge, 0 in the middle)
-            leftBlend = (CHUNK_WIDTH - x) / CHUNK_WIDTH;
-        }
-
-        let rightBlend = 0;
-        if (rightChunk) {
-            // Near the right edge, blend factor is high (0 at left edge, 1 at edge)
-            rightBlend = x / CHUNK_WIDTH;
-        }
-
-        const blendBiomeLayer = (offset, scale) => {
-            const currentVal = heightNoise.getNoise(worldX, offset, scale);
-            if (leftBlend > 0 && leftChunk) {
-                const leftVal = leftChunk.biome.heightNoise.getNoise(
-                    worldX,
-                    offset,
-                    scale
-                );
-                return lerpEaseInOut(leftVal, currentVal, 1 - leftBlend);
-            }
-            if (rightBlend > 0 && rightChunk) {
-                const rightVal = rightChunk.biome.heightNoise.getNoise(
-                    worldX,
-                    offset,
-                    scale
-                );
-                return lerpEaseInOut(currentVal, rightVal, rightBlend);
-            }
-            return currentVal;
-        };
-
-        const biomeLayer1 = blendBiomeLayer(0, 1);
-        const biomeLayer2 = blendBiomeLayer(200000, 2);
-        const biomeNoise = (biomeLayer1 + biomeLayer2) / 2;
-
-        // Blend the biome's minimum height value.
-        let currentMin = heightNoise.min;
-        let blendedMin = currentMin;
-        if (leftBlend > 0 && leftChunk) {
-            blendedMin = lerpEaseInOut(
-                leftChunk.biome.heightNoise.min,
-                currentMin,
-                1 - leftBlend
-            );
-        } else if (rightBlend > 0 && rightChunk) {
-            blendedMin = lerpEaseInOut(
-                currentMin,
-                rightChunk.biome.heightNoise.min,
-                rightBlend
-            );
-        }
-
-        const biomeBaseline = blendedMin;
-        const biomeDetail = biomeNoise - blendedMin;
-
-        const continentalness = normalizeNoise(
-            noiseMaps.continentalness.getNoise(worldX, 0),
-            noiseMaps.continentalness
-        );
-        const erosion = normalizeNoise(
-            noiseMaps.erosion.getNoise(worldX, 10000),
-            noiseMaps.erosion
-        );
-        const peaks = normalizeNoise(
-            noiseMaps.peaks.getNoise(worldX, 20000),
-            noiseMaps.peaks
-        );
-        const heightDetail =
-            noiseMaps.heightDetail.getNoise(worldX, 30000) -
-            noiseMaps.heightDetail.min;
-
-        const continentHeight = lerp(-20, 30, continentalness);
-        const erosionScale = lerp(1, 0.25, erosion);
-        const peakBoost = Math.pow(peaks, 2) * 28;
-        const ridgeBoost = Math.pow(1 - Math.abs(peaks * 2 - 1), 2) * 16;
-
-        let height =
-            biomeBaseline +
-            continentHeight * 0.6 +
-            biomeDetail * 1.1 +
-            heightDetail * 0.4 +
-            (peakBoost + ridgeBoost) * erosionScale;
-
-        const caveNoise = noiseMaps.cave.getNoise(
-            worldX,
-            Math.max(1, Math.floor(height))
-        );
-        const caveFactor = clamp(
-            (CAVES_THRESHOLD - caveNoise) / CAVES_THRESHOLD,
-            0,
-            1
-        );
-        height -= caveFactor * 3;
-
-        return Math.floor(clamp(height, 1, this.height - 2));
+        return this.world.generator.getTerrainHeight(this.x / BLOCK_SIZE + x, this.dimension);
     }
 
     getWorldX(x) {
@@ -373,6 +240,9 @@ export class Chunk {
     }
 
     generateWater() {
+        // Flat worlds use a fixed surface, so the normal height noise cannot
+        // decide where water belongs. Keep new flat chunks dry and consistent.
+        if (this.world.generator.specialWorldProps.flat) return;
         const maxWaterLevel = TERRAIN_HEIGHT + this.biome.waterLevel; // Calculate max water height
 
         for (let x = 0; x < this.width; x++) {

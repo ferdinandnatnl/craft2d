@@ -25,7 +25,7 @@
 
 -   buildMultiplayerLeaveSnapshot
 -   sendMultiplayerLeaveSync
--   window.leaveGameToTitle
+-   window.leaveGameToWorlds
 
 ## Assets/multiplayer/messageHandler.js
 

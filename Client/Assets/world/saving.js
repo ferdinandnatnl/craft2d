@@ -225,13 +225,14 @@ export function loadWorldFromLocalStorage() {
         console.log("Loading world from local storage");
         selectedWorld = JSON.parse(selectedWorld);
     } else {
-        if (SPAWN_PLAYER) {
-            setTimeout(() => {
-                runtime.world.spawnPlayer();
-            }, 100);
-        }
-
-        return;
+        selectedWorld = {
+            id: Date.now(),
+            name: "New World",
+            seed: Math.floor(Math.random() * 100000000),
+            gameMode: 0,
+            difficulty: "easy",
+        };
+        localStorage.setItem("selectedWorld", JSON.stringify(selectedWorld));
     }
 
     if (selectedWorld.difficulty && runtime.world) {
