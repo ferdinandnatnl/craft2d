@@ -1048,7 +1048,7 @@ export class Chat {
             this.message("Return home for ender pearls and the End shrine.", "", Colors.Aqua);
             return;
         }
-        this.message("1. Frame a 2 x 3 air gap with 10 obsidian.", "", Colors.Aqua);
+        this.message("1. Frame a 1 x 3 gap with 8 obsidian (or wider).", "", Colors.Aqua);
         this.message("2. Ignite the bottom inside block; walk in.", "", Colors.Aqua);
         this.message("3. Nether: defeat blazes for rods.", "", Colors.Aqua);
         this.message("4. Craft blaze powder; hunt endermen for pearls.", "", Colors.Aqua);

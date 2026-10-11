@@ -622,6 +622,15 @@ export class Player extends Entity {
             return;
         }
 
+        // A frame lit before it was completed can be activated by clicking
+        // the existing fire again, without breaking it first.
+        if (this.hoverBlock.blockType === Blocks.Fire) {
+            getDimensionChunks(activeDimension)
+                .get(this.hoverBlock.chunkX)
+                ?.checkForPortal(this.hoverBlock.x, this.hoverBlock.y);
+            return;
+        }
+
         // Check if block is placeable
         if (!this.checkBlockForPlacing(getBlock(Blocks.Fire))) return;
 

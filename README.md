@@ -45,9 +45,10 @@ the optional **Natural 32x** pack is available under Options → Texture Packs.
 
 ### Survival progression
 
-Type `/progress` in chat for an in-game guide. In this 2D world, place ten
-obsidian blocks around a 2 × 3 empty center (the corners are optional). Use
-flint and steel on a bottom air block inside the frame, then walk into the
+Type `/progress` in chat for an in-game guide. In this 2D world, place at least
+eight obsidian blocks around a 1 × 3 empty center (the corners are optional).
+A 2 × 3 opening also works. Use flint and steel on a bottom air block inside
+the frame, then walk into the
 portal to enter the Nether. Blazes there drop rods, which craft into blaze
 powder. Endermen drop pearls; combine
 one pearl and one blaze powder to make an Eye of Ender. Use an eye to find the
@@ -57,11 +58,11 @@ return home. Newly generated Overworld chunks can also contain ruined portals
 with supplies to repair and light them.
 
 ```text
-  O O
-O . . O
-O . . O
-O F . O
-  O O
+  O
+O . O
+O . O
+O F O
+  O
 ```
 
 `O` is obsidian, `.` is air, and `F` is the inside air block to ignite.

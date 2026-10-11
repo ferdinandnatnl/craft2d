@@ -7,7 +7,8 @@ export function findNetherPortalFrame(x, y, blockAt, { air, fire, obsidian }) {
     while (x - left <= 21 && blockAt(left, y) !== obsidian) left--;
     while (right - x <= 21 && blockAt(right, y) !== obsidian) right++;
     const width = right - left - 1;
-    if (width < 2 || width > 21 || blockAt(left, y) !== obsidian || blockAt(right, y) !== obsidian) return null;
+    // In a side view, a one-block opening is wide enough for the player.
+    if (width < 1 || width > 21 || blockAt(left, y) !== obsidian || blockAt(right, y) !== obsidian) return null;
 
     let top = y;
     let bottom = y;

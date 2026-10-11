@@ -31,6 +31,24 @@ test("a cornerless ten-obsidian frame lights from inside", () => {
     });
 });
 
+test("a one-block-wide 2D frame lights from its bottom opening", () => {
+    const blocks = new Map();
+    const set = (x, y, type) => blocks.set(`${x},${y}`, type);
+    const get = (x, y) => blocks.get(`${x},${y}`) ?? AIR;
+    for (let x = 0; x <= 2; x++) {
+        set(x, 0, OBSIDIAN);
+        set(x, 4, OBSIDIAN);
+    }
+    for (let y = 1; y <= 3; y++) {
+        set(0, y, OBSIDIAN);
+        set(2, y, OBSIDIAN);
+    }
+    set(1, 3, FIRE);
+    assert.deepEqual(findNetherPortalFrame(1, 3, get, types), {
+        left: 0, right: 2, top: 0, bottom: 4,
+    });
+});
+
 test("a missing frame block or blocked interior prevents lighting", () => {
     const broken = frame();
     broken.set(3, 2, AIR);
