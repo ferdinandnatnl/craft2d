@@ -194,7 +194,7 @@ export class Chat {
             true,
         );
         this.message(
-            "Welcome to 2dcraft.com! Type /help for commands.",
+            "Welcome to craft2d.com! Type /help for commands.",
             "",
             Colors.Green,
         );

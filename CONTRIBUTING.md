@@ -1,4 +1,4 @@
-# Contributing to 2dcraft.com
+# Contributing to craft2d.com
 
 Thank you for your interest in contributing! We welcome help from everyone, regardless of experience level. Every contribution counts, whether it's a bug report, a suggestion, or a code change.
 

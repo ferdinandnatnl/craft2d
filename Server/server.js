@@ -30,7 +30,7 @@ const defaultProperties = {
     serverPort: 25565,
     allowNether: true,
     levelName: "world",
-    motd: "A 2dcraft.com Server",
+    motd: "A craft2d.com Server",
     maxPlayers: 20,
 };
 
@@ -171,7 +171,7 @@ function loadBannedIPs() {
 }
 
 function beforeInit() {
-    serverLog("Welcome to the 2dcraft.com server panel!");
+    serverLog("Welcome to the craft2d.com server panel!");
     loadProperties();
     loadUserCache();
     loadBannedIPs();
@@ -228,7 +228,7 @@ wss.on("connection", (ws) => {
                             motd: properties.motd,
                             maxPlayers: properties.maxPlayers,
                             onlinePlayers: players.length,
-                            version: "2dcraft.com 1.0",
+                            version: "craft2d.com 1.0",
                             icon: serverIcon,
                             requestId: data.message?.requestId || null,
                         },
