@@ -15,6 +15,7 @@ import { Warden } from "../entities/mobs/warden.js";
 import { Minecart } from "../entities/minecart.js";
 import { CreeperMinion, CreeperMinionEgg } from "../entities/mobs/creeperMinion.js";
 import { Catfish } from "../entities/mobs/catfish.js";
+import { Centipede } from "../entities/mobs/centipede.js";
 
 export const AUTOSAVE_INTERVAL = 60000;
 
@@ -44,7 +45,9 @@ export let currentSave = {
     boats: [],
     golems: [],
     catfish: [],
+    centipedes: [],
     playerBoatUUID: null,
+    playerStatusEffects: null,
 };
 
 export function saveWorld(message = true, toFile = false) {
@@ -111,6 +114,7 @@ export function saveWorld(message = true, toFile = false) {
         currentSave.activeDimension = activeDimension;
         currentSave.flying = runtime.world.player.abilities.flying;
         currentSave.playerBoatUUID = runtime.world.player.boat?.UUID ?? null;
+        currentSave.playerStatusEffects = runtime.world.player.getStatusEffectSaveData();
         if (runtime.world.player.spawnPoint) {
             currentSave.spawnPoint = JSON.stringify(runtime.world.player.spawnPoint);
         }
@@ -126,6 +130,7 @@ export function saveWorld(message = true, toFile = false) {
             health: entity.health,
             homeX: entity.homeX,
             dimension: entity.dimension,
+            statusEffects: entity.getStatusEffectSaveData(),
         }));
     currentSave.boats = runtime.world.entities
         .filter(entity => entity.isBoat)
@@ -157,6 +162,9 @@ export function saveWorld(message = true, toFile = false) {
         }));
     currentSave.catfish = runtime.world.entities
         .filter(entity => entity.isCatfish && entity.health > 0)
+        .map(entity => entity.createSaveData());
+    currentSave.centipedes = runtime.world.entities
+        .filter(entity => entity.isCentipede && entity.health > 0)
         .map(entity => entity.createSaveData());
     currentSave.minecarts = runtime.world.entities
         .filter(entity => entity.name === "Minecart")
@@ -445,6 +453,7 @@ export async function loadWorld(save) {
             saved.UUID,
         );
         villager.dimension = dimensionIndex;
+        villager.loadStatusEffectSaveData(saved.statusEffects);
         chunk.entities.push(villager);
     }
 
@@ -578,6 +587,37 @@ export async function loadWorld(save) {
         catfish.dimension = dimensionIndex;
         if (!chunk.entities.includes(catfish)) chunk.entities.push(catfish);
     }
+
+    const savedCentipedes = Array.isArray(currentSave.centipedes)
+        ? currentSave.centipedes : [];
+    for (const saved of savedCentipedes) {
+        if (!saved || typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) || saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) continue;
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const centipede = runtime.world.summonEntity(
+            Centipede,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                health: Math.min(saved.health, 35),
+                segmentCount: Number.isFinite(saved.segmentCount)
+                    ? Math.max(5, Math.min(8, Math.floor(saved.segmentCount))) : 5,
+                segmentTrail: saved.segmentTrail,
+                myChunkX: chunkX,
+            },
+            false,
+            saved.UUID,
+        );
+        centipede.dimension = dimensionIndex;
+        if (!chunk.entities.includes(centipede)) chunk.entities.push(centipede);
+    }
+
     const savedMinecarts = Array.isArray(currentSave.minecarts)
         ? currentSave.minecarts : [];
     for (const saved of savedMinecarts) {
@@ -666,6 +706,7 @@ export async function loadWorld(save) {
                 runtime.hotbar.currentSlot = currentSave.currentSlot;
 
             runtime.world.player.setGamemode(currentSave.gamemode);
+            runtime.world.player.loadStatusEffectSaveData(currentSave.playerStatusEffects);
 
             if (currentSave.health !== undefined)
                 runtime.world.player.health = currentSave.health;

@@ -504,7 +504,25 @@ export class Chunk {
         }
         if (!floors.length) return;
 
-        for (let i = 0; i < remaining && floors.length; i++) {
+        const hasCentipede = this.entities.some(entity =>
+            entity.isCentipede && entity.health > 0,
+        );
+        let spawnedCentipede = false;
+        if (!hasCentipede && remaining > 0 && randomRange(0, 12) === 0) {
+            const floor = floors.splice(randomRange(0, floors.length), 1)[0];
+            const centipede = this.world.summonEntity(
+                Entities.Centipede,
+                new Vector2(this.x + floor.x * BLOCK_SIZE, 0),
+                { myChunkX: this.x },
+            );
+            centipede.position.y = this.world.userBlockYToWorld(floor.y) -
+                centipede.hitbox.y;
+            centipede.dimension = this.dimension;
+            this.entities.push(centipede);
+            spawnedCentipede = true;
+        }
+
+        for (let i = spawnedCentipede ? 1 : 0; i < remaining && floors.length; i++) {
             const floor = floors.splice(randomRange(0, floors.length), 1)[0];
             const choices = this.getBlockType(floor.x, floor.y + 2) === Blocks.Air
                 ? this.biome.googlies

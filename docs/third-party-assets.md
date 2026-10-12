@@ -15,13 +15,16 @@ release by Alex's Mobs contributors:
 - `Client/Assets/sprites/entity/alexsmobs/crocodile_crown.png`
 - `Client/Assets/sprites/entity/alexsmobs/caiman.png`
 - `Client/Assets/sprites/entity/alexsmobs/catfish_{small,medium,large}*.png`
+- `Client/Assets/sprites/entity/alexsmobs/cave_centipede*.png`
 - `Client/Assets/sprites/blocks/alexsmobs/caiman_eggs*.png`
 - `Client/Assets/sprites/items/alexsmobs/caiman_egg.png`
 - `Client/Assets/sprites/items/alexsmobs/raw_catfish.png`
 - `Client/Assets/sprites/items/alexsmobs/cooked_catfish.png`
 - `Client/Assets/sprites/items/alexsmobs/{small,medium}_catfish.png`
 - `Client/Assets/sprites/items/alexsmobs/large_catfish_bucket.png`
+- `Client/Assets/sprites/items/alexsmobs/centipede_leg.png`
 - `Client/Assets/audio/sfx/alexsmobs/caiman_*.ogg`
+- `Client/Assets/audio/sfx/alexsmobs/centipede_*.ogg`
 
 The Sea Lantern and Sea Pickle textures and Cod hurt/death sounds are from the
 official Minecraft Java 1.20.1 client assets. The Sea Lantern texture contains
@@ -41,6 +44,10 @@ with the original model scale and side-scrolling orientation.
 The Catfish rig in `Client/Assets/rendering/alexsMobsCatfishRig.js` translates
 the source Small, Medium, and Large model geometry and uses each original
 texture atlas plus its alternate spit texture.
+
+The Centipede rig in `Client/Assets/rendering/alexsMobsCentipedeRig.js` uses
+the original atlas and eye overlay. It translates the source head, body, and
+tail into repeated side-on segments; the limb and tail geometry is simplified.
 
 Sources:
 

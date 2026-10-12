@@ -29,6 +29,7 @@ import { ChemicalX } from "./projectiles/chemicalX.js";
 import { MutantBoneArrow, MutantIceShard } from "./projectiles/mutantProjectiles.js";
 import { CreeperMinion, CreeperMinionEgg } from "./mobs/creeperMinion.js";
 import { Catfish } from "./mobs/catfish.js";
+import { Centipede } from "./mobs/centipede.js";
 
 export const Entities = Object.freeze({
     Pig: Pig,
@@ -61,6 +62,7 @@ export const Entities = Object.freeze({
     CreeperMinion: CreeperMinion,
     CreeperMinionEgg: CreeperMinionEgg,
     Catfish: Catfish,
+    Centipede: Centipede,
     MutantSkeleton: MutantSkeleton,
     MutantEnderman: MutantEnderman,
     MutantSnowGolem: MutantSnowGolem,

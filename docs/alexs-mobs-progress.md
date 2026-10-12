@@ -41,7 +41,7 @@ Pending means the source behavior has not been ported and verified. Do not mark 
 | Caiman | Partial | Partial | Partial | Partial | Partial | Complete | Partial |
 | Capuchin Monkey | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 | Catfish | Partial | Partial | Partial | Partial | Partial | Complete | Partial |
-| Centipede | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
+| Centipede | Partial | Partial | Partial | Partial | Partial | Partial | Partial |
 | Cockroach | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 | Comb Jelly | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 | Cosmic Cod | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
@@ -190,6 +190,26 @@ lantern attraction, pickle-triggered spitting, feeding, prey handling, bucket
 and save state, and renderer setup. See
 `Client/tests/alexsMobsCatfish.test.js`. The live browser view has not yet been
 checked.
+
+## Centipede slice
+
+The first Centipede slice adds the source 35-health, six-armor head, its cave
+spawn egg and leg drops, dark-cave spawning, light avoidance, and hostility
+toward players, villagers, and Cockroaches. Successful bites deal eight damage
+and apply Poison with the source difficulty duration and amplifier. The source
+five-to-eight body count follows a saved movement trail, and the custom 3D rig
+uses the original texture atlas and Centipede audio. Player and villager Poison
+state and the Centipede's segment trail persist in world saves.
+
+The 2D game represents the source multipart head, body, and tail as one entity
+with an articulated visual chain. Hits still resolve on the head entity, and
+the model translation simplifies some source leg and tail geometry. Cave spawn
+weight is adapted to a low-probability roll in this game's dark-cave spawn
+cycle. Wall climbing, Centipede leggings and their armor effect, potion
+resistance, source spawn weighting, and live browser inspection remain pending.
+Five focused tests cover source stats and drops, segment spacing, targeting and
+poison, armor and save state, and rig construction. See
+`Client/tests/alexsMobsCentipede.test.js`.
 
 ### Batch files
 

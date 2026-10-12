@@ -6,6 +6,7 @@ import { getBlock } from "../world/block.js";
 import { getBoatPartPitch, getHeadPitch, getLimbPitch, getSwimPartPitch } from "./entityPose.js";
 import { skinBox, skinLimbHalf } from "./entityGeometry.js";
 import { createAlexCatfishRig, updateAlexCatfishRig } from "./alexsMobsCatfishRig.js";
+import { createAlexCentipedeRig, updateAlexCentipedeRig } from "./alexsMobsCentipedeRig.js";
 import { mutantPartParent, mutantPartPitch, mutantWalkBob } from "./mutantPose.js";
 import { MUTANT_CREEPER_RIG } from "./mutantCreeperRig.js";
 import { renderLightTint } from "./renderLight.js";
@@ -86,6 +87,14 @@ export class VoxelEntities {
         if (entity.isCatfish) {
             const record = {
                 ...createAlexCatfishRig(image, entity.catfishSize),
+                source: image.src,
+            };
+            this.scene.add(record.group);
+            return record;
+        }
+        if (entity.isCentipede) {
+            const record = {
+                ...createAlexCentipedeRig(image, entity.segmentCount),
                 source: image.src,
             };
             this.scene.add(record.group);
@@ -816,6 +825,16 @@ export class VoxelEntities {
                 record.material.color.setRGB(light, light, light);
                 record.material.emissive.set(entity.body.flashingColor || 0);
                 record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+                continue;
+            }
+            if (record.centipedeRig) {
+                updateAlexCentipedeRig(record, entity, seconds);
+                for (const material of record.materials) {
+                    material.color.setRGB(light, light, light);
+                    material.emissive.set(entity.body.flashingColor || 0);
+                    material.emissiveIntensity = entity.body.flashingColor ? 0.65 :
+                        (material === record.eyeMaterial ? 0.12 : 0);
+                }
                 continue;
             }
             if (record.eggModel) {

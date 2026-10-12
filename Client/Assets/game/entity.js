@@ -151,6 +151,9 @@ export class Entity {
         this.air = air;
         this.maxAir = maxAir;
         this.canDrown = canDrown;
+        this.poisonTicks = 0;
+        this.poisonAmplifier = 0;
+        this.poisonDamageTicks = 0;
 
         this.flashingColor = false;
 
@@ -550,11 +553,63 @@ export class Entity {
     }
 
     entityTickUpdate() {
+        this.statusEffectsLogic();
         this.fireLogic();
         this.voidLogic();
         this.portalLogic();
         this.footstepEmitterLogic();
         this.airLogic();
+    }
+
+    applyPoison(durationTicks, amplifier = 0) {
+        if (!Number.isFinite(durationTicks) || durationTicks <= 0) return false;
+        const nextAmplifier = Math.max(0, Math.min(4, Math.floor(amplifier)));
+        if (this.poisonTicks <= 0 || nextAmplifier > this.poisonAmplifier) {
+            this.poisonAmplifier = nextAmplifier;
+            this.poisonTicks = Math.floor(durationTicks);
+            this.poisonDamageTicks = Math.max(1, 25 >> nextAmplifier);
+        } else if (nextAmplifier === this.poisonAmplifier) {
+            this.poisonTicks = Math.max(this.poisonTicks, Math.floor(durationTicks));
+        }
+        return true;
+    }
+
+    statusEffectsLogic() {
+        if (this.poisonTicks <= 0) return;
+        this.poisonTicks--;
+        this.poisonDamageTicks--;
+        if (this.poisonDamageTicks <= 0) {
+            if (this.health > 1) {
+                this.hit?.(1, this.position.x + this.hitbox.x / 2, 0, "Poison");
+            }
+            this.poisonDamageTicks = Math.max(1, 25 >> this.poisonAmplifier);
+        }
+        if (this.poisonTicks <= 0) {
+            this.poisonTicks = 0;
+            this.poisonAmplifier = 0;
+            this.poisonDamageTicks = 0;
+        }
+    }
+
+    getStatusEffectSaveData() {
+        if (this.poisonTicks <= 0) return null;
+        return {
+            poisonTicks: this.poisonTicks,
+            poisonAmplifier: this.poisonAmplifier,
+            poisonDamageTicks: this.poisonDamageTicks,
+        };
+    }
+
+    loadStatusEffectSaveData(saved) {
+        if (!saved || typeof saved !== "object") return;
+        this.poisonTicks = Number.isFinite(saved.poisonTicks)
+            ? Math.max(0, Math.min(400, Math.floor(saved.poisonTicks))) : 0;
+        this.poisonAmplifier = Number.isFinite(saved.poisonAmplifier)
+            ? Math.max(0, Math.min(4, Math.floor(saved.poisonAmplifier))) : 0;
+        this.poisonDamageTicks = this.poisonTicks > 0 &&
+            Number.isFinite(saved.poisonDamageTicks)
+            ? Math.max(1, Math.min(25, Math.floor(saved.poisonDamageTicks)))
+            : Math.max(1, 25 >> this.poisonAmplifier);
     }
 
     airLogic() {

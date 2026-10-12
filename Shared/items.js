@@ -30,6 +30,7 @@ const SPAWN_EGG_COLORS = Object.freeze({
     Squid: { baseColor: "#223B4D", overlayColor: "#708899" },
     Warden: { baseColor: "#0F4649", overlayColor: "#39D6E0" },
     Catfish: { baseColor: "#807757", overlayColor: "#8A7466" },
+    Centipede: { baseColor: "#342B2E", overlayColor: "#733449" },
 });
 
 export const Items = Object.freeze({
@@ -183,6 +184,7 @@ export const Items = Object.freeze({
     SeaLantern: 1532,
     SeaPickle: 1533,
     PrismarineCrystals: 1534,
+    CentipedeLeg: 1535,
 
     PigSpawnEgg: 3007,
     CowSpawnEgg: 3008,
@@ -208,6 +210,7 @@ export const Items = Object.freeze({
     SmallCatfishBucket: 3034,
     MediumCatfishBucket: 3035,
     LargeCatfishBucket: 3036,
+    CentipedeSpawnEgg: 3037,
     MutantZombieSpawnEgg: 3000,
     MutantCreeperSpawnEgg: 3001,
     MutantSkeletonSpawnEgg: 3002,
@@ -1222,6 +1225,18 @@ export const items = [
         sprite: "spawn_egg",
         spawnEntity: "Warden",
         spawnEggColors: SPAWN_EGG_COLORS.Warden,
+    }),
+    new Item({
+        itemId: Items.CentipedeSpawnEgg,
+        name: "Centipede Spawn Egg",
+        sprite: "spawn_egg",
+        spawnEntity: "Centipede",
+        spawnEggColors: SPAWN_EGG_COLORS.Centipede,
+    }),
+    new Item({
+        itemId: Items.CentipedeLeg,
+        name: "Centipede Leg",
+        sprite: "alexsmobs/centipede_leg.png",
     }),
     new Item({
         itemId: Items.CatfishSpawnEgg,
