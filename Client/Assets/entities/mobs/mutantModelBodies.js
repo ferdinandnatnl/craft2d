@@ -164,16 +164,16 @@ export function createMutantModelBody(entityTypeName) {
             zIndex,
             flip: true,
             eyes: options.eyes,
-            sways: options.sways,
-            swayIntensity: 2,
         });
         part.mutantCube = { u, v, width, height, depth };
         parts[name] = part;
     }
 
-    return new Body({
+    const body = new Body({
         sprite: model.texture,
         renderScale: 8,
         parts,
     });
+    body.mutantModelType = entityTypeName;
+    return body;
 }

@@ -13,6 +13,8 @@ import { VoxelMaterials, FaceBatch } from "./materials.js";
 import { VoxelEntities } from "./entities.js";
 import { syncSliceCamera } from "./projection.js";
 import { terrainColumnFaces, terrainSkyExposure, scenerySeed } from "./heightfield.js";
+import { renderLightTint } from "./renderLight.js";
+import { daylightFactor } from "../utils/daylight.js";
 
 const clamp = THREE.MathUtils.clamp;
 const DAY_SUN = new THREE.Color(0xffebcf);
@@ -20,7 +22,7 @@ const DUSK_SUN = new THREE.Color(0xffbb82);
 const DAY_AMBIENT = new THREE.Color(0xc2d7f2);
 const DAY_FOG = new THREE.Color(0xb9cbd6);
 const DUSK_FOG = new THREE.Color(0x947b83);
-const NIGHT_FOG = new THREE.Color(0x162941);
+const NIGHT_FOG = new THREE.Color(0x233954);
 const noise = (x, z) => tooloud.Perlin.noise(x * 0.035, z * 0.035, 311);
 const random = (x, z) => {
     const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
@@ -30,6 +32,18 @@ const solid = (block) => {
     const def = block && getBlock(block.blockType);
     return !!(def && !def.air && !def.transparent && !def.fluid && !block.cutoff);
 };
+
+function addEndFrameEye(batch, x, y, z, light) {
+    const x0 = x + 0.25, x1 = x + 0.75;
+    const z0 = z + 0.25, z1 = z + 0.75;
+    const y0 = y + 13 / 16, y1 = y + 1;
+    const topUv = [0.25, 0.25, 0.75, 0.75];
+    const sideUv = [0.25, 0.8125, 0.75, 1];
+    batch.quad("endframe_eye", {}, [[x0,y1,z1],[x1,y1,z1],[x1,y1,z0],[x0,y1,z0]], [0,1,0], light, topUv);
+    batch.quad("endframe_eye", {}, [[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]], [0,0,1], light, sideUv);
+    batch.quad("endframe_eye", {}, [[x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0]], [-1,0,0], light, sideUv);
+    batch.quad("endframe_eye", {}, [[x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1]], [1,0,0], light, sideUv);
+}
 
 export class VoxelRenderer {
     constructor(canvas) {
@@ -166,7 +180,12 @@ export class VoxelRenderer {
         for (const { block, def, x, y, wall } of blocks) {
             const h = Math.max(0.02, 1 - (block.cutoff || 0));
             const z = wall ? -1.5 : -0.5;
-            const light = lighting ? Math.max(0.07, Math.min(1, (block.lightLevel ?? 15) / 15)) : 1;
+            const exposureBlock = wall
+                ? world.getBlockAtWorldPosition(x * BLOCK_SIZE, y * BLOCK_SIZE, false)
+                : block;
+            const skyExposure = exposureBlock?.skyExposure ??
+                (exposureBlock?.sunLight ? 1 : 0);
+            const light = renderLightTint(block.lightLevel, skyExposure, lighting);
             const shade = wall ? light * 0.72 : light;
             const sprite = block.spriteName || def.sprite;
             if (!sprite) continue;
@@ -228,10 +247,12 @@ export class VoxelRenderer {
                 continue;
             }
             const neighbor = (dx, dy) => solid(world.getBlockAtWorldPosition((x + dx) * BLOCK_SIZE, (y + dy) * BLOCK_SIZE, wall));
+            const frame = def.specialType === SpecialType.EndPortalFrame;
             batch.box(sprite, { plant: def.transparent, emissive: !!block.lightSourceLevel },
-                x + ox, -y - 1 - oy, z, 1, h, 1, shade,
-                { left: !neighbor(-1,0), right: !neighbor(1,0), top: !neighbor(0,-1) || h < 1,
-                    bottom: !neighbor(0,1), back: false });
+                x + ox, -y - 1 - oy, z, 1, frame ? h * 13 / 16 : h, 1, shade,
+                { left: !neighbor(-1,0), right: !neighbor(1,0), top: frame || !neighbor(0,-1) || h < 1,
+                    bottom: !neighbor(0,1), back: false }, def.faceSprites || {});
+            if (frame && sprite === "endframe_eye") addEndFrameEye(batch, x + ox, -y - 1 - oy, z, shade);
         }
         // Block face lighting avoids coarse shadow-map artifacts on flat terrain.
         batch.build(this.terrain, { castShadow: false, receiveShadow: false });
@@ -441,17 +462,18 @@ export class VoxelRenderer {
     }
 
     updateLighting(time, seconds, dimension, lighting, effects) {
-        let day = time <= 3 ? 1 : time < 3.5 ? (3.5-time)/0.5 : time <= 6.5 ? 0 : time < 6.7 ? (time-6.5)/0.2 : 1;
-        if (getDimension(dimension).alwaysDay || !lighting) day=1;
+        let day = daylightFactor(time);
+        if (dimension !== Dimensions.Overworld || getDimension(dimension).alwaysDay || !lighting) day=1;
+        this.renderer.toneMappingExposure = 1.15 + (1 - day) * 1.0;
         const x=this.camera.position.x, y=this.camera.position.y;
         const elevation=Math.max(0.2, Math.abs(Math.sin(time)));
-        const dusk = Math.max(0, 1 - Math.abs(day - 0.5) * 2);
+        const dusk = 4 * day * (1 - day);
         this.sun.position.set(x-Math.cos(time)*35, y+elevation*42+12, 24);
         this.sun.target.position.set(x,y,-8);
         this.sun.color.set(0x90b3ed).lerp(DAY_SUN, day).lerp(DUSK_SUN, dusk * 0.55);
-        this.sun.intensity = 0.38 + day * 2.58;
+        this.sun.intensity = 0.55 + day * 2.41;
         this.sun.castShadow=effects;
-        this.ambient.intensity=0.7+day*0.83;
+        this.ambient.intensity=0.9+day*0.63;
         if (dimension === Dimensions.End) {
             this.sun.intensity=0.35; this.sun.color.set(0xaaa1c7);
             this.ambient.intensity=0.9; this.ambient.color.set(0x9a87b5);

@@ -48,6 +48,10 @@ function nearestMob(mob, range, canTarget) {
 function triggerAttackPose(entity, duration = 0.4) {
     entity.attackPoseDuration = duration;
     entity.attackPoseUntil = runtime.passedTime + duration;
+    if (entity.body) {
+        entity.body.mutantAttackPoseDuration = duration;
+        entity.body.mutantAttackPoseUntil = entity.attackPoseUntil;
+    }
 }
 
 export class MutantZombie extends Zombie {
@@ -74,7 +78,9 @@ export class MutantZombie extends Zombie {
     }
 
     update() {
-        super.update();
+        this.updateEntity();
+        this.aiUpdate();
+        this.hitPlayerLogic();
         if (runtime.passedTime < this.roarMoveUntil) this.targetVelocity.x = 0;
         this.roarCooldown -= runtime.deltaTime;
 
@@ -99,6 +105,15 @@ export class MutantZombie extends Zombie {
         if (this.attackCooldown) return;
         const player = this.entityCollision(EntityTypes.Player);
         if (!player) return;
+        if (player.abilities.hasHealth && Math.random() < 0.2) {
+            const direction = Math.sign(player.position.x - this.position.x) || this.direction;
+            player.hit(8, this.position.x, 0, `Thrown by ${this.name}`);
+            player.velocity.x = direction * 7 * BLOCK_SIZE;
+            player.velocity.y = Math.min(player.velocity.y, -15 * BLOCK_SIZE);
+            this.attackCooldown = 2.2;
+            triggerAttackPose(this, 0.9);
+            return;
+        }
         player.hit(8, this.position.x, 7, `Killed by ${this.name}`);
         this.attackCooldown = 1.6;
         triggerAttackPose(this, 0.45);
@@ -129,13 +144,25 @@ export class MutantCreeper extends Creeper {
     update() {
         super.update();
         if (this.jumpAttacking) {
-            if (this.grounded) this.jumpAttacking = false;
+            if (this.grounded) {
+                this.jumpAttacking = false;
+                this.explode();
+                return;
+            }
             else this.targetVelocity.x = this.velocity.x;
         }
         this.jumpAttackCooldown -= runtime.deltaTime;
 
         const player = this.world.player;
-        if (!player || player.dimension !== this.dimension || this.primed || !this.grounded ||
+        if (!player || player.dimension !== this.dimension) return;
+        if (player.abilities.hasHealth && !this.attackCooldown &&
+            this.entityCollision(EntityTypes.Player)) {
+            player.hit(9, this.position.x, 5, `Hit by ${this.name}`);
+            player.velocity.y = Math.min(player.velocity.y, -3 * BLOCK_SIZE);
+            this.attackCooldown = 1.3;
+            triggerAttackPose(this, 0.4);
+        }
+        if (!this.grounded ||
             this.jumpAttackCooldown > 0) return;
         const distance = playerDistance(this, player);
         if (distance < 3.5 * BLOCK_SIZE || distance > 9 * BLOCK_SIZE) return;
@@ -148,6 +175,11 @@ export class MutantCreeper extends Creeper {
         this.jumpAttacking = true;
         this.jumpAttackCooldown = randomRange(4, 6);
         triggerAttackPose(this, 0.55);
+    }
+
+    // The mutant uses melee and a landing blast, not the vanilla creeper fuse.
+    checkPrime() {
+        return;
     }
 
     explode() {
@@ -186,7 +218,9 @@ export class MutantSkeleton extends Skeleton {
     }
 
     update() {
-        super.update();
+        this.updateEntity();
+        this.aiUpdate();
+        this.hitPlayerLogic();
         if (runtime.passedTime < this.shootMoveUntil) {
             this.targetVelocity.x = 0;
             return;
@@ -235,6 +269,20 @@ export class MutantSkeleton extends Skeleton {
             );
         }
     }
+
+    hitPlayerLogic() {
+        if (this.attackCooldown) return;
+        const player = this.world.player;
+        if (!player || !player.abilities.hasHealth || player.dimension !== this.dimension ||
+            playerDistance(this, player) > 2.3 * BLOCK_SIZE) return;
+        const direction = Math.sign(player.position.x - this.position.x) || this.direction;
+        if (direction !== this.direction) return;
+        player.hit(8, this.position.x, 0, `Punched by ${this.name}`);
+        player.velocity.x = direction * 7 * BLOCK_SIZE;
+        player.velocity.y = Math.min(player.velocity.y, -4 * BLOCK_SIZE);
+        this.attackCooldown = 1.3;
+        triggerAttackPose(this, 0.5);
+    }
 }
 
 export class MutantEnderman extends Enderman {
@@ -253,21 +301,18 @@ export class MutantEnderman extends Enderman {
             MutantEnderman.spawnSize.width * BLOCK_SIZE,
             MutantEnderman.spawnSize.height * BLOCK_SIZE,
         );
-        this.speed = 0;
-        this.targetVelocity.x = 0;
-        this.teleportCooldown = randomRange(1.8, 2.8);
+        this.speed = 1.35;
+        this.maxVelocity.x = this.speed * BLOCK_SIZE * 1.5;
+        this.teleportCooldown = randomRange(7, 11);
     }
 
     update() {
         this.updateEntity();
-        this.attackCooldownLogic();
-        this.targetVelocity.x = 0;
-        this.velocity.x = 0;
-
         if (this.world.difficulty === "peaceful") {
             this.world.removeEntity(this);
             return;
         }
+        this.aiUpdate();
 
         const player = this.world.player;
         if (!player || player.dimension !== this.dimension) return;
@@ -287,12 +332,15 @@ export class MutantEnderman extends Enderman {
         }
 
         const destination = this.findTeleportPosition(player);
-        this.teleportCooldown = randomRange(2, 3.2);
+        this.teleportCooldown = destination ? randomRange(7, 11) : randomRange(1.5, 3);
         if (!destination) return;
 
         this.position = destination;
         this.velocity = new Vector2();
         this.targetVelocity = new Vector2();
+        this.direction = Math.sign(player.position.x - destination.x) || this.direction;
+        this.moving = false;
+        this.resetMoveTime();
         triggerAttackPose(this, 0.5);
         this.hitNearbyEntities();
     }
@@ -306,35 +354,40 @@ export class MutantEnderman extends Enderman {
                 side * distance * BLOCK_SIZE;
             const x = Math.floor(centerX / BLOCK_SIZE) * BLOCK_SIZE +
                 (BLOCK_SIZE - this.hitbox.x) / 2;
-            const y = player.position.y;
-            let clear = true;
-
-            for (
-                let sampleX = x;
-                sampleX < x + this.hitbox.x;
-                sampleX += BLOCK_SIZE
-            ) {
-                for (
-                    let sampleY = y;
-                    sampleY < y + this.hitbox.y;
-                    sampleY += BLOCK_SIZE
-                ) {
-                    const block = this.world.getBlockAtWorldPosition(
-                        sampleX,
-                        sampleY,
-                        false,
-                        this.dimension,
+            for (const heightOffset of [0, -1, 1, -2, 2]) {
+                const feetY = player.position.y + player.hitbox.y + heightOffset * BLOCK_SIZE;
+                const y = feetY - this.hitbox.y;
+                let clear = true;
+                for (const sampleX of [x + 1, x + this.hitbox.x - 1]) {
+                    const ground = this.world.getBlockAtWorldPosition(
+                        sampleX, feetY + 1, false, this.dimension,
                     );
-                    const definition = block && getBlock(block.blockType);
-                    if (!definition || (hasBlockCollision(block) && !definition.fluid)) {
+                    if (!ground || !hasBlockCollision(ground)) {
+                        clear = false;
+                        break;
+                    }
+                    for (let sampleY = y; sampleY < feetY; sampleY += BLOCK_SIZE) {
+                        const block = this.world.getBlockAtWorldPosition(
+                            sampleX, sampleY, false, this.dimension,
+                        );
+                        const definition = block && getBlock(block.blockType);
+                        if (!definition || definition.fluid || hasBlockCollision(block)) {
+                            clear = false;
+                            break;
+                        }
+                    }
+                    if (!clear) break;
+                    const footBlock = this.world.getBlockAtWorldPosition(
+                        sampleX, feetY - 1, false, this.dimension,
+                    );
+                    if (!footBlock || hasBlockCollision(footBlock) ||
+                        getBlock(footBlock.blockType)?.fluid) {
                         clear = false;
                         break;
                     }
                 }
-                if (!clear) break;
+                if (clear) return new Vector2(x, y);
             }
-
-            if (clear) return new Vector2(x, y);
         }
         return null;
     }
@@ -344,6 +397,7 @@ export class MutantEnderman extends Enderman {
             if (
                 entity === this ||
                 entity.dimension !== this.dimension ||
+                (entity.type === EntityTypes.Player && !entity.abilities.hasHealth) ||
                 (entity.type !== EntityTypes.Player && entity.type !== EntityTypes.Mob)
             ) {
                 continue;
@@ -352,6 +406,9 @@ export class MutantEnderman extends Enderman {
             if (Vector2.Distance(this.position, entity.position) > 2.5 * BLOCK_SIZE)
                 continue;
             entity.hit?.(2, this.position.x, 5, "Hit by a Mutant Enderman teleport");
+            const direction = Math.sign(entity.position.x - this.position.x) || 1;
+            entity.velocity.x += direction * 4 * BLOCK_SIZE;
+            entity.velocity.y = Math.min(entity.velocity.y, -4 * BLOCK_SIZE);
         }
     }
 }
@@ -414,6 +471,7 @@ export class MutantSnowGolem extends SnowGolem {
                     Math.sin(angle) * 14 * BLOCK_SIZE,
                 ),
                 dimension: this.dimension,
+                ownerUUID: this.UUID,
             },
             multiplayer,
         );

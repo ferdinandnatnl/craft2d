@@ -148,16 +148,16 @@ export class FaceBatch {
         }
     }
 
-    box(sprite, options, x, y, z, w = 1, h = 1, d = 1, light = 1, exposed = {}) {
+    box(sprite, options, x, y, z, w = 1, h = 1, d = 1, light = 1, exposed = {}, faces = {}) {
         // x/y/z is the bottom-left-back corner in Three's y-up coordinate space.
         const X = x + w, Y = y + h, Z = z + d;
         // The front of the water slice must reveal submerged players and mobs.
-        if (exposed.front !== false) this.quad(sprite, { ...options, cutaway: !!options.fluid }, [[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]], [0,0,1], light);
-        if (exposed.back) this.quad(sprite, options, [[X,y,z],[x,y,z],[x,Y,z],[X,Y,z]], [0,0,-1], light);
-        if (exposed.left !== false) this.quad(sprite, options, [[x,y,z],[x,y,Z],[x,Y,Z],[x,Y,z]], [-1,0,0], light);
-        if (exposed.right !== false) this.quad(sprite, options, [[X,y,Z],[X,y,z],[X,Y,z],[X,Y,Z]], [1,0,0], light);
-        if (exposed.top !== false) this.quad(sprite, { ...options, top: true }, [[x,Y,Z],[X,Y,Z],[X,Y,z],[x,Y,z]], [0,1,0], light);
-        if (exposed.bottom !== false) this.quad(sprite, options, [[x,y,z],[X,y,z],[X,y,Z],[x,y,Z]], [0,-1,0], light);
+        if (exposed.front !== false) this.quad(faces.front || sprite, { ...options, cutaway: !!options.fluid }, [[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]], [0,0,1], light);
+        if (exposed.back) this.quad(faces.side || sprite, options, [[X,y,z],[x,y,z],[x,Y,z],[X,Y,z]], [0,0,-1], light);
+        if (exposed.left !== false) this.quad(faces.side || sprite, options, [[x,y,z],[x,y,Z],[x,Y,Z],[x,Y,z]], [-1,0,0], light);
+        if (exposed.right !== false) this.quad(faces.side || sprite, options, [[X,y,Z],[X,y,z],[X,Y,z],[X,Y,Z]], [1,0,0], light);
+        if (exposed.top !== false) this.quad(faces.top || sprite, { ...options, top: !faces.top }, [[x,Y,Z],[X,Y,Z],[X,Y,z],[x,Y,z]], [0,1,0], light);
+        if (exposed.bottom !== false) this.quad(faces.bottom || sprite, options, [[x,y,z],[X,y,z],[X,y,Z],[x,y,Z]], [0,-1,0], light);
     }
 
     build(group, { castShadow = true, receiveShadow = true } = {}) {

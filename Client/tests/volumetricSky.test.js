@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { VolumetricSky } from "../Assets/rendering/volumetricSky.js";
+import { daylightFactor } from "../Assets/utils/daylight.js";
 
 const options = {
     width: 1920, height: 1080, time: 1, seconds: 30,
@@ -17,6 +18,7 @@ test("the sky bounds GPU allocation while preserving the viewport projection", (
             assert.ok(sky.target.width <= 960 && sky.target.height <= 540);
             assert.ok(Math.abs(sky.target.width / sky.target.height - width / height) < 0.01);
             assert.equal(sky.material.uniforms.aspect.value, width / height);
+            assert.equal(sky.material.uniforms.daylight.value, daylightFactor(options.time));
         }
     } finally {
         sky.dispose();

@@ -14,6 +14,7 @@ import { Dimensions, activeDimension, enterEnd, getDimensionChunks, gotoDimensio
 import { entityRegistry } from "../entities/entityRegistry.js";
 import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
 import { updateBendPose } from "../rendering/entityPose.js";
+import { classicLightTint } from "../rendering/renderLight.js";
 
 export const EntityTypes = Object.freeze({
     Drop: 0,
@@ -501,6 +502,18 @@ export class Entity {
             this.grounded,
             this.lookDirection,
         );
+        if (this.isMutant && this.body) {
+            const body = this.body;
+            const walked = Math.abs(this.position.x - (body.mutantLastX ?? this.position.x));
+            body.mutantLastX = this.position.x;
+            if (this.grounded && walked < BLOCK_SIZE) {
+                body.mutantWalkPhase = (body.mutantWalkPhase || 0) + walked / BLOCK_SIZE * 4;
+            }
+            body.mutantWalkAmount = this.grounded
+                ? Math.min(1, Math.abs(this.velocity.x) /
+                    (Math.max(0.5, this.speed || 1) * BLOCK_SIZE))
+                : 0;
+        }
         if (this.body) updateBendPose(this, runtime.passedTime);
     }
 
@@ -1149,6 +1162,11 @@ export class Entity {
             ?.sunLight;
     }
 
+    getSkyExposure() {
+        const block = this.getBlockAtPosition(this.position.x, this.position.y);
+        return block?.skyExposure ?? (block?.sunLight ? 1 : 0);
+    }
+
     drawEntity(ctx) {
         ctx.save();
         const centerX = this.position.x - camera.x + this.offset.x;
@@ -1156,9 +1174,9 @@ export class Entity {
 
         const blockLightLevel = this.getLightLevel();
 
-        if (blockLightLevel !== null) {
-            if (this.body)
-                this.body.brightness = Math.max(0.1, blockLightLevel / 15);
+        if (blockLightLevel != null && this.body) {
+            this.body.brightness = runtime.game?.settings?.lighting === false
+                ? 1 : classicLightTint(blockLightLevel, this.getSkyExposure(), runtime.time);
         }
 
         if (this.body) {

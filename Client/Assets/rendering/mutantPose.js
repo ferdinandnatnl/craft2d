@@ -55,15 +55,25 @@ export function mutantPartPitch(type, name, limbSwing, amount, attack, seconds) 
             return 0;
         }
         case "MutantEnderman": {
-            // This game's Enderman stays teleport-only as requested.
+            const step = Math.sin(limbSwing * 0.3) * amount;
+            const leftStep = (Math.sin((limbSwing - 0.8) * 0.3) + 0.8) * amount;
+            const rightStep = -(Math.sin((limbSwing + 0.8) * 0.3) - 0.8) * amount;
+            const leftKnee = (Math.sin((limbSwing + 0.8) * 0.3) - 0.8) * amount;
+            const rightKnee = -(Math.sin((limbSwing - 0.8) * 0.3) + 0.8) * amount;
             if (name === "abdomen") return 0.31;
             if (name === "chest") return 0.39 + breathe;
             if (name === "neck") return 0.2;
             if (name === "head") return -0.79;
-            if (name.includes("ForeRightArm") || name.includes("ForeLeftArm")) return -0.63;
-            if (name.endsWith("Arm")) return -0.52 - attack * 0.8;
-            if (name === "leftLeg" || name === "rightLeg") return -0.9;
-            if (name.endsWith("Foreleg")) return 0.79;
+            if (name === "upperRightArm") return -0.52 - step * 0.6 - attack * 0.8;
+            if (name === "upperLeftArm") return -0.52 + step * 0.6 - attack * 0.8;
+            if (name === "lowerRightArm") return -0.42 - step * 0.3;
+            if (name === "lowerLeftArm") return -0.42 + step * 0.3;
+            if (name === "foreRightArm" || name === "lowerForeRightArm") return -0.63 - step * 0.2;
+            if (name === "foreLeftArm" || name === "lowerForeLeftArm") return -0.63 + step * 0.2;
+            if (name === "leftLeg") return -0.9 + leftStep * 0.6;
+            if (name === "rightLeg") return -0.9 + rightStep * 0.6;
+            if (name === "leftForeleg") return 0.79 + leftKnee * 0.3;
+            if (name === "rightForeleg") return 0.79 + rightKnee * 0.3;
             return 0;
         }
         case "MutantSnowGolem": {
@@ -101,7 +111,7 @@ export function mutantPartPitch(type, name, limbSwing, amount, attack, seconds) 
 }
 
 export function mutantWalkBob(type, limbSwing, amount) {
-    if (type === "MutantEnderman") return 0;
+    if (type === "MutantEnderman") return Math.abs(Math.sin(limbSwing * 0.3)) * amount * 0.04;
     const phase = type === "SpiderPig" ? limbSwing * 0.9 : limbSwing * 0.4;
     return Math.abs(Math.sin(phase)) * amount * (type === "MutantSnowGolem" ? 0.055 : 0.03);
 }

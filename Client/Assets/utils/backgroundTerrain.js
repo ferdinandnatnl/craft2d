@@ -1,6 +1,7 @@
 import { getSpriteUrl } from "./texturePackLoader.js";
 import { surfaceTexture } from "./surfaceTexture.js";
 import { getBlock } from "../world/block.js";
+import { daylightFactor } from "./daylight.js";
 
 const LAYERS = [
     { tile: 12, parallax: 0.12, base: 0.48, rise: 150, haze: 0.70 },
@@ -86,7 +87,7 @@ export class BackgroundTerrain {
         let worldSeed = 0;
         for (const letter of String(seed)) worldSeed = (worldSeed * 31 + letter.charCodeAt(0)) | 0;
         worldSeed = (worldSeed >>> 0) % 10007;
-        const daylight = Math.max(0, Math.min(1, (Math.sin(time) + 0.18) / 0.65));
+        const daylight = daylightFactor(time);
         const ctx = this.ctx;
         for (let layer = 0; layer < LAYERS.length; layer++) {
             const { tile, parallax, base, rise, haze } = LAYERS[layer];
@@ -151,7 +152,7 @@ export class BackgroundTerrain {
             ctx.globalCompositeOperation = "source-atop";
             ctx.fillStyle = `rgba(154,185,201,${haze})`;
             ctx.fillRect(0, 0, width, height);
-            ctx.fillStyle = `rgba(7,15,32,${(1 - daylight) * 0.92})`;
+            ctx.fillStyle = `rgba(7,15,32,${(1 - daylight) * 0.68})`;
             ctx.fillRect(0, 0, width, height);
             ctx.restore();
             target.drawImage(this.canvas, 0, 0);

@@ -1,5 +1,6 @@
 import { BLOCK_SIZE } from "./globals.js";
 import { getBlock } from "../world/block.js";
+import { getSpriteUrl } from "./texturePackLoader.js";
 import { surfaceTexture } from "./surfaceTexture.js";
 
 const DEPTH_X = 0.32;
@@ -8,6 +9,19 @@ const DEPTH_Y = 0.32;
 // A shallow oblique projection of exposed terrain. The front face remains on
 // the exact collision/selection grid; these extra faces are decoration only.
 export class TerrainDepth {
+    faceImage(sprite) {
+        this.faceImages ||= new Map();
+        const url = getSpriteUrl(`blocks/${sprite}`);
+        let entry = this.faceImages.get(sprite);
+        if (entry?.url !== url) {
+            const image = new Image();
+            image.src = url;
+            entry = { image, url };
+            this.faceImages.set(sprite, entry);
+        }
+        return entry.image.complete && entry.image.naturalWidth ? entry.image : null;
+    }
+
     prepare(world, camera, width, height) {
         this.cells = new Map();
         this.visible = [];
@@ -54,17 +68,20 @@ export class TerrainDepth {
             const textureSize = block.spriteSize;
             const brightness = block.getBrightness();
             if (!this.sample(x + 1, y).solid) {
+                const side = def.faceSprites?.side && this.faceImage(def.faceSprites.side) || block.img;
                 ctx.save();
                 ctx.transform(dx / size, -dy / size, 0, 1, sx + size, sy);
-                ctx.drawImage(block.img, 0, 0, textureSize, textureSize, 0, 0, size, size);
+                ctx.drawImage(side, 0, 0, side.width, side.width, 0, 0, size, size);
                 ctx.fillStyle = `rgba(12,18,27,${1 - brightness * 0.58})`;
                 ctx.fillRect(0, 0, size, size);
                 ctx.restore();
             }
             if (!this.sample(x, y - 1).solid) {
+                const top = def.faceSprites?.top && this.faceImage(def.faceSprites.top);
                 ctx.save();
                 ctx.transform(1, 0, -dx / size, dy / size, sx + dx, sy - dy);
-                ctx.drawImage(surfaceTexture(block.img, def.sprite, textureSize), 0, 0,
+                if (top) ctx.drawImage(top, 0, 0, top.width, top.width, 0, 0, size, size);
+                else ctx.drawImage(surfaceTexture(block.img, def.sprite, textureSize), 0, 0,
                     textureSize, textureSize, 0, 0, size, size);
                 ctx.fillStyle = "rgba(255,244,209,0.07)";
                 ctx.fillRect(0, 0, size, size);

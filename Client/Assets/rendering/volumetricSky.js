@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { daylightFactor } from "../utils/daylight.js";
 
 const vertexShader = `
     in vec3 position;
@@ -15,6 +16,7 @@ const fragmentShader = `
     uniform sampler3D noiseVolume;
     uniform float seconds;
     uniform float time;
+    uniform float daylight;
     uniform float aspect;
     uniform float tanHalfFov;
     uniform vec2 cameraPosition;
@@ -48,8 +50,8 @@ const fragmentShader = `
 
     vec3 atmosphere(vec3 ray, vec3 sun, float day, float dusk) {
         float altitude = max(0.0, ray.y);
-        vec3 zenith = mix(vec3(0.018, 0.032, 0.072), vec3(0.15, 0.39, 0.71), day);
-        vec3 horizon = mix(vec3(0.055, 0.081, 0.13), vec3(0.64, 0.79, 0.90), day);
+        vec3 zenith = mix(vec3(0.035, 0.060, 0.11), vec3(0.15, 0.39, 0.71), day);
+        vec3 horizon = mix(vec3(0.080, 0.12, 0.19), vec3(0.64, 0.79, 0.90), day);
         float facing = pow(max(0.0, dot(ray, normalize(vec3(sun.x, 0.12, sun.z)))), 4.0);
         horizon = mix(horizon, vec3(0.98, 0.64, 0.39), dusk * (0.3 + facing * 0.7));
         vec3 color = mix(horizon, zenith, 1.0 - exp(-altitude * 4.4));
@@ -78,8 +80,8 @@ const fragmentShader = `
         vec3 ray = normalize(vec3((uv.x * 2.0 - 1.0) * aspect * tanHalfFov,
             (uv.y * 2.0 - 1.0) * tanHalfFov, -1.0));
         vec3 sun = normalize(vec3(-cos(time), sin(time), -0.85));
-        float day = smoothstep(-0.25, 0.10, sin(time));
-        float dusk = (1.0 - smoothstep(0.0, 0.42, abs(sin(time) - 0.04))) * day;
+        float day = daylight;
+        float dusk = 4.0 * day * (1.0 - day);
         vec3 sky = atmosphere(ray, sun, day, dusk);
         vec3 color = sky;
 
@@ -111,7 +113,7 @@ const fragmentShader = `
                     lit *= mix(vec3(1.0), vec3(1.0, 0.83, 0.67), dusk * 0.55);
                     // A thin sun-facing edge transmits more warm light.
                     lit += sunlight * pow(max(0.0, dot(ray, sun)), 12.0) * direct * 0.08;
-                    lit = mix(lit * vec3(0.16, 0.21, 0.32), lit, day);
+                    lit = mix(lit * vec3(0.27, 0.32, 0.43), lit, day);
                     lit = mix(lit, sky, 1.0 - exp(-distance * 0.000085));
                     float opacity = 1.0 - exp(-fog * stepLength * 0.028);
                     accumulated += lit * opacity * transmission;
@@ -153,6 +155,7 @@ export class VolumetricSky {
             depthTest: false, depthWrite: false,
             uniforms: {
                 noiseVolume: { value: this.noise }, seconds: { value: 0 }, time: { value: 1 },
+                daylight: { value: 1 },
                 aspect: { value: 1 }, tanHalfFov: { value: Math.tan(Math.PI / 5) },
                 cameraPosition: { value: new THREE.Vector2() },
             },
@@ -172,6 +175,7 @@ export class VolumetricSky {
         const uniforms = this.material.uniforms;
         uniforms.seconds.value = seconds;
         uniforms.time.value = time;
+        uniforms.daylight.value = daylightFactor(time);
         uniforms.aspect.value = width / height;
         uniforms.tanHalfFov.value = Math.tan(fov * Math.PI / 360);
         uniforms.cameraPosition.value.set(cameraX * 0.12, (surfaceY - cameraY - height / 2) * 0.12);

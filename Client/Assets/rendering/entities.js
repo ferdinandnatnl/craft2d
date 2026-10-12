@@ -6,7 +6,11 @@ import { getBlock } from "../world/block.js";
 import { getBoatPartPitch, getHeadPitch, getLimbPitch, getSwimPartPitch } from "./entityPose.js";
 import { skinBox, skinLimbHalf } from "./entityGeometry.js";
 import { mutantPartParent, mutantPartPitch, mutantWalkBob } from "./mutantPose.js";
+import { renderLightTint } from "./renderLight.js";
 import ironGolemModel from "../sprites/entity/golem/iron_golem.geo.json" with { type: "json" };
+
+// Keep movement side-on while revealing the front of cuboid faces and skins.
+const FACING_YAW = Math.PI / 3;
 
 export class VoxelEntities {
     constructor(scene) {
@@ -614,21 +618,17 @@ export class VoxelEntities {
                 }
                 continue;
             }
+            const light = renderLightTint(
+                entity.getLightLevel?.(), entity.getSkyExposure?.() ?? entity.getSunLight?.(), lighting,
+            );
             const aquaticPhase = entity.swimPhase || 0;
             const aquaticBob = entity.isAquatic ? Math.sin(aquaticPhase * 2) * 0.015 : 0;
             record.group.position.set((entity.position.x + entity.hitbox.x / 2) / BLOCK_SIZE,
                 -(entity.position.y + entity.hitbox.y) / BLOCK_SIZE + aquaticBob, 0.05);
             if (record.mutantModel) {
-                record.group.rotation.y = entity.direction < 0 ? -Math.PI / 2 : Math.PI / 2;
-                const walked = Math.abs(entity.position.x - (record.walkX ?? entity.position.x));
-                record.walkX = entity.position.x;
-                if (walked < BLOCK_SIZE) {
-                    record.walkPhase = (record.walkPhase || 0) + walked / BLOCK_SIZE * 4;
-                }
-                const speed = Math.abs(entity.velocity?.x ?? 0);
-                const stride = entity.grounded
-                    ? Math.min(1, speed / (Math.max(0.5, entity.speed || 1) * BLOCK_SIZE))
-                    : 0;
+                record.group.rotation.y = entity.direction < 0 ? -FACING_YAW : FACING_YAW;
+                const walkPhase = entity.body.mutantWalkPhase || 0;
+                const stride = entity.body.mutantWalkAmount || 0;
 
                 const attackDuration = entity.attackPoseDuration || 0.4;
                 const attackRemaining = (entity.attackPoseUntil || 0) - seconds;
@@ -640,11 +640,11 @@ export class VoxelEntities {
                     : 0;
                 const walkAmount = stride * (1 - attackSwing);
                 record.group.position.y += mutantWalkBob(
-                    entity.entityTypeName, record.walkPhase || 0, walkAmount,
+                    entity.entityTypeName, walkPhase, walkAmount,
                 );
                 const angles = new Map(record.mutantParts.map(part => [part.name,
                     mutantPartPitch(entity.entityTypeName, part.name,
-                        record.walkPhase || 0, walkAmount, attackSwing, seconds)]));
+                        walkPhase, walkAmount, attackSwing, seconds)]));
                 const positions = record.geometry.getAttribute("position");
                 const normals = record.geometry.getAttribute("normal");
                 for (const part of record.mutantParts) {
@@ -683,7 +683,6 @@ export class VoxelEntities {
                 }
                 positions.needsUpdate = true;
                 normals.needsUpdate = true;
-                const light = lighting ? Math.max(0.08, Math.min(1, (entity.getLightLevel?.() ?? 15) / 15)) : 1;
                 for (const material of record.materials) {
                     material.color.setRGB(light, light, light);
                     if (!material.userData.mutantGlow) {
@@ -702,9 +701,8 @@ export class VoxelEntities {
                 record.pivots.arm0.rotation.x = -stride * 0.12;
                 record.pivots.arm1.rotation.x = stride * 0.12;
                 record.group.rotation.y = entity.direction < 0
-                    ? -Math.PI / 2
-                    : Math.PI / 2;
-                const light = lighting ? Math.max(0.08, Math.min(1, (entity.getLightLevel?.() ?? 15) / 15)) : 1;
+                    ? -FACING_YAW
+                    : FACING_YAW;
                 record.material.color.setRGB(light, light, light);
                 record.material.emissive.set(entity.body.flashingColor || 0);
                 record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
@@ -713,14 +711,13 @@ export class VoxelEntities {
             if (record.bodylessSprite) {
                 record.group.rotation.y = 0;
                 record.group.scale.x = entity.direction < 0 ? -1 : 1;
-                const light = lighting ? Math.max(0.08, Math.min(1, (entity.getLightLevel?.() ?? 15) / 15)) : 1;
                 record.material.color.setRGB(light, light, light);
                 continue;
             }
             record.group.rotation.y = entity.body.sprite.startsWith("dragon/") || record.portraitSprite
                 ? 0 : entity.body.sprite.startsWith("villager/")
                     ? (entity.direction < 0 ? -Math.PI / 4 : Math.PI / 4)
-                    : entity.direction < 0 ? -Math.PI / 2 + 0.18 : Math.PI / 2 - 0.18;
+                    : entity.direction < 0 ? -FACING_YAW : FACING_YAW;
             if (entity.body.sprite.startsWith("dragon/"))
                 record.group.scale.x = entity.direction < 0 ? -1 : 1;
             else if (record.portraitSprite)
@@ -733,7 +730,6 @@ export class VoxelEntities {
             const bendPose = entity.body.bendPose;
             record.pose.rotation.x = swimAmount * Math.PI / 2 + (bendPose?.lean || 0);
             if (bendPose) record.group.position.y += bendPose.bob;
-            const light = lighting ? Math.max(0.08, Math.min(1, (entity.getLightLevel?.() ?? 15) / 15)) : 1;
             record.material.color.setRGB(light, light, light);
             record.material.emissive.set(entity.body.flashingColor || 0);
             record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;

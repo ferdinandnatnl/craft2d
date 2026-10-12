@@ -15,6 +15,7 @@ import { caveCellAt, caveColumnAt } from "@2dcraft.com/shared/caves.js";
 import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { END_OUTPOST_X, END_SHRINE_WIDTH, endIslandSurfaceY, isEndShrineChunk } from "@2dcraft.com/shared/endProgression.js";
 import { countMobsNearPlayer, MAX_MOBS_NEAR_PLAYER } from "./mobLimits.js";
+import { daylightFactor } from "../utils/daylight.js";
 
 const MUTANT_VARIANTS = {
     Zombie: "MutantZombie",
@@ -1567,37 +1568,9 @@ export class Chunk {
     updateSkyLight() {
         if (this.world.generator.specialWorldProps.void) return;
 
-        // Define key points and transition zones
-        const dayStart = 1; // Full day
-        const duskStart = 3; // Start of transition to night
-        const nightStart = 3.5; // Full night begins
-        const nightEnd = 6.5; // Full night ends
-        const dawnStart = 6.7; // Start of transition to day
-        const dayEnd = 7.3; // Full day, loops back to 1
-
-        // Calculate dayNightFactor (1 = full day, 0 = full night)
-        let dayNightFactor;
-
-        if (runtime.time <= duskStart) {
-            // Full day (1 to 3)
-            dayNightFactor = 1;
-        } else if (runtime.time < nightStart) {
-            // Dusk transition (3 to 3.5)
-            dayNightFactor = 1 - (runtime.time - duskStart) / (nightStart - duskStart);
-        } else if (runtime.time <= nightEnd) {
-            // Full night (3.5 to 6.5)
-            dayNightFactor = 0;
-        } else if (runtime.time < dawnStart) {
-            // Dawn transition (6.5 to 6.7)
-            dayNightFactor = (runtime.time - nightEnd) / (dawnStart - nightEnd);
-        } else {
-            // Full day (6.7 to 7.3)
-            dayNightFactor = 1;
-        }
-
         // Maximum skylight: 15 during day, 1 at night
         const maxSkyLight = !getDimension(this.dimension).alwaysDay
-            ? Math.floor(1 + 14 * dayNightFactor)
+            ? Math.floor(1 + 14 * daylightFactor(runtime.time))
             : 15;
 
         if (getDimension(this.dimension).baseLightLevel) {
@@ -1608,6 +1581,8 @@ export class Chunk {
                     block.lightLevel = getDimension(
                         this.dimension
                     ).baseLightLevel;
+                    block.skyExposure = 0;
+                    block.sunLight = false;
                 }
             }
 
@@ -1618,11 +1593,13 @@ export class Chunk {
         for (let x = 0; x < this.width; x++) {
             let skyLight = maxSkyLight;
             let stopped = false;
+            let cover = 0;
 
             for (let y = 0; y < this.height; y++) {
                 const block = this.blocks[y][x];
                 block.lightLevel = skyLight;
                 block.sunLight = false;
+                block.skyExposure = Math.max(0, 1 - cover / 10);
 
                 const def = getBlock(block.blockType);
 
@@ -1632,12 +1609,14 @@ export class Chunk {
                 ) {
                     skyLight = Math.max(skyLight - 1, 1);
                     stopped = true;
+                    cover = Math.min(10, cover + 1);
                 } else {
                     if (!stopped) {
                         skyLight = maxSkyLight;
                         block.sunLight = true;
                     } else {
                         skyLight = Math.max(skyLight - 1, 1);
+                        cover = Math.min(10, cover + 1);
                     }
                 }
             }

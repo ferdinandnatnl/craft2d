@@ -5,6 +5,7 @@ export class BlockType {
     constructor({
         blockId,
         sprite = null,
+        faceSprites = null,
         wallSprite = null,
         iconSprite = null,
         states = [],
@@ -95,6 +96,7 @@ export class BlockType {
     } = {}) {
         this.blockId = blockId;
         this.sprite = sprite;
+        this.faceSprites = faceSprites;
         this.wallSprite = wallSprite;
         this.iconSprite = iconSprite ? iconSprite : sprite;
         this.states = states;

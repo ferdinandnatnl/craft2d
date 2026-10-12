@@ -1,9 +1,10 @@
 import { BLOCK_SIZE } from "./globals.js";
 import { getBlock } from "../world/block.js";
+import { daylightFactor } from "./daylight.js";
 
 // A bounded, render-only sunlight pass. No changes to gameplay light levels.
 export function drawSceneLighting(ctx, world, camera, time, width, height) {
-    const daylight = Math.max(0, Math.sin(time));
+    const daylight = daylightFactor(time) * Math.max(0.25, Math.sin(time));
     if (daylight === 0) return;
     const size = BLOCK_SIZE;
     const firstX = Math.floor(camera.x / size);
@@ -96,7 +97,7 @@ export function drawLocalLighting(ctx, world, terrain, camera, time, seconds, wi
         const pixels = radius * size;
         const flicker = 0.96 + Math.sin(seconds * 5.1 + x * 7 + y) * 0.025
             + Math.sin(seconds * 8.7 + x) * 0.015;
-        const daylight = block.sunLight ? Math.max(0, Math.sin(time)) : 0;
+        const daylight = block.sunLight ? daylightFactor(time) : 0;
         const strength = (0.42 - daylight * 0.26) * flicker;
         ctx.save();
         ctx.beginPath();

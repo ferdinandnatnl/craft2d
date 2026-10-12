@@ -17,6 +17,7 @@ import {
 } from "./dimensionState.js";
 import { createParticleEmitter } from "./particleEmitter.js";
 import { treesRegistry } from "@2dcraft.com/shared/treesRegistry.js";
+import { classicLightTint } from "../rendering/renderLight.js";
 
 function Blocks() {
     return blockRegistry.Blocks;
@@ -1837,6 +1838,17 @@ export class Block extends Square {
                 );
             }
         }
+    }
+
+    getBrightness() {
+        if (runtime.game?.settings?.lighting === false) return 1;
+        const exposureBlock = this.wall
+            ? this.world?.getBlockAtWorldPosition(
+                this.transform.position.x, this.transform.position.y, false)
+            : this;
+        const skyExposure = exposureBlock?.skyExposure ??
+            (exposureBlock?.sunLight ? 1 : 0);
+        return classicLightTint(this.lightLevel, skyExposure, runtime.time);
     }
 
     draw(ctx, camera) {

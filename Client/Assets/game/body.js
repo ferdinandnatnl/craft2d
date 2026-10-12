@@ -9,6 +9,7 @@ import {
     getBoatPartPitch,
     getSwimPartPitch,
 } from "../rendering/entityPose.js";
+import { mutantPartPitch } from "../rendering/mutantPose.js";
 
 export class Body {
     constructor({
@@ -185,6 +186,13 @@ export class Body {
             ctx.translate(-centerX, -centerY);
         }
         const bendPose = this.bendPose;
+        const attackRemaining = (this.mutantAttackPoseUntil || 0) - runtime.passedTime;
+        const attackProgress = attackRemaining > 0
+            ? 1 - attackRemaining / (this.mutantAttackPoseDuration || 0.4)
+            : 0;
+        const mutantAttack = attackProgress > 0
+            ? Math.sin(Math.min(1, attackProgress) * Math.PI)
+            : 0;
         if (bendPose?.lean) {
             const hipX = this.position.x + BLOCK_SIZE * 0.2;
             const hipY = this.position.y + BLOCK_SIZE * 1.1;
@@ -216,6 +224,13 @@ export class Body {
                 rotation += (boatRotation - rotation) * this.boatAmount;
             }
             const side = part.zIndex < 0 ? -1 : 1;
+            if (this.mutantModelType) {
+                rotation = mutantPartPitch(
+                    this.mutantModelType, part.id, this.mutantWalkPhase || 0,
+                    (this.mutantWalkAmount || 0) * (1 - mutantAttack),
+                    mutantAttack, runtime.passedTime,
+                ) * 180 / Math.PI * direction;
+            }
             if (bendPose?.pitch[part.id] != null) {
                 rotation = bendPose.pitch[part.id] * 180 / Math.PI * direction * side;
             }

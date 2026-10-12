@@ -1,4 +1,6 @@
 // Cached cloud sprites keep atmospheric rendering independent of world generation.
+import { daylightFactor, twilightFactor } from "./daylight.js";
+
 const clamp = (value) => Math.max(0, Math.min(1, value));
 const smooth = (value) => { const t = clamp(value); return t * t * (3 - 2 * t); };
 const mix = (a, b, t) => a.map((value, i) => value + (b[i] - value) * t);
@@ -80,12 +82,11 @@ export class SkyRenderer {
 
     draw(ctx, { width, height, time, seconds, cameraX, cameraY, surfaceY }) {
         this.clouds ??= [1, 7, 19, 31].map(createCloud);
-        const elevation = Math.sin(time);
-        const daylight = smooth((elevation + 0.22) / 0.62);
-        const sunset = (1 - smooth(Math.abs(elevation - 0.04) / 0.42)) * daylight;
-        const top = mix([5, 10, 25], [83, 122, 172], daylight);
-        const middle = mix(mix([12, 22, 43], [134, 168, 204], daylight), [151, 139, 171], sunset * 0.55);
-        const horizon = mix(mix([23, 33, 53], [219, 225, 226], daylight), [249, 167, 104], sunset);
+        const daylight = daylightFactor(time);
+        const sunset = twilightFactor(time);
+        const top = mix([10, 20, 40], [83, 122, 172], daylight);
+        const middle = mix(mix([22, 37, 66], [134, 168, 204], daylight), [151, 139, 171], sunset * 0.55);
+        const horizon = mix(mix([35, 56, 83], [219, 225, 226], daylight), [249, 167, 104], sunset);
         ctx.save();
         const sky = ctx.createLinearGradient(0, 0, 0, height * 0.85);
         sky.addColorStop(0, rgb(top));
