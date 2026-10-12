@@ -259,6 +259,12 @@ export class Block extends Square {
         let props = {};
         let storage = [];
 
+        if (block.blockId === Blocks().SeaPickle) {
+            this.metaData = new Metadata({ waterlogged: true, pickles: 1 });
+            this.updateSeaPickleLightLevel();
+            return;
+        }
+
         // Fluid
         if (block.fluid) {
             props.isSource = true;
@@ -387,6 +393,10 @@ export class Block extends Square {
     recieveSyncMetaData(metaData) {
         this.metaData = new Metadata(metaData);
 
+        if (this.blockType === Blocks().SeaPickle) {
+            this.updateSeaPickleLightLevel(true);
+        }
+
         if (this.metaData.storage) {
             const storage = this.metaData.storage.map((row) =>
                 row.map((item) => InventoryItem(item)),
@@ -403,6 +413,10 @@ export class Block extends Square {
     setBlockMetaData(metaData) {
         this.metaData = new Metadata(metaData);
 
+        if (this.blockType === Blocks().SeaPickle) {
+            this.updateSeaPickleLightLevel(true);
+        }
+
         if (this.metaData.storage) {
             // Create a deep copy of the storage array and create new InventoryItem instances with the copied data
             const storage = this.metaData.storage.map((row) =>
@@ -411,6 +425,45 @@ export class Block extends Square {
 
             this.metaData.storage = storage;
         }
+    }
+
+    updateSeaPickleLightLevel(markDirty = false) {
+        if (this.blockType !== Blocks().SeaPickle) return;
+
+        if (!this.metaData) {
+            this.metaData = new Metadata({ waterlogged: true, pickles: 1 });
+        }
+        if (typeof this.metaData.waterlogged !== "boolean") {
+            this.metaData.waterlogged = true;
+        }
+
+        const count = Number(this.metaData.pickles);
+        this.metaData.pickles = Number.isFinite(count)
+            ? Math.max(1, Math.min(4, Math.trunc(count)))
+            : 1;
+
+        const previousLight = this.lightSourceLevel;
+        this.lightSourceLevel = this.wall || !this.metaData.waterlogged
+            ? 0
+            : 6 + 3 * (this.metaData.pickles - 1);
+        if (markDirty && previousLight !== this.lightSourceLevel) {
+            this.markChunkDirty();
+        }
+    }
+
+    addSeaPickle() {
+        if (this.blockType !== Blocks().SeaPickle ||
+            this.metaData?.waterlogged !== true) return false;
+
+        const count = Number(this.metaData.pickles) || 1;
+        if (count >= 4) return false;
+
+        this.setBlockMetaData({
+            ...this.metaData,
+            pickles: count + 1,
+        });
+        this.syncMetaData(false);
+        return true;
     }
 
     setBlockType(blockType, override = false) {

@@ -175,11 +175,19 @@ swallowing, player bites, spit behavior, size-specific drops, bucket capture and
 release, save data, and the translated source model and textures. The large
 Catfish can also spit swallowed mobs back into the active chunk.
 
-The source Sea Lantern and Sea Pickle attraction and spit interactions are not
-implemented because this game does not register those vanilla blocks or items.
-Source Catfish audio is also pending. These gaps keep the Catfish row partial.
-Six focused tests cover size and spawning rules, feeding and spitting, prey
-handling, bucket and save state, and renderer setup. See
+Catfish follow a nearby player holding a Sea Lantern and seek nearby Sea Lantern
+blocks while they are in water and have room in their stomach. Touching a Sea
+Pickle block or interacting with a held Sea Pickle makes them spit. The game now
+registers the two vanilla support blocks and items and uses the source Cod hurt
+and death sounds plus the vanilla player burp for the block-triggered spit.
+
+Sea Pickles store the vanilla one-to-four cluster count and waterlogged state.
+Their light levels are 6, 9, 12, and 15. The 2D game uses one non-solid tile
+for each cluster and does not yet model warm-ocean acquisition. The Catfish row
+remains partial until the remaining source mechanics and live gameplay are
+checked. Ten focused tests cover size and spawning rules, pickle cluster state,
+lantern attraction, pickle-triggered spitting, feeding, prey handling, bucket
+and save state, and renderer setup. See
 `Client/tests/alexsMobsCatfish.test.js`. The live browser view has not yet been
 checked.
 

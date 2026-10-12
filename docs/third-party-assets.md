@@ -23,6 +23,10 @@ release by Alex's Mobs contributors:
 - `Client/Assets/sprites/items/alexsmobs/large_catfish_bucket.png`
 - `Client/Assets/audio/sfx/alexsmobs/caiman_*.ogg`
 
+The Sea Lantern and Sea Pickle textures and Cod hurt/death sounds are from the
+official Minecraft Java 1.20.1 client assets. The Sea Lantern texture contains
+five animation frames; this renderer uses its first 16 by 16 frame.
+
 The crocodile geometry and texture coordinates in
 `Client/Assets/rendering/alexsMobsCrocodileRig.js` are translated from the
 release's `ModelCrocodile.java`. The Three.js rig turns the source model's long

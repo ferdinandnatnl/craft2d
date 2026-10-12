@@ -1,6 +1,6 @@
 import { Body, BodyPart } from "../../game/body.js";
 import { InventoryItem } from "../../game/inventoryItem.js";
-import { AquaticMob } from "./aquatic.js";
+import { AquaticMob, isAquaticWaterBlock } from "./aquatic.js";
 import { EntityTypes } from "../../game/entity.js";
 import { entityRegistry } from "../entityRegistry.js";
 import { Items } from "@2dcraft.com/shared/items.js";
@@ -10,6 +10,8 @@ import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { Vector2, randomRange } from "../../utils/classes.js";
 import { BLOCK_SIZE, multiplayer } from "../../utils/globals.js";
 import { runtime } from "../../utils/runtime.js";
+import { playPositionalSound, playRandomSoundFromArray } from "../../game/sounds.js";
+import { Sounds } from "@2dcraft.com/shared/sounds.js";
 
 const CATFISH_BUCKETS = Object.freeze([
     Items.SmallCatfishBucket,
@@ -85,6 +87,10 @@ export class Catfish extends AquaticMob {
         this.eatCooldown = clampTicks(eatCooldown, 120);
         this.foodScanTicks = randomRange(50, 100);
         this.foodTarget = null;
+        this.lanternScanTicks = randomRange(70, 140);
+        this.lanternTargetBlock = null;
+        this.lanternChillTicks = 0;
+        this.lanternChillTime = randomRange(10, 30);
         this.speed = 0.7;
         this.swimSpeed = this.speed * BLOCK_SIZE;
         this.maxVelocity.x = this.swimSpeed * 1.5;
@@ -111,6 +117,14 @@ export class Catfish extends AquaticMob {
             this.targetTimer = 0.25;
         } else {
             this.foodTarget = null;
+            const playerWithLantern = this.noAi ? null : this.findLanternPlayer();
+            const target = playerWithLantern
+                ? this.findWaterPositionNear(this.getEntityCenter(playerWithLantern))
+                : this.lanternTargetBlock && !this.isFull()
+                  ? this.findWaterPositionNear(this.lanternTargetBlock)
+                  : null;
+            this.targetPosition = target;
+            this.targetTimer = target ? 0.25 : 0;
         }
         this.swimLogic();
         this.updateEntity();
@@ -127,6 +141,27 @@ export class Catfish extends AquaticMob {
             if (!this.noAi && this.isInWater() && this.eatCooldown <= 0 && !this.isFull()) {
                 this.foodTarget = this.findFoodTarget();
             }
+        }
+
+        if (!this.noAi) {
+            this.lanternScanTicks--;
+            if (this.lanternScanTicks <= 0) {
+                this.lanternScanTicks = randomRange(70, 140);
+                this.lanternTargetBlock = this.isInWater() && !this.isFull()
+                    ? this.findFascinatingLantern()
+                    : null;
+                this.lanternChillTicks = 0;
+                this.lanternChillTime = randomRange(10, 30);
+            }
+            this.updateLanternInterest();
+        }
+
+        const pickle = this.findSeaPickleContact();
+        if (pickle && this.canSpit()) {
+            if (this.spitTime === 0) {
+                playPositionalSound(this.position, "player/burp.ogg");
+            }
+            this.spit();
         }
     }
 
@@ -145,8 +180,118 @@ export class Catfish extends AquaticMob {
     isInWater() {
         const centerX = this.position.x + this.hitbox.x / 2;
         const centerY = this.position.y + this.hitbox.y / 2;
-        return this.world.getBlockAtWorldPosition(centerX, centerY, false, this.dimension)
-            ?.blockType === Blocks.Water;
+        return isAquaticWaterBlock(
+            this.world.getBlockAtWorldPosition(centerX, centerY, false, this.dimension),
+        );
+    }
+
+    findLanternPlayer() {
+        const players = new Set(this.world.entities || []);
+        if (this.world.player) players.add(this.world.player);
+        return [...players]
+            .filter((player) =>
+                player !== this &&
+                player.type === EntityTypes.Player &&
+                player.health > 0 &&
+                player.dimension === this.dimension &&
+                player.holdItem?.itemId === Items.SeaLantern &&
+                distanceBetween(this, player) <= BLOCK_SIZE * 10,
+            )
+            .sort((a, b) => distanceBetween(this, a) - distanceBetween(this, b))[0] || null;
+    }
+
+    findFascinatingLantern() {
+        const centerX = this.position.x + this.hitbox.x / 2;
+        const centerY = this.position.y + this.hitbox.y / 2;
+        const originX = Math.floor(centerX / BLOCK_SIZE);
+        const originY = Math.floor(centerY / BLOCK_SIZE);
+        let nearest = null;
+        for (let dy = -8; dy <= 2; dy++) {
+            for (let dx = -16; dx <= 16; dx++) {
+                const x = (originX + dx + 0.5) * BLOCK_SIZE;
+                const y = (originY + dy + 0.5) * BLOCK_SIZE;
+                const block = this.world.getBlockAtWorldPosition(x, y, false, this.dimension);
+                if (block?.blockType !== Blocks.SeaLantern) continue;
+                const distance = Math.hypot(x - centerX, y - centerY);
+                if (distance > BLOCK_SIZE * 16 || (nearest && distance >= nearest.distance)) continue;
+                if (!this.findWaterPositionNear(new Vector2(x, y))) continue;
+                nearest = { x, y, distance };
+            }
+        }
+        return nearest ? new Vector2(nearest.x, nearest.y) : null;
+    }
+
+    findWaterPositionNear(position) {
+        const originX = Math.floor(position.x / BLOCK_SIZE);
+        const originY = Math.floor(position.y / BLOCK_SIZE);
+        let nearest = null;
+        for (let dy = -3; dy <= 3; dy++) {
+            for (let dx = -3; dx <= 3; dx++) {
+                const x = (originX + dx + 0.5) * BLOCK_SIZE;
+                const y = (originY + dy + 0.5) * BLOCK_SIZE;
+                const target = new Vector2(x, y);
+                if (!isAquaticWaterBlock(
+                    this.world.getBlockAtWorldPosition(x, y, false, this.dimension),
+                ) || !this.isWaterPosition(target)) continue;
+                const distance = Math.hypot(x - position.x, y - position.y);
+                if (!nearest || distance < nearest.distance) nearest = { target, distance };
+            }
+        }
+        return nearest?.target || null;
+    }
+
+    getEntityCenter(entity) {
+        return new Vector2(
+            entity.position.x + entity.hitbox.x / 2,
+            entity.position.y + entity.hitbox.y / 2,
+        );
+    }
+
+    updateLanternInterest() {
+        const lantern = this.lanternTargetBlock;
+        if (!lantern) return;
+        const block = this.world.getBlockAtWorldPosition(
+            lantern.x,
+            lantern.y,
+            false,
+            this.dimension,
+        );
+        if (block?.blockType !== Blocks.SeaLantern || !this.isInWater() || this.isFull()) {
+            this.lanternTargetBlock = null;
+            return;
+        }
+        const distance = Math.hypot(
+            lantern.x - (this.position.x + this.hitbox.x / 2),
+            lantern.y - (this.position.y + this.hitbox.y / 2),
+        );
+        if (distance < BLOCK_SIZE * 1.25) {
+            this.lanternChillTicks++;
+            if (this.lanternChillTicks > this.lanternChillTime) {
+                this.lanternTargetBlock = null;
+                this.lanternScanTicks = randomRange(70, 140);
+            }
+        } else {
+            this.lanternChillTicks = 0;
+        }
+    }
+
+    findSeaPickleContact() {
+        const firstX = Math.floor(this.position.x / BLOCK_SIZE);
+        const lastX = Math.floor((this.position.x + this.hitbox.x - 1) / BLOCK_SIZE);
+        const firstY = Math.floor(this.position.y / BLOCK_SIZE);
+        const lastY = Math.floor((this.position.y + this.hitbox.y - 1) / BLOCK_SIZE);
+        for (let x = firstX; x <= lastX; x++) {
+            for (let y = firstY; y <= lastY; y++) {
+                const block = this.world.getBlockAtWorldPosition(
+                    (x + 0.5) * BLOCK_SIZE,
+                    (y + 0.5) * BLOCK_SIZE,
+                    false,
+                    this.dimension,
+                );
+                if (block?.blockType === Blocks.SeaPickle) return block;
+            }
+        }
+        return null;
     }
 
     findFoodTarget() {
@@ -310,10 +455,22 @@ export class Catfish extends AquaticMob {
     hit(damage, hitfromX = 0, kb = 0) {
         const healthBefore = this.health;
         super.hit(damage, hitfromX, kb);
+        if (this.health < healthBefore && this.health > 0) {
+            playRandomSoundFromArray({
+                array: Sounds.Cod_Hurt,
+                positional: true,
+                origin: this.position,
+            });
+        }
         if (this.health < healthBefore) this.spit();
     }
 
     dieEvent() {
+        playRandomSoundFromArray({
+            array: Sounds.Cod_Death,
+            positional: true,
+            origin: this.position,
+        });
         if (runtime.GAMERULES.doMobLoot) {
             const cooked = this.fire > this.fireMin;
             for (const item of this.lootTable?.getRandomLoot() || []) {
@@ -332,6 +489,10 @@ export class Catfish extends AquaticMob {
     }
 
     interact(player, item) {
+        if (item?.itemId === Items.SeaPickle) {
+            this.spit();
+            return true;
+        }
         if (item?.itemId !== Items.Bucket) return false;
         const bucketItem = CATFISH_BUCKETS[this.catfishSize];
         const bucketData = this.createBucketData();

@@ -62,6 +62,19 @@ export const Sounds = Object.freeze({
 
     Water_Enter: ["liquid/splash", "liquid/splash2"],
 
+    Cod_Hurt: [
+        "mobs/fish/hurt1",
+        "mobs/fish/hurt2",
+        "mobs/fish/hurt3",
+        "mobs/fish/hurt4",
+    ],
+    Cod_Death: [
+        "mobs/fish/hurt1",
+        "mobs/fish/hurt2",
+        "mobs/fish/hurt3",
+        "mobs/fish/hurt4",
+    ],
+
     // Mobs
     Pig_Say: ["mobs/pig/say1", "mobs/pig/say2", "mobs/pig/say3"],
     Pig_Step: [

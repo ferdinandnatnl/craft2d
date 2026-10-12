@@ -186,6 +186,8 @@ export const Blocks = Object.freeze({
     AcaciaDoorUpper: 809,
     IronDoorLower: 810,
     IronDoorUpper: 811,
+    SeaLantern: 902,
+    SeaPickle: 903,
 });
 
 export const doorBlockPairs = Object.freeze([
@@ -2393,6 +2395,39 @@ export const blockTypes = [
         breakSound: Sounds.Break_Wood,
         breakingSound: Sounds.Breaking_Wood,
         toolType: ToolType.Axe,
+    }),
+    new BlockType({
+        blockId: Blocks.SeaLantern,
+        name: "Sea Lantern",
+        sprite: "sea_lantern",
+        hardness: 0.3,
+        breakSound: Sounds.Break_Stone,
+        breakingSound: Sounds.Breaking_Stone,
+        toolType: ToolType.Pickaxe,
+        dropBlock: null,
+        dropTable: new LootTable([
+            new LootItem({
+                itemId: Items.PrismarineCrystals,
+                maxCount: 3,
+                subtract: 2,
+            }),
+        ]),
+        lightLevel: 15,
+        excludeFromCreativeInventory: true,
+    }),
+    new BlockType({
+        blockId: Blocks.SeaPickle,
+        name: "Sea Pickle",
+        sprite: "sea_pickle",
+        hardness: 0,
+        collision: false,
+        transparent: true,
+        breakSound: Sounds.Break_Stone,
+        breakingSound: Sounds.Breaking_Stone,
+        dropBlock: null,
+        dropItem: Items.SeaPickle,
+        lightLevel: 6,
+        excludeFromCreativeInventory: true,
     }),
     ...doorBlockPairs.flatMap(({ lower, upper, sprite, name, itemId, wooden }) => [
         new BlockType({

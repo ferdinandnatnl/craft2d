@@ -180,6 +180,9 @@ export const Items = Object.freeze({
     TropicalFish: 1519,
     RawCatfish: 1530,
     CookedCatfish: 1531,
+    SeaLantern: 1532,
+    SeaPickle: 1533,
+    PrismarineCrystals: 1534,
 
     PigSpawnEgg: 3007,
     CowSpawnEgg: 3008,
@@ -1244,6 +1247,23 @@ export const items = [
         name: "Large Catfish Bucket",
         sprite: "alexsmobs/large_catfish_bucket.png",
         stackSize: 1,
+    }),
+    new Item({
+        itemId: Items.SeaLantern,
+        name: "Sea Lantern",
+        sprite: "sea_lantern",
+        placeBlock: 902,
+    }),
+    new Item({
+        itemId: Items.SeaPickle,
+        name: "Sea Pickle",
+        sprite: "sea_pickle",
+        placeBlock: 903,
+    }),
+    new Item({
+        itemId: Items.PrismarineCrystals,
+        name: "Prismarine Crystals",
+        sprite: "prismarine_crystals",
     }),
     //#endregion
 

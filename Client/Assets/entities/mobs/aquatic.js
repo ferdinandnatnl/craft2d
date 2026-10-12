@@ -59,6 +59,12 @@ const AQUATIC_SPECIES = Object.freeze({
     },
 });
 
+export function isAquaticWaterBlock(block) {
+    return block?.blockType === Blocks.Water ||
+        (block?.blockType === Blocks.SeaPickle &&
+            block.metaData?.waterlogged === true);
+}
+
 export class AquaticMob extends Mob {
     static spawnInWater = true;
 
@@ -199,8 +205,9 @@ export class AquaticMob extends Mob {
             [position.x + this.hitbox.x / 2 - inset, position.y + this.hitbox.y / 2 - inset],
         ];
         return points.every(([x, y]) =>
-            this.world.getBlockAtWorldPosition(x, y, false, this.dimension)
-                ?.blockType === Blocks.Water,
+            isAquaticWaterBlock(
+                this.world.getBlockAtWorldPosition(x, y, false, this.dimension),
+            ),
         );
     }
 

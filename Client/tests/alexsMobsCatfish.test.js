@@ -41,10 +41,13 @@ await import("../Assets/game/inventoryItem.js");
 
 const [
     { Catfish, catfishSpawnSize },
+    { Block },
     { Vector2 },
     { EntityTypes },
     { Blocks },
+    { blockTypes },
     { Items },
+    { getItem },
     { runtime },
     { BLOCK_SIZE },
     { VoxelEntities },
@@ -53,10 +56,13 @@ const [
     { Entities },
 ] = await Promise.all([
     import("../Assets/entities/mobs/catfish.js"),
+    import("../Assets/world/block.js"),
     import("../Assets/utils/classes.js"),
     import("../Assets/game/entity.js"),
     import("../../Shared/blocks.js"),
+    import("../../Shared/blocks.js"),
     import("../../Shared/items.js"),
+    import("../../Shared/item.js"),
     import("../Assets/utils/runtime.js"),
     import("../Assets/utils/globals.js"),
     import("../Assets/rendering/entities.js"),
@@ -71,9 +77,13 @@ function makeWorld() {
         entities: [],
         drops: [],
         removed: [],
+        blockOverrides: new Map(),
         difficulty: "easy",
         getChunkForX: () => chunk,
-        getBlockAtWorldPosition: () => ({ blockType: Blocks.Water }),
+        getBlockAtWorldPosition(x, y) {
+            return this.blockOverrides.get(`${Math.floor(x / BLOCK_SIZE)},${Math.floor(y / BLOCK_SIZE)}`) ||
+                { blockType: Blocks.Water };
+        },
         removeEntity(entity) {
             this.removed.push(entity);
             this.entities = this.entities.filter(entry => entry !== entity);
@@ -128,6 +138,98 @@ test("Catfish keeps the source sizes, health, storage capacity, and spawn varian
     assert.equal(catfishSpawnSize("Swamp", sequence(0.1, 0.9)), 1);
     assert.equal(catfishSpawnSize("Swamp", sequence(0.9, 0.09)), 2);
     assert.equal(catfishSpawnSize("Plains", sequence(0.9, 0.1)), 0);
+});
+
+test("Sea Lantern and Sea Pickle support blocks use the registered placeable vanilla items", () => {
+    const seaLantern = blockTypes.find(block => block.blockId === Blocks.SeaLantern);
+    const seaPickle = blockTypes.find(block => block.blockId === Blocks.SeaPickle);
+    assert.equal(getItem(Items.SeaLantern).placeBlock, Blocks.SeaLantern);
+    assert.equal(getItem(Items.SeaPickle).placeBlock, Blocks.SeaPickle);
+    assert.equal(seaLantern.lightLevel, 15);
+    assert.equal(seaPickle.lightLevel, 6);
+    assert.equal(seaPickle.collision, false);
+});
+
+test("Sea Pickle cluster metadata controls source light levels from one to four", () => {
+    const pickle = Object.create(Block.prototype);
+    pickle.blockType = Blocks.SeaPickle;
+    pickle.lightSourceLevel = 6;
+    pickle.wall = false;
+    pickle.markChunkDirty = () => {};
+
+    pickle.setMetaData();
+    assert.equal(pickle.metaData.waterlogged, true);
+    assert.equal(pickle.metaData.pickles, 1);
+    assert.equal(pickle.lightSourceLevel, 6);
+
+    assert.equal(pickle.addSeaPickle(), true);
+    assert.equal(pickle.metaData.pickles, 2);
+    assert.equal(pickle.lightSourceLevel, 9);
+    assert.equal(pickle.addSeaPickle(), true);
+    assert.equal(pickle.lightSourceLevel, 12);
+    assert.equal(pickle.addSeaPickle(), true);
+    assert.equal(pickle.lightSourceLevel, 15);
+    assert.equal(pickle.addSeaPickle(), false);
+
+    pickle.setBlockMetaData({ waterlogged: false, pickles: 4 });
+    assert.equal(pickle.lightSourceLevel, 0);
+});
+
+test("Sea Lantern items tempt Catfish and nearby Sea Lantern blocks attract unfilled fish", () => {
+    const world = makeWorld();
+    const catfish = new Catfish(world, { catfishSize: 0 });
+    const player = {
+        type: EntityTypes.Player,
+        position: new Vector2(BLOCK_SIZE * 4, 0),
+        hitbox: new Vector2(BLOCK_SIZE * 0.8, BLOCK_SIZE * 1.8),
+        dimension: 0,
+        health: 20,
+        holdItem: { itemId: Items.SeaLantern },
+    };
+    world.player = player;
+    world.entities = [catfish, player];
+
+    assert.equal(catfish.findLanternPlayer(), player);
+    catfish.update();
+    assert.ok(catfish.targetPosition);
+    assert.equal(catfish.foodTarget, null);
+
+    player.holdItem = { itemId: Items.Bucket };
+    catfish.lanternScanTicks = 1;
+    world.blockOverrides.set("2,0", { blockType: Blocks.SeaLantern });
+    catfish.tickUpdate();
+    assert.deepEqual(catfish.lanternTargetBlock, new Vector2(BLOCK_SIZE * 2.5, BLOCK_SIZE * 0.5));
+});
+
+test("Sea Pickles behave as water for aquatic navigation and make Catfish spit", () => {
+    const world = makeWorld();
+    const catfish = new Catfish(world, { catfishSize: 0 });
+    world.blockOverrides.set("0,0", {
+        blockType: Blocks.SeaPickle,
+        metaData: { waterlogged: true, pickles: 1 },
+    });
+    assert.equal(catfish.isInWater(), true);
+    assert.ok(catfish.findSeaPickleContact());
+    world.blockOverrides.set("0,0", {
+        blockType: Blocks.SeaPickle,
+        metaData: { waterlogged: false, pickles: 1 },
+    });
+    assert.equal(catfish.isInWater(), false);
+    world.blockOverrides.set("0,0", {
+        blockType: Blocks.SeaPickle,
+        metaData: { waterlogged: true, pickles: 1 },
+    });
+
+    catfish.stomachItems = [{ itemId: Items.RawCatfish, count: 1 }];
+    catfish.tickUpdate();
+    assert.equal(catfish.spitTime, 10);
+    assert.equal(catfish.stomachItems.length, 0);
+    assert.equal(world.drops.length, 1);
+
+    catfish.stomachItems = [{ itemId: Items.RawCatfish, count: 2 }];
+    assert.equal(catfish.interact({ abilities: {} }, { itemId: Items.SeaPickle }), true);
+    assert.equal(catfish.stomachItems.length, 0);
+    assert.equal(world.drops.length, 2);
 });
 
 test("small and medium Catfish collect item drops and spit them with a pickup delay", () => {

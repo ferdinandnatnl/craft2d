@@ -1803,12 +1803,29 @@ export class Player extends Entity {
             ? getBlock(selectedItem.placeBlock)
             : selectedItem;
 
+        const placingSeaPickle = blockToPlace.blockId === Blocks.SeaPickle;
+        const placingSeaLanternInWater =
+            blockToPlace.blockId === Blocks.SeaLantern &&
+            this.hoverBlock.blockType === Blocks.Water;
+        if (placingSeaPickle && this.checkForEntityOnMouse()?.isCatfish) return;
+
+        if (placingSeaPickle &&
+            this.hoverBlock.blockType === Blocks.SeaPickle) {
+            if (!this.hoverBlock.addSeaPickle()) return;
+            this.playerSwing();
+            if (!this.abilities.instaBuild) this.removeFromCurrentSlot();
+            this.inventory.syncInventoryMultiplayer();
+            return;
+        }
+
         // Check if it's a wall item/block
         const isWall = this.getSelectedSlotItem().props?.wall;
 
         // Validate placement based on wall or regular block
         if (!isWall) {
-            if (!this.checkBlockForPlacing(blockToPlace)) {
+            if (placingSeaPickle && this.hoverBlock.blockType !== Blocks.Water) return;
+            if (!placingSeaPickle && !placingSeaLanternInWater &&
+                !this.checkBlockForPlacing(blockToPlace)) {
                 return;
             }
         } else {
@@ -1824,8 +1841,10 @@ export class Player extends Entity {
 
         // Place the block
         const placementMetaData =
-            !isWall && blockToPlace.specialType === SpecialType.Door
-                ? { open: false } : null;
+            !isWall && placingSeaPickle
+                ? { waterlogged: true, pickles: 1 }
+                : !isWall && blockToPlace.specialType === SpecialType.Door
+                  ? { open: false } : null;
         const newBlock = chunk.setBlockTypeLocal(
             this.hoverBlock.x,
             this.hoverBlock.y,
@@ -1850,6 +1869,7 @@ export class Player extends Entity {
             isWall,
             activeDimension,
         );
+        if (placingSeaPickle) newBlock.syncMetaData(false);
 
         // Play appropriate break sound
         if (!isWall) {
