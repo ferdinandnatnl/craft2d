@@ -16,6 +16,7 @@ import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { END_OUTPOST_X, END_SHRINE_WIDTH, endIslandSurfaceY, isEndShrineChunk } from "@2dcraft.com/shared/endProgression.js";
 import { countMobsNearPlayer, MAX_MOBS_NEAR_PLAYER } from "./mobLimits.js";
 import { daylightFactor } from "../utils/daylight.js";
+import { catfishSpawnSize } from "../entities/mobs/catfish.js";
 
 const MUTANT_VARIANTS = {
     Zombie: "MutantZombie",
@@ -569,33 +570,45 @@ export class Chunk {
               ? ["Cod", "Salmon", "Salmon"]
               : ["Cod", "Cod", "Salmon", "TropicalFish", "Pufferfish"];
         const remaining = spawnLimit - existing;
-        const count = Math.min(
+        let count = Math.min(
             remaining,
             MAX_MOBS_NEAR_PLAYER - activeMobCount,
             randomRange(1, 3),
         );
+        const catfishGroup = randomRange(0, 18) === 0;
+        if (catfishGroup) count = Math.min(count, 2);
 
         for (let i = 0; i < count; i++) {
-            const isSquid = deepWaterCells.length > 0 && randomRange(0, 8) === 0;
+            const isSquid = !catfishGroup && deepWaterCells.length > 0 && randomRange(0, 8) === 0;
             const species = isSquid
                 ? "Squid"
+                : catfishGroup
+                  ? "Catfish"
                 : speciesForBiome[randomRange(0, speciesForBiome.length)];
             const cells = isSquid ? deepWaterCells : waterCells;
-            const position = cells[randomRange(0, cells.length)];
-            const hitbox = species === "Squid"
-                ? BLOCK_SIZE * 0.9
-                : species === "Pufferfish"
-                  ? BLOCK_SIZE * 0.7
-                  : BLOCK_SIZE * 0.5;
+            const cellPosition = cells[randomRange(0, cells.length)];
+            const catfishSize = species === "Catfish"
+                ? catfishSpawnSize(this.biome.name)
+                : null;
+            const dimensions = species === "Catfish"
+                ? Entities.Catfish.spawnSizeFor(catfishSize)
+                : {
+                    width: species === "Pufferfish" ? 0.7 : 0.9,
+                    height: species === "Squid" ? 0.9 :
+                        species === "Pufferfish" ? 0.7 : 0.5,
+                };
+            const width = dimensions.width * BLOCK_SIZE;
+            const height = dimensions.height * BLOCK_SIZE;
             const entity = this.world.summonEntity(
                 Entities[species],
                 new Vector2(
-                    position.x +
-                        (BLOCK_SIZE * 0.9 - BLOCK_SIZE *
-                            (species === "Pufferfish" ? 0.7 : 0.9)) / 2,
-                    position.y + (BLOCK_SIZE * 0.5 - hitbox) / 2,
+                    cellPosition.x + (BLOCK_SIZE * 0.9 - width) / 2,
+                    cellPosition.y + (BLOCK_SIZE * 0.5 - height) / 2,
                 ),
-                { myChunkX: this.x },
+                {
+                    myChunkX: this.x,
+                    ...(species === "Catfish" ? { catfishSize } : {}),
+                },
             );
             entity.dimension = this.dimension;
             this.entities.push(entity);

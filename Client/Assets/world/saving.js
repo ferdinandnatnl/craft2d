@@ -14,6 +14,7 @@ import { Boat } from "../entities/boat.js";
 import { Warden } from "../entities/mobs/warden.js";
 import { Minecart } from "../entities/minecart.js";
 import { CreeperMinion, CreeperMinionEgg } from "../entities/mobs/creeperMinion.js";
+import { Catfish } from "../entities/mobs/catfish.js";
 
 export const AUTOSAVE_INTERVAL = 60000;
 
@@ -42,6 +43,7 @@ export let currentSave = {
     dimensions: [], // Array of { index, chunks: [{ x, biome, previousChunk, blocks, walls }] }
     boats: [],
     golems: [],
+    catfish: [],
     playerBoatUUID: null,
 };
 
@@ -153,6 +155,9 @@ export function saveWorld(message = true, toFile = false) {
             health: entity.health,
             dimension: entity.dimension,
         }));
+    currentSave.catfish = runtime.world.entities
+        .filter(entity => entity.isCatfish && entity.health > 0)
+        .map(entity => entity.createSaveData());
     currentSave.minecarts = runtime.world.entities
         .filter(entity => entity.name === "Minecart")
         .map(entity => ({
@@ -536,6 +541,43 @@ export async function loadWorld(save) {
         chunk.entities.push(warden);
     }
 
+    const savedCatfish = Array.isArray(currentSave.catfish)
+        ? currentSave.catfish : [];
+    for (const saved of savedCatfish) {
+        if (!saved || typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) || saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) continue;
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const catfishSize = Number.isInteger(saved.catfishSize)
+            ? Math.max(0, Math.min(2, saved.catfishSize)) : 0;
+        const catfish = runtime.world.summonEntity(
+            Catfish,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                catfishSize,
+                health: Math.min(saved.health, 10 + catfishSize * 10),
+                fromBucket: saved.fromBucket === true,
+                stomachItems: Array.isArray(saved.stomachItems)
+                    ? saved.stomachItems : [],
+                swallowedEntity: saved.swallowedEntity ?? null,
+                spitTime: Number.isFinite(saved.spitTime)
+                    ? Math.max(0, Math.min(10, saved.spitTime)) : 0,
+                eatCooldown: Number.isFinite(saved.eatCooldown)
+                    ? Math.max(0, Math.min(120, saved.eatCooldown)) : 0,
+                myChunkX: chunkX,
+            },
+            false,
+            saved.UUID,
+        );
+        catfish.dimension = dimensionIndex;
+        if (!chunk.entities.includes(catfish)) chunk.entities.push(catfish);
+    }
     const savedMinecarts = Array.isArray(currentSave.minecarts)
         ? currentSave.minecarts : [];
     for (const saved of savedMinecarts) {

@@ -634,6 +634,15 @@ export class Player extends Entity {
             return;
         }
 
+        if ([
+            Items.SmallCatfishBucket,
+            Items.MediumCatfishBucket,
+            Items.LargeCatfishBucket,
+        ].includes(item.itemId)) {
+            this.useCatfishBucket();
+            return;
+        }
+
         if (item.itemId === Items.EyeOfEnder) {
             if (this.hoverBlock?.blockType === Blocks.EndPortalFrame) return;
             if (activeDimension !== 0) return;
@@ -682,7 +691,12 @@ export class Player extends Entity {
     spawnEntityFromEgg(entityTypeName) {
         const EntityType = Entities[entityTypeName];
         const groundBlock = this.hoverBlock;
-        const spawnSize = EntityType?.spawnSize;
+        const catfishSize = entityTypeName === "Catfish"
+            ? Entities.Catfish.randomSpawnSize("Swamp")
+            : null;
+        const spawnSize = entityTypeName === "Catfish"
+            ? Entities.Catfish.spawnSizeFor(catfishSize)
+            : EntityType?.spawnSize;
         if (!EntityType || !groundBlock || !spawnSize) return;
 
         const groundDefinition = getBlock(groundBlock.blockType);
@@ -738,7 +752,11 @@ export class Player extends Entity {
         const entity = this.world.summonEntity(
             EntityType,
             position,
-            { myChunkX: chunk.x, dimension: activeDimension },
+            {
+                myChunkX: chunk.x,
+                dimension: activeDimension,
+                ...(entityTypeName === "Catfish" ? { catfishSize } : {}),
+            },
             multiplayer,
         );
         if (!entity) return;
@@ -1166,6 +1184,56 @@ export class Player extends Entity {
         }
     }
 
+    useCatfishBucket() {
+        const block = this.hoverBlock;
+        if (!block || block.blockType !== Blocks.Water) return false;
+        const sizeByBucket = new Map([
+            [Items.SmallCatfishBucket, 0],
+            [Items.MediumCatfishBucket, 1],
+            [Items.LargeCatfishBucket, 2],
+        ]);
+        const size = sizeByBucket.get(this.holdItem.itemId);
+        if (size === undefined ||
+            countMobsNearPlayer(this.world, activeDimension) >= MAX_MOBS_NEAR_PLAYER) {
+            return false;
+        }
+
+        const spawnSize = Entities.Catfish.spawnSizeFor(size);
+        const width = spawnSize.width * BLOCK_SIZE;
+        const height = spawnSize.height * BLOCK_SIZE;
+        const position = new Vector2(
+            block.transform.position.x + (BLOCK_SIZE - width) / 2,
+            block.transform.position.y + (BLOCK_SIZE - height) / 2,
+        );
+        const chunk = this.world.getChunkForX(position.x, activeDimension);
+        if (!chunk) return false;
+
+        const bucketData = this.holdItem.props || {};
+        const catfish = this.world.summonEntity(
+            Entities.Catfish,
+            position,
+            {
+                catfishSize: size,
+                health: Number.isFinite(bucketData.health) ? bucketData.health : undefined,
+                stomachItems: Array.isArray(bucketData.stomachItems)
+                    ? bucketData.stomachItems : [],
+                swallowedEntity: bucketData.swallowedEntity ?? null,
+                fromBucket: true,
+                myChunkX: chunk.x,
+                dimension: activeDimension,
+            },
+            multiplayer,
+        );
+        if (!catfish) return false;
+        if (!chunk.entities.includes(catfish)) chunk.entities.push(catfish);
+        this.playerSwing();
+        if (!this.abilities.instaBuild) {
+            this.removeFromCurrentSlot();
+            this.inventory.addItem(new InventoryItem({ itemId: Items.Bucket, count: 1 }));
+        }
+        return true;
+    }
+
     processEating() {
         if (!this.eating) return;
 
@@ -1503,6 +1571,7 @@ export class Player extends Entity {
 
     pickupDrop(drop) {
         if (!drop.isReady) return;
+        if ((drop.pickupDelayUntil || 0) > (runtime.passedTime || 0)) return;
 
         let left = 0;
 

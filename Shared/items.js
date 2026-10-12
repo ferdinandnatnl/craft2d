@@ -29,6 +29,7 @@ const SPAWN_EGG_COLORS = Object.freeze({
     TropicalFish: { baseColor: "#EF6915", overlayColor: "#FFF9EF" },
     Squid: { baseColor: "#223B4D", overlayColor: "#708899" },
     Warden: { baseColor: "#0F4649", overlayColor: "#39D6E0" },
+    Catfish: { baseColor: "#807757", overlayColor: "#8A7466" },
 });
 
 export const Items = Object.freeze({
@@ -177,6 +178,8 @@ export const Items = Object.freeze({
     CookedSalmon: 1517,
     Pufferfish: 1518,
     TropicalFish: 1519,
+    RawCatfish: 1530,
+    CookedCatfish: 1531,
 
     PigSpawnEgg: 3007,
     CowSpawnEgg: 3008,
@@ -198,6 +201,10 @@ export const Items = Object.freeze({
     TropicalFishSpawnEgg: 3024,
     SquidSpawnEgg: 3025,
     WardenSpawnEgg: 3026,
+    CatfishSpawnEgg: 3033,
+    SmallCatfishBucket: 3034,
+    MediumCatfishBucket: 3035,
+    LargeCatfishBucket: 3036,
     MutantZombieSpawnEgg: 3000,
     MutantCreeperSpawnEgg: 3001,
     MutantSkeletonSpawnEgg: 3002,
@@ -851,6 +858,21 @@ export const items = [
         foodValue: 1,
         foodSaturation: 0.2,
     }),
+    new Item({
+        itemId: Items.RawCatfish,
+        name: "Raw Catfish",
+        sprite: "alexsmobs/raw_catfish",
+        smeltOutput: { itemId: Items.CookedCatfish },
+        foodValue: 2,
+        foodSaturation: 0.6,
+    }),
+    new Item({
+        itemId: Items.CookedCatfish,
+        name: "Cooked Catfish",
+        sprite: "alexsmobs/cooked_catfish",
+        foodValue: 5,
+        foodSaturation: 2.5,
+    }),
     new Item({ itemId: Items.Cookie, name: "Cookie", sprite: "cookie", foodValue: 2, foodSaturation: 0.4 }),
     new Item({ itemId: Items.MushroomStew, name: "Mushroom Stew", sprite: "mushroom_stew", stackSize: 1, foodValue: 6, foodSaturation: 7.2 }),
     new Item({ itemId: Items.RawRabbit, name: "Raw Rabbit", sprite: "rabbit_raw", smeltOutput: { itemId: Items.CookedRabbit }, foodValue: 3, foodSaturation: 1.8 }),
@@ -1197,6 +1219,31 @@ export const items = [
         sprite: "spawn_egg",
         spawnEntity: "Warden",
         spawnEggColors: SPAWN_EGG_COLORS.Warden,
+    }),
+    new Item({
+        itemId: Items.CatfishSpawnEgg,
+        name: "Catfish Spawn Egg",
+        sprite: "spawn_egg",
+        spawnEntity: "Catfish",
+        spawnEggColors: SPAWN_EGG_COLORS.Catfish,
+    }),
+    new Item({
+        itemId: Items.SmallCatfishBucket,
+        name: "Small Catfish Bucket",
+        sprite: "alexsmobs/small_catfish_bucket.svg",
+        stackSize: 1,
+    }),
+    new Item({
+        itemId: Items.MediumCatfishBucket,
+        name: "Medium Catfish Bucket",
+        sprite: "alexsmobs/medium_catfish_bucket.svg",
+        stackSize: 1,
+    }),
+    new Item({
+        itemId: Items.LargeCatfishBucket,
+        name: "Large Catfish Bucket",
+        sprite: "alexsmobs/large_catfish_bucket.png",
+        stackSize: 1,
     }),
     //#endregion
 

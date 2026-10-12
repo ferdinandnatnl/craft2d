@@ -50,6 +50,13 @@ const AQUATIC_SPECIES = Object.freeze({
         itemId: Items.InkSack,
         maxDrop: 3,
     },
+    Catfish: {
+        sprite: "alexsmobs/catfish_small.png",
+        spriteCrop: { x: 22, y: 14, width: 14, height: 6 },
+        health: 10,
+        hitbox: new Vector2(BLOCK_SIZE * 0.9, BLOCK_SIZE * 0.6),
+        itemId: Items.RawCatfish,
+    },
 });
 
 export class AquaticMob extends Mob {
@@ -64,6 +71,8 @@ export class AquaticMob extends Mob {
             position = new Vector2(),
             invulnerable = false,
             myChunkX = 0,
+            UUID,
+            despawn = true,
         } = {},
     ) {
         const definition = AQUATIC_SPECIES[species] || AQUATIC_SPECIES.Cod;
@@ -73,6 +82,7 @@ export class AquaticMob extends Mob {
             noAi,
             position,
             invulnerable,
+            UUID,
             hitbox: definition.hitbox,
             body: createAquaticBody(definition),
             myChunkX,
@@ -81,6 +91,7 @@ export class AquaticMob extends Mob {
             noGravity: true,
             float: false,
             canDrown: false,
+            despawn,
             lootTable: new LootTable([
                 new LootItem({
                     itemId: definition.itemId,

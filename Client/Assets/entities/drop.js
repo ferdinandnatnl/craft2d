@@ -53,6 +53,8 @@ export class Drop extends Entity {
         this.props = props;
 
         this.isReady = false;
+        this.spawnedAt = runtime.passedTime || 0;
+        this.pickupDelayUntil = 0;
 
         setTimeout(() => {
             this.isReady = true;

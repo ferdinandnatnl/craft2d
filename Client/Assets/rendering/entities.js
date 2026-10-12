@@ -5,6 +5,7 @@ import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { getBlock } from "../world/block.js";
 import { getBoatPartPitch, getHeadPitch, getLimbPitch, getSwimPartPitch } from "./entityPose.js";
 import { skinBox, skinLimbHalf } from "./entityGeometry.js";
+import { createAlexCatfishRig, updateAlexCatfishRig } from "./alexsMobsCatfishRig.js";
 import { mutantPartParent, mutantPartPitch, mutantWalkBob } from "./mutantPose.js";
 import { MUTANT_CREEPER_RIG } from "./mutantCreeperRig.js";
 import { renderLightTint } from "./renderLight.js";
@@ -82,6 +83,14 @@ export class VoxelEntities {
             bends[name] = elbow;
         };
         const species = spriteName.split("/")[0];
+        if (entity.isCatfish) {
+            const record = {
+                ...createAlexCatfishRig(image, entity.catfishSize),
+                source: image.src,
+            };
+            this.scene.add(record.group);
+            return record;
+        }
         const quadruped = ["cow", "pig", "sheep"].includes(species);
         const creeper = species === "creeper" || entity.isCreeperMinion;
         const bodylessSprite = !entity.body && entity.voxelSprite;
@@ -802,6 +811,13 @@ export class VoxelEntities {
             const aquaticBob = entity.isAquatic ? Math.sin(aquaticPhase * 2) * 0.015 : 0;
             record.group.position.set((entity.position.x + entity.hitbox.x / 2) / BLOCK_SIZE,
                 -(entity.position.y + entity.hitbox.y) / BLOCK_SIZE + aquaticBob, 0.05);
+            if (record.catfishRig) {
+                updateAlexCatfishRig(record, entity, seconds);
+                record.material.color.setRGB(light, light, light);
+                record.material.emissive.set(entity.body.flashingColor || 0);
+                record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+                continue;
+            }
             if (record.eggModel) {
                 record.material.color.setRGB(light, light, light);
                 continue;
