@@ -9,6 +9,7 @@ import { Square, Transform, Vector2, arePropsEqual, randomRange } from "../utils
 import { BLOCK_SIZE, CHUNK_HEIGHT, TICK_SPEED, ToolType, multiplayer, updatingBlocks } from "../utils/globals.js";
 import { getSpriteAverageColor, getSpriteSize, getSpriteUrl } from "../utils/texturePackLoader.js";
 import { blockRegistry } from "@2dcraft.com/shared/blockRegistry.js";
+import { doorBlockPairs } from "@2dcraft.com/shared/blocks.js";
 import {
     activeDimension,
     getDimension,
@@ -206,6 +207,9 @@ export class Block extends Square {
         }
 
         switch (getBlock(this.blockType).specialType) {
+            case SpecialType.Door:
+                this.setDoorOpen(true);
+                break;
             case SpecialType.RedstoneLamp:
                 this.lightSourceLevel = 8;
                 this.setState(1);
@@ -238,6 +242,9 @@ export class Block extends Square {
         }
 
         switch (getBlock(this.blockType).specialType) {
+            case SpecialType.Door:
+                this.setDoorOpen(false);
+                break;
             case SpecialType.RedstoneLamp:
                 this.lightSourceLevel = 0;
                 this.setState(0);
@@ -354,7 +361,7 @@ export class Block extends Square {
         this.metaData = new Metadata(props);
     }
 
-    syncMetaData() {
+    syncMetaData(uploadChunk = true) {
         if (!multiplayer) return;
         if (!this.metaData) return;
 
@@ -365,13 +372,15 @@ export class Block extends Square {
                 x: this.x,
                 y: this.y,
                 chunkX: this.chunkX,
-                dimensionIndex: activeDimension,
+                dimensionIndex: this.dimensionIndex,
                 blockType: this.blockType,
                 metaData: this.metaData,
             },
         });
 
-        this.world.uploadChunkToServer(this.chunkX);
+        if (uploadChunk) {
+            this.world.uploadChunkToServer(this.chunkX, this.dimensionIndex);
+        }
     }
 
     recieveSyncMetaData(metaData) {
@@ -418,12 +427,12 @@ export class Block extends Square {
         this.blockType = blockType;
         const block = getBlock(blockType);
 
-        this.lightSourceLevel = block.lightLevel;
+        this.lightSourceLevel = this.wall ? 0 : block.lightLevel;
 
         this.powered = false;
 
         if (myChunk) {
-            if (block.chunkUpdate) {
+            if (!this.wall && block.chunkUpdate) {
                 if (!myChunk.update.includes(this)) {
                     myChunk.update.push(this);
                 }
@@ -436,23 +445,23 @@ export class Block extends Square {
         }
 
         this.metaData = undefined;
-        this.setMetaData();
+        if (!this.wall) this.setMetaData();
 
-        if (block.updateSpeed > 0 && !block.chunkUpdate)
+        if (!this.wall && block.updateSpeed > 0 && !block.chunkUpdate)
             updatingBlocks.push(this);
 
-        this.drawOffset = block.grassOffset ? randomRange(-2, 2) : 0;
+        this.drawOffset = !this.wall && block.grassOffset ? randomRange(-2, 2) : 0;
 
         this.cutoff = 0;
 
         this.frameCount = 0;
         this.filterBrightness = 100;
 
-        if (block.defaultCutoff > 0) {
+        if (!this.wall && block.defaultCutoff > 0) {
             this.cutoff = block.defaultCutoff;
         }
 
-        if (block.fluid) {
+        if (!this.wall && block.fluid) {
             this.cutoff = this.metaData.waterLevel;
         }
 
@@ -461,7 +470,7 @@ export class Block extends Square {
             this.ambientSound = null;
         }
 
-        if (block.ambientSound) {
+        if (!this.wall && block.ambientSound) {
             this.ambientSound = playMessySound(
                 this.world.getBlockWorldPosition(this),
                 block.ambientSound + ".ogg",
@@ -472,19 +481,20 @@ export class Block extends Square {
 
         this.onAWall = false;
         // Wall logic
-        if (block.canBePlacedOnWall) {
+        if (!this.wall && block.canBePlacedOnWall) {
             const wall = this.getWallBehind();
             if (wall && !getBlock(wall.blockType).air) {
                 this.onAWall = true;
             }
         }
 
-        this.redstoneOutput = block.baseRedstoneOutput;
+        this.redstoneOutput = this.wall ? 0 : block.baseRedstoneOutput;
 
         this.updateSprite();
     }
 
     update() {
+        if (this.wall) return;
         const blockDef = getBlock(this.blockType);
 
         if (blockDef.fluid) {
@@ -1145,6 +1155,36 @@ export class Block extends Square {
 
         const block = getBlock(this.blockType);
 
+        if (
+            this.blockType === Blocks().Pumpkin &&
+            itemInHand?.itemId === Items.Shears
+        ) {
+            this.world.setBlockType(this, Blocks().CarvedPumpkin);
+            this.world.serverPlaceBlock(
+                this.chunkX,
+                this.x,
+                this.y,
+                Blocks().CarvedPumpkin,
+                false,
+                activeDimension,
+            );
+            player.reduceDurability();
+            player.playerSwing();
+
+            if (runtime.GAMERULES.doTileDrops) {
+                this.world.spawnDrop(
+                    new Vector2(
+                        this.transform.position.x + BLOCK_SIZE / 2,
+                        this.transform.position.y,
+                    ),
+                    { itemId: Items.PumpkinSeeds, count: 4 },
+                );
+            }
+
+            player.tryCreateGolem(this);
+            return;
+        }
+
         switch (block.specialType) {
             case SpecialType.Jukebox:
                 this.jukeBoxInteraction(getItem(itemInHand.itemId), player);
@@ -1161,7 +1201,69 @@ export class Block extends Square {
             case SpecialType.EndPortalFrame:
                 this.insertEnderEye(player);
                 break;
+            case SpecialType.Door: {
+                const door = getDoorPair(this.blockType);
+                if (door?.wooden) this.setDoorOpen(!this.metaData?.open);
+                break;
+            }
         }
+    }
+
+    setDoorOpen(open) {
+        const door = getDoorPair(this.blockType);
+        if (!door) return false;
+
+        const isUpper = this.blockType === door.upper;
+        const lower = isUpper
+            ? this.world.getBlockAtWorldPosition(
+                  this.transform.position.x,
+                  this.transform.position.y + BLOCK_SIZE,
+                  false,
+                  this.dimensionIndex,
+              )
+            : this;
+        const upper = isUpper
+            ? this
+            : this.world.getBlockAtWorldPosition(
+                  this.transform.position.x,
+                  this.transform.position.y - BLOCK_SIZE,
+                  false,
+                  this.dimensionIndex,
+              );
+        if (lower?.blockType !== door.lower || upper?.blockType !== door.upper) {
+            return false;
+        }
+
+        const nextState = Boolean(open);
+        if (
+            Boolean(lower.metaData?.open) === nextState &&
+            Boolean(upper.metaData?.open) === nextState
+        ) {
+            return false;
+        }
+
+        const metadata = {
+            ...(normalizeMetaDataObject(lower.metaData) || {}),
+            open: nextState,
+        };
+        lower.setBlockMetaData(metadata);
+        upper.setBlockMetaData(metadata);
+
+        if (door.wooden) {
+            playPositionalSound(
+                this.world.getBlockWorldPosition(this),
+                Sounds.Wood_Click,
+                10,
+                nextState ? 0.8 : 0.65,
+            );
+        }
+
+        lower.syncMetaData(false);
+        upper.syncMetaData(false);
+        if (multiplayer) {
+            this.world.uploadChunkToServer(lower.chunkX, lower.dimensionIndex);
+        }
+        return true;
     }
 
     insertEnderEye(player) {
@@ -1472,6 +1574,7 @@ export class Block extends Square {
     }
 
     blockUpdate() {
+        if (this.wall) return;
         const blockDef = getBlock(this.blockType);
 
         // Check for blocks that should break if they don't have a solid block underneath
@@ -1536,7 +1639,7 @@ export class Block extends Square {
         if (wall) {
             let blockFront = this.getBlockFront();
 
-            if (blockFront.onAWall) {
+            if (blockFront?.onAWall) {
                 blockFront.breakBlock(
                     getBlock(blockFront.blockType).dropWithoutTool,
                     false,
@@ -1548,7 +1651,7 @@ export class Block extends Square {
 
         // Handle crop loot when fully grown
         if (!skipDrops) {
-            if (blockDef.cropOutcome) {
+            if (!wall && blockDef.cropOutcome) {
                 if (this.metaData?.props?.stage === blockDef.states.length - 1)
                     this.dropCropLoot(blockDef);
                 else this.dropBlock();
@@ -1562,6 +1665,7 @@ export class Block extends Square {
                 const blockAtPos = this.world.getBlockAtWorldPosition(
                     block.x,
                     block.y,
+                    wall,
                 );
 
                 if (blockAtPos && blockAtPos !== this) {
@@ -1571,7 +1675,7 @@ export class Block extends Square {
             }
         }
 
-        if (!skipDrops && blockDef.dropTable) this.dropTable();
+        if (!wall && !skipDrops && blockDef.dropTable) this.dropTable();
 
         this.playBreakSound();
 
@@ -1587,7 +1691,7 @@ export class Block extends Square {
             }
         }
 
-        if (blockDef.changeToBlockWhenBroken) {
+        if (!wall && blockDef.changeToBlockWhenBroken) {
             this.world.setBlockType(this, blockDef.changeToBlockWhenBroken);
         } else {
             this.world.setBlockType(this, Blocks().Air);
@@ -1736,12 +1840,46 @@ export class Block extends Square {
     }
 
     draw(ctx, camera) {
-        super.draw(ctx, camera);
+        if (
+            !this.wall &&
+            getBlock(this.blockType).specialType === SpecialType.Door &&
+            this.metaData?.open &&
+            this.img?.complete
+        ) {
+            const width = Math.max(2, Math.round(BLOCK_SIZE * 0.12));
+            const blockX = this.transform.position.x;
+            const x = Math.round(
+                (this.metaData.hinge === "left" ? blockX : blockX + BLOCK_SIZE - width) -
+                    camera.x,
+            );
+            const y = Math.round(this.transform.position.y - camera.y);
+            ctx.save();
+            ctx.globalAlpha = this.alpha;
+            if (this.filterBrightness < 100) {
+                ctx.filter = `brightness(${this.filterBrightness}%)`;
+            }
+            ctx.drawImage(this.img, x, y, width, BLOCK_SIZE);
+            ctx.filter = "none";
+            if (this.dark) {
+                ctx.globalAlpha = 0.5;
+                ctx.fillStyle = "black";
+                ctx.fillRect(x, y, width, BLOCK_SIZE);
+            }
+            if (this.lightLevel < 15) {
+                ctx.globalAlpha = 1 - this.getBrightness();
+                ctx.fillStyle = "black";
+                ctx.fillRect(x, y, width, BLOCK_SIZE);
+            }
+            ctx.restore();
+        } else {
+            super.draw(ctx, camera);
+        }
 
         this.drawSignText(ctx, camera);
     }
 
     drawSignText(ctx, camera) {
+        if (this.wall) return;
         if (getBlock(this.blockType).specialType !== SpecialType.Sign) return;
         if (!this.metaData || !this.metaData.text) return;
 
@@ -1805,4 +1943,20 @@ export class Block extends Square {
 export function getBlock(blockId) {
     return blockMap().has(blockId) ? blockMap().get(blockId) : 0;
 }
+
+export function getDoorPair(blockType) {
+    return (
+        doorBlockPairs.find(
+            (door) => door.lower === blockType || door.upper === blockType,
+        ) || null
+    );
+}
+
+export function hasBlockCollision(block) {
+    if (!block) return false;
+    const def = getBlock(block.blockType);
+    if (!def?.collision) return false;
+    return !(def.specialType === SpecialType.Door && block.metaData?.open);
+}
+
 runtime.getBlock = getBlock;

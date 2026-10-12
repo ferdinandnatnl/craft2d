@@ -43,6 +43,11 @@ The game uses the original texture pack by default. In the pause menu, switch
 Press **F1** to show or hide the HUD. Uploaded texture packs remain supported;
 the optional **Natural 32x** pack is available under Options → Texture Packs.
 
+Use the **Wallpaper** tab in Creative to get a background version of any block.
+In Survival, put a block stack in the Converter to switch it between a block
+and wallpaper. Use the normal Place control to put wallpaper behind blocks or
+on an adjacent background tile. A hammer removes wallpaper.
+
 ### Survival progression
 
 Type `/progress` in chat for an in-game guide. In this 2D world, place at least
@@ -56,6 +61,11 @@ End shrine, fill its three frames, and enter the End to fight the dragon.
 Explore outer End islands for loot outposts, then use the center portal to
 return home. Newly generated Overworld chunks can also contain ruined portals
 with supplies to repair and light them.
+
+Use `/locate village` in chat to find the nearest village. Pumpkin patches can
+appear in plains, forests, taiga, and savanna. Use shears on a pumpkin, then
+place the carved pumpkin last: put it above two snow blocks for a snow golem,
+or above the center of a four-iron-block T for an iron golem.
 
 ```text
   O

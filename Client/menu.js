@@ -1410,10 +1410,15 @@ export function setGameMode(gamemode) {
 
 export let worldSeed = "";
 export function updateWorldSeed(value) {
-    if (value === "") {
-        value = Math.floor(Math.random() * 100000000);
-    }
     worldSeed = value;
+    document.querySelectorAll(".seed-presets [data-seed]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.seed === value.toLowerCase()));
+    });
+}
+
+export function selectWorldSeed(seed) {
+    worldSeedInput.value = seed;
+    updateWorldSeed(seed);
 }
 
 export let worldName = "New World";

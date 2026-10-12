@@ -6,7 +6,6 @@ import { surfaceTexture } from "../utils/surfaceTexture.js";
 export class VoxelMaterials {
     constructor() {
         this.entries = new Map();
-        this.revision = 0;
     }
 
     get(sprite, { top = false, plant = false, fluid = false, emissive = false, cutaway = false } = {}) {
@@ -49,7 +48,6 @@ export class VoxelMaterials {
             entry.frames = top ? 1 : Math.max(1, Math.floor(entry.image.height / entry.image.width));
             this.updateImage(entry, 0);
             if (!plant && (!fluid || water)) this.makeNormalMap(entry);
-            this.revision++;
         };
         entry.image.onerror = () => {
             console.warn(`Could not load voxel texture: ${sprite}`);
@@ -162,7 +160,7 @@ export class FaceBatch {
         if (exposed.bottom !== false) this.quad(sprite, options, [[x,y,z],[X,y,z],[X,y,Z],[x,y,Z]], [0,-1,0], light);
     }
 
-    build(group, shadows = true) {
+    build(group, { castShadow = true, receiveShadow = true } = {}) {
         for (const child of [...group.children]) {
             child.geometry.dispose();
             group.remove(child);
@@ -175,8 +173,8 @@ export class FaceBatch {
             geometry.setAttribute("color", new THREE.Float32BufferAttribute(values.colors, 3));
             geometry.computeBoundingSphere();
             const mesh = new THREE.Mesh(geometry, entry.material);
-            mesh.castShadow = shadows && !entry.material.transparent;
-            mesh.receiveShadow = shadows;
+            mesh.castShadow = castShadow && !entry.material.transparent;
+            mesh.receiveShadow = receiveShadow;
             group.add(mesh);
         }
     }

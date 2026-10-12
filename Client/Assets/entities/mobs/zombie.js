@@ -80,6 +80,7 @@ export class Zombie extends Mob {
 
         touchingPlayer.hit(4, this.position.x, 3, `Killed by ${this.name}`);
 
+        this.attackPoseUntil = runtime.passedTime + 0.4;
         this.attackCooldown = 1;
     }
 

@@ -51,6 +51,7 @@ export const Items = Object.freeze({
     GoldIngot: 24,
     RedstoneDust: 25,
     GoldNugget: 26,
+    Emerald: 27,
 
     RawBeef: 1500,
     CookedBeef: 1501,
@@ -70,6 +71,12 @@ export const Items = Object.freeze({
     Leather: 50,
     Bone: 51,
     Gunpowder: 52,
+    Feather: 53,
+    String: 54,
+    SpiderEye: 55,
+    Slimeball: 56,
+    Sugar: 57,
+    SugarCane: 58,
 
     Seeds: 100,
 
@@ -89,6 +96,20 @@ export const Items = Object.freeze({
     MusicDiscWait: 2267,
 
     Snowball: 300,
+    Boat: 301,
+    Egg: 302,
+    PumpkinSeeds: 303,
+
+    RawChicken: 1528,
+    CookedChicken: 1529,
+    Cookie: 1520,
+    MushroomStew: 1521,
+    RawRabbit: 1522,
+    CookedRabbit: 1523,
+    RabbitFoot: 1524,
+    RabbitHide: 1525,
+    RabbitStew: 1526,
+    PumpkinPie: 1527,
 
     // Dyes
     InkSack: 1200,
@@ -117,10 +138,41 @@ export const Items = Object.freeze({
     BlazePowder: 2003,
     EnderPearl: 2004,
     EyeOfEnder: 2005,
+    FishingRod: 2006,
+    EchoShard: 2007,
+
+    RawCod: 1514,
+    CookedCod: 1515,
+    RawSalmon: 1516,
+    CookedSalmon: 1517,
+    Pufferfish: 1518,
+    TropicalFish: 1519,
+
+    MutantZombieSpawnEgg: 3000,
+    MutantCreeperSpawnEgg: 3001,
+    MutantSkeletonSpawnEgg: 3002,
+    MutantEndermanSpawnEgg: 3003,
+    MutantSnowGolemSpawnEgg: 3004,
+    SpiderPigSpawnEgg: 3005,
+    ChemicalX: 3006,
+
+    OakDoor: 4000,
+    SpruceDoor: 4001,
+    BirchDoor: 4002,
+    JungleDoor: 4003,
+    AcaciaDoor: 4004,
+    IronDoor: 4005,
 });
 
 export const items = [
     new Item({ itemId: 0, name: "Stick", sprite: "stick", fuelTime: 5 }),
+    new Item({ itemId: Items.Boat, name: "Boat", sprite: "boat" }),
+    new Item({ itemId: Items.OakDoor, name: "Oak Door", sprite: "door_wood", placeBlock: 800 }),
+    new Item({ itemId: Items.SpruceDoor, name: "Spruce Door", sprite: "door_spruce", placeBlock: 802 }),
+    new Item({ itemId: Items.BirchDoor, name: "Birch Door", sprite: "door_birch", placeBlock: 804 }),
+    new Item({ itemId: Items.JungleDoor, name: "Jungle Door", sprite: "door_jungle", placeBlock: 806 }),
+    new Item({ itemId: Items.AcaciaDoor, name: "Acacia Door", sprite: "door_acacia", placeBlock: 808 }),
+    new Item({ itemId: Items.IronDoor, name: "Iron Door", sprite: "door_iron", placeBlock: 810 }),
 
     //#region Wooden Tools
     new Item({
@@ -546,6 +598,16 @@ export const items = [
     new Item({ itemId: Items.BlazePowder, name: "Blaze Powder", sprite: "blaze_powder" }),
     new Item({ itemId: Items.EnderPearl, name: "Ender Pearl", sprite: "ender_pearl" }),
     new Item({ itemId: Items.EyeOfEnder, name: "Eye of Ender", sprite: "ender_eye" }),
+    new Item({ itemId: Items.EchoShard, name: "Echo Shard", sprite: "echo_shard.svg" }),
+    new Item({
+        itemId: Items.FishingRod,
+        name: "Fishing Rod",
+        sprite: "fishing_rod_uncast",
+        toolType: ToolType.FishingRod,
+        heldInHand: true,
+        stackSize: 1,
+        durability: 64,
+    }),
     new Item({
         itemId: 20,
         name: "Coal",
@@ -586,6 +648,7 @@ export const items = [
         name: "Gold Nugget",
         sprite: "gold_nugget",
     }),
+    new Item({ itemId: Items.Emerald, name: "Emerald", sprite: "emerald" }),
 
     //#endregion
 
@@ -694,6 +757,60 @@ export const items = [
         foodValue: 6,
         foodSaturation: 9.6,
     }),
+    new Item({
+        itemId: Items.RawCod,
+        name: "Raw Cod",
+        sprite: "fish_cod_raw",
+        smeltOutput: { itemId: Items.CookedCod },
+        foodValue: 2,
+        foodSaturation: 0.4,
+    }),
+    new Item({
+        itemId: Items.CookedCod,
+        name: "Cooked Cod",
+        sprite: "fish_cod_cooked",
+        foodValue: 5,
+        foodSaturation: 6,
+    }),
+    new Item({
+        itemId: Items.RawSalmon,
+        name: "Raw Salmon",
+        sprite: "fish_salmon_raw",
+        smeltOutput: { itemId: Items.CookedSalmon },
+        foodValue: 2,
+        foodSaturation: 0.4,
+    }),
+    new Item({
+        itemId: Items.CookedSalmon,
+        name: "Cooked Salmon",
+        sprite: "fish_salmon_cooked",
+        foodValue: 6,
+        foodSaturation: 9.6,
+    }),
+    new Item({
+        itemId: Items.Pufferfish,
+        name: "Pufferfish",
+        sprite: "fish_pufferfish_raw",
+        foodValue: 1,
+        foodSaturation: 0.2,
+    }),
+    new Item({
+        itemId: Items.TropicalFish,
+        name: "Tropical Fish",
+        sprite: "fish_clownfish_raw",
+        foodValue: 1,
+        foodSaturation: 0.2,
+    }),
+    new Item({ itemId: Items.Cookie, name: "Cookie", sprite: "cookie", foodValue: 2, foodSaturation: 0.4 }),
+    new Item({ itemId: Items.MushroomStew, name: "Mushroom Stew", sprite: "mushroom_stew", stackSize: 1, foodValue: 6, foodSaturation: 7.2 }),
+    new Item({ itemId: Items.RawRabbit, name: "Raw Rabbit", sprite: "rabbit_raw", smeltOutput: { itemId: Items.CookedRabbit }, foodValue: 3, foodSaturation: 1.8 }),
+    new Item({ itemId: Items.CookedRabbit, name: "Cooked Rabbit", sprite: "rabbit_cooked", foodValue: 5, foodSaturation: 6 }),
+    new Item({ itemId: Items.RabbitFoot, name: "Rabbit's Foot", sprite: "rabbit_foot" }),
+    new Item({ itemId: Items.RabbitHide, name: "Rabbit Hide", sprite: "rabbit_hide" }),
+    new Item({ itemId: Items.RabbitStew, name: "Rabbit Stew", sprite: "rabbit_stew", stackSize: 1, foodValue: 10, foodSaturation: 12 }),
+    new Item({ itemId: Items.PumpkinPie, name: "Pumpkin Pie", sprite: "pumpkin_pie", foodValue: 8, foodSaturation: 4.8 }),
+    new Item({ itemId: Items.RawChicken, name: "Raw Chicken", sprite: "chicken_raw", smeltOutput: { itemId: Items.CookedChicken }, foodValue: 2, foodSaturation: 1.2 }),
+    new Item({ itemId: Items.CookedChicken, name: "Cooked Chicken", sprite: "chicken_cooked", foodValue: 6, foodSaturation: 7.2 }),
     //#endregion
 
     //#region Mob Drops
@@ -712,6 +829,12 @@ export const items = [
         name: "Gunpowder",
         sprite: "gunpowder",
     }),
+    new Item({ itemId: Items.Feather, name: "Feather", sprite: "feather" }),
+    new Item({ itemId: Items.String, name: "String", sprite: "string" }),
+    new Item({ itemId: Items.SpiderEye, name: "Spider Eye", sprite: "spider_eye" }),
+    new Item({ itemId: Items.Slimeball, name: "Slimeball", sprite: "slimeball" }),
+    new Item({ itemId: Items.Sugar, name: "Sugar", sprite: "sugar" }),
+    new Item({ itemId: Items.SugarCane, name: "Sugar Cane", sprite: "reeds" }),
     //#endregion
 
     //#region Seeds
@@ -827,6 +950,54 @@ export const items = [
         stackSize: 16,
         projectile: "Snowball",
         throwPower: 25,
+    }),
+    new Item({ itemId: Items.Egg, name: "Egg", sprite: "egg", stackSize: 16 }),
+    new Item({ itemId: Items.PumpkinSeeds, name: "Pumpkin Seeds", sprite: "seeds_pumpkin" }),
+    //#endregion
+
+    //#region Mutant Spawn Eggs
+    new Item({
+        itemId: Items.MutantZombieSpawnEgg,
+        name: "Mutant Zombie Spawn Egg",
+        sprite: "mutantbeasts/spawn_egg",
+        spawnEntity: "MutantZombie",
+    }),
+    new Item({
+        itemId: Items.MutantCreeperSpawnEgg,
+        name: "Mutant Creeper Spawn Egg",
+        sprite: "mutantbeasts/spawn_egg",
+        spawnEntity: "MutantCreeper",
+    }),
+    new Item({
+        itemId: Items.MutantSkeletonSpawnEgg,
+        name: "Mutant Skeleton Spawn Egg",
+        sprite: "mutantbeasts/spawn_egg",
+        spawnEntity: "MutantSkeleton",
+    }),
+    new Item({
+        itemId: Items.MutantEndermanSpawnEgg,
+        name: "Mutant Enderman Spawn Egg",
+        sprite: "mutantbeasts/spawn_egg",
+        spawnEntity: "MutantEnderman",
+    }),
+    new Item({
+        itemId: Items.MutantSnowGolemSpawnEgg,
+        name: "Mutant Snow Golem Spawn Egg",
+        sprite: "mutantbeasts/spawn_egg",
+        spawnEntity: "MutantSnowGolem",
+    }),
+    new Item({
+        itemId: Items.SpiderPigSpawnEgg,
+        name: "Spider Pig Spawn Egg",
+        sprite: "mutantbeasts/spawn_egg",
+        spawnEntity: "SpiderPig",
+    }),
+    new Item({
+        itemId: Items.ChemicalX,
+        name: "Chemical X",
+        sprite: "mutantbeasts/chemical_x",
+        projectile: "ChemicalX",
+        throwPower: 20,
     }),
     //#endregion
 

@@ -1,16 +1,26 @@
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, TERRAIN_HEIGHT, RENDER_DISTANCE } from "../utils/globals.js";
-import { getBlock } from "../world/block.js";
+import { getBlock, SpecialType } from "../world/block.js";
 import { getDimension, getDimensionChunks, Dimensions } from "../world/dimension.js";
 import { VolumetricSky } from "./volumetricSky.js";
 import { VoxelMaterials, FaceBatch } from "./materials.js";
 import { VoxelEntities } from "./entities.js";
 import { syncSliceCamera } from "./projection.js";
-import { terrainColumnFaces, scenerySeed } from "./heightfield.js";
+import { terrainColumnFaces, terrainSkyExposure, scenerySeed } from "./heightfield.js";
 
 const clamp = THREE.MathUtils.clamp;
+const DAY_SUN = new THREE.Color(0xffebcf);
+const DUSK_SUN = new THREE.Color(0xffbb82);
+const DAY_AMBIENT = new THREE.Color(0xc2d7f2);
+const DAY_FOG = new THREE.Color(0xb9cbd6);
+const DUSK_FOG = new THREE.Color(0x947b83);
+const NIGHT_FOG = new THREE.Color(0x162941);
 const noise = (x, z) => tooloud.Perlin.noise(x * 0.035, z * 0.035, 311);
 const random = (x, z) => {
     const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
@@ -49,7 +59,7 @@ export class VoxelRenderer {
             this.renderer.shadowMap.type = THREE.PCFShadowMap;
             this.scene = new THREE.Scene();
             this.camera = new THREE.PerspectiveCamera(72, 16 / 9, 0.1, 190);
-            this.scene.fog = new THREE.Fog(0xb8cbd7, 38, 128);
+            this.scene.fog = new THREE.Fog(0xb8cbd7, 46, 150);
             this.materials = new VoxelMaterials();
             this.entities = new VoxelEntities(this.scene);
             this.terrain = new THREE.Group();
@@ -75,6 +85,23 @@ export class VoxelRenderer {
             });
             this.sky = new VolumetricSky();
             this.scene.background = this.sky.target.texture;
+            try {
+                this.composer = new EffectComposer(this.renderer);
+                this.composer.addPass(new RenderPass(this.scene, this.camera));
+                const effectWidth = Math.ceil(this.canvas.width / 2);
+                const effectHeight = Math.ceil(this.canvas.height / 2);
+                // Bloom only the brightest scene light. The HUD is drawn on a
+                // separate canvas and stays crisp.
+                this.bloomPass = new UnrealBloomPass(
+                    new THREE.Vector2(effectWidth, effectHeight), 0.3, 0.35, 1.1,
+                );
+                this.composer.addPass(this.bloomPass);
+                this.composer.addPass(new OutputPass());
+                this.bloomPass.setSize(effectWidth, effectHeight);
+            } catch (error) {
+                console.warn("Cinematic effects are unavailable; keeping 3D rendering.", error);
+                this.disposePostprocessing();
+            }
             this.initialized = this.supported = true;
         } catch (error) {
             console.warn("3D rendering unavailable; using the Classic renderer.", error);
@@ -84,9 +111,21 @@ export class VoxelRenderer {
         return this.supported;
     }
 
+    disposePostprocessing() {
+        this.composer?.passes.forEach(pass => pass.dispose());
+        this.composer?.dispose();
+        this.composer = null;
+        this.bloomPass = null;
+    }
+
     updateCamera(camera, width, height) {
         syncSliceCamera(this.camera, camera, width, height, BLOCK_SIZE);
-        if (this.canvas.width !== width || this.canvas.height !== height) this.renderer.setSize(width, height, false);
+        if (this.canvas.width !== width || this.canvas.height !== height) {
+            this.renderer.setSize(width, height, false);
+            this.composer?.setSize(width, height);
+            // Sample bloom below scene resolution.
+            this.bloomPass?.setSize(Math.ceil(width / 2), Math.ceil(height / 2));
+        }
     }
 
     updateTerrain(world, camera, width, height, dimension, lighting) {
@@ -113,12 +152,13 @@ export class VoxelRenderer {
                     if (def.air) continue;
                     hash = Math.imul(hash ^ (block.blockType + x * 31 + y * 7919 + (wall ? 5 : 0)), 16777619);
                     hash = Math.imul(hash ^ Math.round((block.cutoff || 0) * 1000) ^ Math.round(block.lightLevel || 0) ^ (def.states?.indexOf(block.spriteName) || 0), 16777619);
+                    hash = Math.imul(hash ^ (block.metaData?.open ? 1 : 0), 16777619);
                     blocks.push({ block, def, x, y, wall });
                     if (block.lightSourceLevel > 2) this.sources.push({ x, y, wall, block, def });
                 }
             }
         }
-        const key = `${dimension}:${left}:${right}:${top}:${bottom}:${hash}:${lighting}:${this.materials.revision}`;
+        const key = `${dimension}:${left}:${right}:${top}:${bottom}:${hash}:${lighting}`;
         if (this.terrainKey === key) return;
         this.terrainKey = key;
         const batch = new FaceBatch(this.materials);
@@ -130,7 +170,32 @@ export class VoxelRenderer {
             const shade = wall ? light * 0.72 : light;
             const sprite = block.spriteName || def.sprite;
             if (!sprite) continue;
+            if (wall) {
+                // Wallpaper uses the block's texture in the background layer,
+                // without its foreground shape or effects.
+                const frontZ = z + 1.01;
+                batch.quad(sprite, { plant: true }, [
+                    [x, -y - 1, frontZ], [x + 1, -y - 1, frontZ],
+                    [x + 1, -y, frontZ], [x, -y, frontZ],
+                ], [0, 0, 1], shade);
+                continue;
+            }
             const ox = def.blockOffset?.x || 0, oy = def.blockOffset?.y || 0;
+            if (def.specialType === SpecialType.Door) {
+                const frontZ = z + 1.01;
+                const isOpen = Boolean(block.metaData?.open);
+                const doorWidth = isOpen ? 0.09 : 1;
+                const hingeX = block.metaData?.hinge === "left"
+                    ? x
+                    : x + 1 - doorWidth;
+                batch.quad(sprite, { plant: true }, [
+                    [hingeX, -y - 1, frontZ],
+                    [hingeX + doorWidth, -y - 1, frontZ],
+                    [hingeX + doorWidth, -y - 1 + h, frontZ],
+                    [hingeX, -y - 1 + h, frontZ],
+                ], [0, 0, 1], shade);
+                continue;
+            }
             if (def.fluid) {
                 const above = world.getBlockAtWorldPosition(x * BLOCK_SIZE, (y - 1) * BLOCK_SIZE, wall);
                 const surface = !above || !getBlock(above.blockType).fluid;
@@ -168,7 +233,8 @@ export class VoxelRenderer {
                 { left: !neighbor(-1,0), right: !neighbor(1,0), top: !neighbor(0,-1) || h < 1,
                     bottom: !neighbor(0,1), back: false });
         }
-        batch.build(this.terrain);
+        // Block face lighting avoids coarse shadow-map artifacts on flat terrain.
+        batch.build(this.terrain, { castShadow: false, receiveShadow: false });
         this.foregroundWater = water;
     }
 
@@ -178,7 +244,7 @@ export class VoxelRenderer {
             this.scenery.visible = false; this.backgroundWater = []; return;
         }
         this.scenery.visible = true;
-        const key = `${world.seed}:${dimension}:${!!world.generator.specialWorldProps.flat}:${world.generator.forceToBiome?.name}:${this.materials.revision}`;
+        const key = `${world.seed}:${dimension}:${!!world.generator.specialWorldProps.flat}:${world.generator.forceToBiome?.name}`;
         if (this.sceneryWorld !== world || this.sceneryKey !== key) {
             this.clearScenery();
             this.sceneryWorld = world;
@@ -198,14 +264,19 @@ export class VoxelRenderer {
                 this.sceneryChunks.delete(index);
             }
         }
-        for (let index = center - radius; index <= center + radius; index++) {
-            if (this.sceneryChunks.has(index)) continue;
-            const chunk = this.buildSceneryChunk(world, dimension, index);
-            this.sceneryChunks.set(index, chunk);
-            this.scenery.add(chunk.group);
+        let built = 0;
+        for (let offset = 0; offset <= radius && built < 2; offset++) {
+            for (const index of offset ? [center - offset, center + offset] : [center]) {
+                if (built >= 2) break;
+                if (this.sceneryChunks.has(index)) continue;
+                const chunk = this.buildSceneryChunk(world, dimension, index);
+                this.sceneryChunks.set(index, chunk);
+                this.scenery.add(chunk.group);
+                built++;
+            }
         }
         this.backgroundWater = [...this.sceneryChunks.values()].flatMap(chunk => chunk.water);
-        this.sceneryRange = range;
+        if (this.sceneryChunks.size === radius * 2 + 1) this.sceneryRange = range;
     }
 
     clearScenery() {
@@ -254,9 +325,13 @@ export class VoxelRenderer {
                 const submerged = y < waterY;
                 const surface = getBlock(submerged ? biome.waterSandType : biome.topLayer).sprite;
                 const earth = getBlock(biome.secondLayer).sprite;
+                const skyExposure = world.generator.specialWorldProps.flat
+                    ? 1 : terrainSkyExposure(x, depth, heightAt);
                 for (const face of terrainColumnFaces(x, depth, heightAt, floor)) {
                     const material = face.top ? surface : face.corners[0][1] < y - 3 ? getBlock(biome.baseBlock).sprite : earth;
-                    batch.quad(material, { top: face.top }, face.corners, face.normal);
+                    const light = face.top ? skyExposure : Math.max(0.6,
+                        skyExposure * 0.88 - (y - face.corners[0][1]) * 0.015);
+                    batch.quad(material, { top: face.top }, face.corners, face.normal, light);
                 }
                 if (submerged) {
                     water.push({ x, y: waterY, z });
@@ -264,13 +339,23 @@ export class VoxelRenderer {
                         [[x,waterY,z+1],[x+1,waterY,z+1],[x+1,waterY,z],[x,waterY,z]], [0,1,0]);
                 }
                 const detail = random(x, depth + seed);
-                if (!submerged && !world.generator.specialWorldProps.flat && depth < 45 && detail > 0.78 && biome.grassType.length) {
-                    const plant = getBlock(biome.grassType[Math.floor(detail * biome.grassType.length) % biome.grassType.length]);
-                    batch.quad(plant.sprite, { plant: true }, [[x,y,z],[x+0.85,y,z],[x+0.85,y+0.85,z],[x,y+0.85,z]], [0,0,1]);
+                if (!submerged && !world.generator.specialWorldProps.flat && depth < 30 && detail > 0.97 && biome.grassType.length) {
+                    const plantType = biome.grassType[Math.floor(random(x + 149, depth + seed) * biome.grassType.length)];
+                    const plant = getBlock(plantType);
+                    const sparsePlant = plant.sprite === "deadbush" || plant.sprite.startsWith("flower_") || plant.sprite.startsWith("double_plant_");
+                    if (!sparsePlant || random(x + 71, depth + seed) < 0.15) {
+                        batch.quad(plant.sprite, { plant: true }, [[x,y,z],[x+0.85,y,z],[x+0.85,y+0.85,z],[x,y+0.85,z]], [0,0,1]);
+                    }
                 }
-                if (!submerged && !world.generator.specialWorldProps.flat && depth > 8 && depth % 7 === 2 && x % 11 === 0 && detail > 0.48 && biome.treeType.length) {
-                    const tree = biome.treeType[Math.floor(detail * biome.treeType.length) % biome.treeType.length];
-                    const shape = tree.variants[Math.floor(detail * tree.variants.length) % tree.variants.length].blocks;
+                if (submerged || world.generator.specialWorldProps.flat || depth <= 8 || !biome.treeType.length) continue;
+                // Each patch gets a seeded, offset tree position. Use separate
+                // draws for presence, species, and shape so all variants occur.
+                const patchX = Math.floor(x / 11), patchDepth = Math.floor(depth / 7);
+                const treeX = patchX * 11 + 3 + Math.floor(random(patchX + seed, patchDepth * 17) * 5);
+                const treeDepth = patchDepth * 7 + 1 + Math.floor(random(patchX * 19, patchDepth + seed) * 5);
+                if (depth === treeDepth && x === treeX && random(patchX + seed, patchDepth + 37) > 0.48) {
+                    const tree = biome.treeType[Math.floor(random(x + seed, depth + 53) * biome.treeType.length)];
+                    const shape = tree.variants[Math.floor(random(x + seed, depth + 97) * tree.variants.length)].blocks;
                     const roots = shape.at(-1).map((id,index) => getBlock(id)?.air ? -1 : index).filter(index => index >= 0);
                     if (!roots.length) continue;
                     const origin = x - roots[0];
@@ -281,15 +366,18 @@ export class VoxelRenderer {
                             const def = getBlock(shape[row][col]);
                             if (!def || def.air || !def.sprite) continue;
                             const leaves = def.sprite.includes("leaves");
+                            const neighbors = leaves ? [shape[row][col - 1], shape[row][col + 1]]
+                                .filter(id => getBlock(id)?.sprite?.includes("leaves")).length : 0;
+                            const crownDepth = leaves ? 1.5 + neighbors * 0.4 : 1;
                             batch.box(def.sprite, {}, origin + col, y + shape.length - row - 1,
-                                z - (leaves ? 1 : 0), 1, 1, leaves ? 3 : 1, 1, { back: true });
+                                z - (crownDepth - 1) / 2, 1, 1, crownDepth, 1, { back: true });
                         }
                     }
                 }
             }
         }
         const group = new THREE.Group();
-        batch.build(group);
+        batch.build(group, { castShadow: true, receiveShadow: true });
         return { group, water };
     }
 
@@ -352,29 +440,30 @@ export class VoxelRenderer {
         this.water.visible=true;
     }
 
-    updateLighting(world, time, seconds, dimension, lighting, effects) {
+    updateLighting(time, seconds, dimension, lighting, effects) {
         let day = time <= 3 ? 1 : time < 3.5 ? (3.5-time)/0.5 : time <= 6.5 ? 0 : time < 6.7 ? (time-6.5)/0.2 : 1;
         if (getDimension(dimension).alwaysDay || !lighting) day=1;
         const x=this.camera.position.x, y=this.camera.position.y;
         const elevation=Math.max(0.2, Math.abs(Math.sin(time)));
+        const dusk = Math.max(0, 1 - Math.abs(day - 0.5) * 2);
         this.sun.position.set(x-Math.cos(time)*35, y+elevation*42+12, 24);
         this.sun.target.position.set(x,y,-8);
-        this.sun.color.set(day > 0.5 ? 0xffebcf : 0x90b3ed);
-        this.sun.intensity = 0.16 + day * 2.8;
+        this.sun.color.set(0x90b3ed).lerp(DAY_SUN, day).lerp(DUSK_SUN, dusk * 0.55);
+        this.sun.intensity = 0.38 + day * 2.58;
         this.sun.castShadow=effects;
-        this.ambient.intensity=0.3+day*1.23;
-        const player=world.player;
-        const skylit=player?.getSunLight?.();
-        if (lighting && skylit === false) this.ambient.intensity*=0.45;
+        this.ambient.intensity=0.7+day*0.83;
         if (dimension === Dimensions.End) {
             this.sun.intensity=0.35; this.sun.color.set(0xaaa1c7);
             this.ambient.intensity=0.9; this.ambient.color.set(0x9a87b5);
         } else if (dimension !== Dimensions.Overworld) {
             this.sun.intensity=0.25; this.sun.color.set(0xfc7c42);
             this.ambient.intensity=0.75; this.ambient.color.set(0xbb6352);
-        } else this.ambient.color.set(day > 0.5 ? 0xc2d7f2 : 0x607dad);
+        } else this.ambient.color.set(0x607dad).lerp(DAY_AMBIENT, day);
         this.scene.fog.color.set(dimension === Dimensions.End ? 0x15101f :
-            day > 0.5 ? 0xb9cbd6 : 0x0d182c);
+            dimension === Dimensions.Overworld ? NIGHT_FOG : 0x24151a);
+        if (dimension === Dimensions.Overworld) {
+            this.scene.fog.color.lerp(DAY_FOG, day).lerp(DUSK_FOG, dusk * 0.4);
+        }
         this.sources.sort((a,b)=>Math.hypot(a.x-x,-a.y-y)-Math.hypot(b.x-x,-b.y-y));
         this.lights.forEach((light,index)=>{
             const source=lighting && this.sources[index];
@@ -403,14 +492,22 @@ export class VoxelRenderer {
             this.updateScenery(world,dimension);
             this.updateWater([...(this.foregroundWater || []), ...(this.backgroundWater || [])]);
             this.materials.update(seconds,effects);
-            this.updateLighting(world,time,seconds,dimension,lighting,effects);
+            this.updateLighting(time,seconds,dimension,lighting,effects);
             this.entities.update(world.entities,dimension,this.camera,seconds,lighting);
             if (dimension === Dimensions.Overworld) {
                 this.scene.background=this.sky.draw(this.renderer,{width,height,time,seconds,cameraX:camera.x,
                     cameraY:camera.y,surfaceY:(CHUNK_HEIGHT-TERRAIN_HEIGHT)*BLOCK_SIZE,fov:this.camera.fov});
             } else this.scene.background=new THREE.Color(
                 dimension === Dimensions.End ? 0x15101f : 0x24151a);
-            this.renderer.render(this.scene,this.camera);
+            if (effects && this.composer) {
+                try {
+                    this.composer.render();
+                } catch (error) {
+                    console.warn("Cinematic bloom failed; keeping 3D rendering.", error);
+                    this.disposePostprocessing();
+                    this.renderer.render(this.scene,this.camera);
+                }
+            } else this.renderer.render(this.scene,this.camera);
             return true;
         } catch (error) {
             console.error("3D rendering failed; using the Classic renderer.",error);
@@ -425,6 +522,7 @@ export class VoxelRenderer {
         this.water?.geometry.dispose(); this.water?.material.dispose(); this.waterNormals?.dispose();
         this.sky?.dispose(); this.sun?.shadow.dispose();
         for (const light of this.lights || []) light.shadow.dispose();
+        this.disposePostprocessing();
         this.renderer?.dispose();
     }
 }

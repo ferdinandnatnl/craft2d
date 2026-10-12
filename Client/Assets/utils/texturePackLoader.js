@@ -14,7 +14,7 @@ export let texturePackFiles = null;
 export let vanillaTextureCache = null;
 
 // Load vanilla textures by iterating over Blocks and Items
-export async function loadVanillaTextures() {
+export async function loadVanillaTextures(onProgress) {
     vanillaTextureCache = {};
 
     // Collect sprite paths from Blocks and Items
@@ -53,11 +53,19 @@ export async function loadVanillaTextures() {
             if (initEntity.body?.sprite) {
                 spritePaths.push(`entity/${initEntity.body.sprite}`);
             }
+            for (const part of Object.values(initEntity.body?.parts ?? {})) {
+                if (part.ownSpriteMap) {
+                    spritePaths.push(`entity/${part.ownSpriteMap}`);
+                }
+            }
         }
     }
 
     // Misc Entity Sprites
     spritePaths.push(`entity/sheep/sheep_fur`);
+    spritePaths.push(`entity/warden-art/warden.svg`);
+    spritePaths.push(`items/minecart_normal`);
+    spritePaths.push(`items/minecart_chest`);
 
     // Player
     spritePaths.push(`entity/player/steve`);
@@ -77,6 +85,10 @@ export async function loadVanillaTextures() {
     spritePaths.push(`gui/container/hopper`);
     spritePaths.push(`gui/container/horse`);
     spritePaths.push(`gui/container/inventory`);
+    spritePaths.push(`gui/container/creative_inventory/tab_items`);
+    spritePaths.push(`gui/container/creative_inventory/tab_item_search`);
+    spritePaths.push(`gui/container/creative_inventory/tab_inventory`);
+    spritePaths.push(`gui/container/creative_inventory/tabs`);
     spritePaths.push(`gui/container/single_chest`);
     spritePaths.push(`gui/container/stats_icons`);
     spritePaths.push(`gui/container/villager`);
@@ -87,61 +99,68 @@ export async function loadVanillaTextures() {
     // Remove duplicates (if any)
     const uniquePaths = [...new Set(spritePaths)];
 
+    let loaded = 0;
     await Promise.all(
         uniquePaths.map(async (path) => {
+            const spritePath = /\.(?:png|svg|webp)$/i.test(path)
+                ? path
+                : `${path}.png`;
+            const imgUrl = resolveAssetUrl(`Assets/sprites/${spritePath}`);
             try {
-                const imgUrl = resolveAssetUrl(`Assets/sprites/${path}.png`);
-                const img = new Image();
-                img.src = imgUrl;
-
-                await new Promise((resolve, reject) => {
-                    img.onload = async () => {
-                        const averageColor = await getAverageColor(img);
-                        vanillaTextureCache[path] = {
-                            url: imgUrl,
-                            width: img.width,
-                            height: img.height,
-                            originalWidth: img.width,
-                            originalHeight: img.height,
-                            averageColor,
-                        };
-                        resolve();
-                    };
-                    img.onerror = () => {
-                        vanillaTextureCache[path] = {
-                            url: imgUrl,
-                            width: 16,
-                            height: 16,
-                            originalWidth: 16,
-                            originalHeight: 16,
-                            averageColor: { r: 0, g: 0, b: 0 },
-                        };
-                        resolve();
-                    };
-                });
+                const img = await loadImage(imgUrl);
+                vanillaTextureCache[path] = {
+                    url: imgUrl,
+                    width: img?.width || 16,
+                    height: img?.height || 16,
+                    originalWidth: img?.width || 16,
+                    originalHeight: img?.height || 16,
+                    averageColor: img && path.startsWith("blocks/")
+                        ? await getAverageColor(img) : "#000000",
+                };
             } catch (err) {
                 console.warn(`Failed to load vanilla texture ${path}:`, err);
                 vanillaTextureCache[path] = {
-                    url: resolveAssetUrl(`Assets/sprites/${path}.png`),
+                    url: imgUrl,
                     width: 16,
                     height: 16,
                     originalWidth: 16,
                     originalHeight: 16,
-                    averageColor: { r: 0, g: 0, b: 0 },
+                    averageColor: "#000000",
                 };
+            } finally {
+                onProgress?.(++loaded / uniquePaths.length);
             }
         })
     );
 }
 
+function loadImage(url) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const timeout = setTimeout(() => {
+            img.src = "";
+            reject(new Error(`Timed out loading image: ${url.slice(0, 120)}`));
+        }, 15000);
+        img.onload = () => {
+            clearTimeout(timeout);
+            resolve(img);
+        };
+        img.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error(`Could not load image: ${url.slice(0, 120)}`));
+        };
+        img.src = url;
+    });
+}
+
 // Load the active texture pack from localStorage
-export async function loadTexturePack() {
+export async function loadTexturePack(onProgress) {
     const currentPackKey =
         localStorage.getItem("currentTexturePack") || "default";
     runtime.isTexturePackLoaded = false;
 
     // Load vanilla textures first
-    await loadVanillaTextures();
+    await loadVanillaTextures((progress) => onProgress?.(progress * 0.9));
 
     if (["default", "classic", "natural"].includes(currentPackKey)) {
         texturePackZip = null;
@@ -154,6 +173,7 @@ export async function loadTexturePack() {
             }
         }
         runtime.isTexturePackLoaded = true;
+        onProgress?.(1);
         return;
     }
 
@@ -169,6 +189,7 @@ export async function loadTexturePack() {
             texturePackFiles = null;
             runtime.isTexturePackLoaded = true;
             localStorage.setItem("currentTexturePack", "default");
+            onProgress?.(1);
             return;
         }
 
@@ -190,48 +211,42 @@ export async function loadTexturePack() {
                 const fileContent = await zip.files[fileName].async("base64");
                 const imgUrl = `data:image/png;base64,${fileContent}`;
 
-                const img = new Image();
-                img.src = imgUrl;
-
-                await new Promise((resolve) => {
-                    img.onload = async () => {
-                        const relativePath = fileName
-                            .replace(/^.*assets\/minecraft\/textures\//, "")
-                            .replace(/\.png$/, "");
-
-                        const originalSize = vanillaTextureCache[
-                            relativePath
-                        ] || { width: 16, height: 16 };
-
-                        const averageColor = await getAverageColor(img);
-
-                        texturePackFiles[relativePath] = {
-                            url: imgUrl,
-                            width: img.width,
-                            height: img.height,
-                            originalWidth: originalSize.width,
-                            originalHeight: originalSize.height,
-                            averageColor,
-                        };
-                        resolve();
+                try {
+                    const img = await loadImage(imgUrl);
+                    const relativePath = fileName
+                        .replace(/^.*assets\/minecraft\/textures\//, "")
+                        .replace(/\.png$/, "");
+                    const originalSize = vanillaTextureCache[relativePath] || { width: 16, height: 16 };
+                    texturePackFiles[relativePath] = {
+                        url: imgUrl,
+                        width: img.width,
+                        height: img.height,
+                        originalWidth: originalSize.width,
+                        originalHeight: originalSize.height,
+                        averageColor: relativePath.startsWith("blocks/")
+                            ? await getAverageColor(img) : "#000000",
                     };
-                });
+                } catch (error) {
+                    console.warn(`Skipping invalid texture pack image ${fileName}:`, error);
+                }
             })
         );
 
         runtime.isTexturePackLoaded = true;
+        onProgress?.(1);
     } catch (err) {
         console.error(`Failed to load texture pack ${currentPackKey}:`, err);
         texturePackZip = null;
         texturePackFiles = null;
         runtime.isTexturePackLoaded = true;
         localStorage.setItem("currentTexturePack", "default");
+        onProgress?.(1);
     }
 }
 
 // Initialize both vanilla and texture pack loading
-export async function initializeTextures() {
-    await loadTexturePack();
+export async function initializeTextures(onProgress) {
+    await loadTexturePack(onProgress);
 }
 
 export function getSpriteUrl(path, useTexturePack = true) {
@@ -253,7 +268,10 @@ export function getSpriteUrl(path, useTexturePack = true) {
         return vanillaTextureCache[path].url;
     }
 
-    return resolveAssetUrl(`Assets/sprites/${path}.png`);
+    const spritePath = /\.(?:png|svg|webp)$/i.test(path)
+        ? path
+        : `${path}.png`;
+    return resolveAssetUrl(`Assets/sprites/${spritePath}`);
 }
 
 export function getSpriteAverageColor(path) {
@@ -333,19 +351,18 @@ export function isBase64(str) {
 
 export async function getAverageColor(img) {
     try {
-        // Create an ImageBitmap from the image
-        const bitmap = await createImageBitmap(img);
-        // Create an OffscreenCanvas to draw the bitmap
-        const offscreen = new OffscreenCanvas(bitmap.width, bitmap.height);
+        // Particles need a rough color, not a full-resolution pixel scan.
+        const offscreen = document.createElement("canvas");
+        offscreen.width = offscreen.height = 8;
         const ctx = offscreen.getContext("2d");
-        ctx.drawImage(bitmap, 0, 0);
+        ctx.drawImage(img, 0, 0, 8, 8);
 
         // Get pixel data
         const imageData = ctx.getImageData(
             0,
             0,
-            bitmap.width,
-            bitmap.height
+            8,
+            8
         ).data;
         let r = 0,
             g = 0,
@@ -363,8 +380,6 @@ export async function getAverageColor(img) {
                 count++;
             }
         }
-
-        bitmap.close(); // Clean up
 
         if (count === 0) {
             return "#000000"; // Default for fully transparent images

@@ -199,6 +199,7 @@ export const SpecialType = Object.freeze({
     Sign: 14,
     EndPortalFrame: 15,
     EndPortal: 16,
+    Door: 17,
 });
 
 export const BlockCategory = Object.freeze({

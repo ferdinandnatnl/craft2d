@@ -1,5 +1,5 @@
 /**
- * Boot overlay for media.zip download/extract progress.
+ * Boot overlay for game resource loading progress.
  * Styles live in boot.css (linked from HTML).
  */
 export function createBootLoader() {
@@ -35,6 +35,12 @@ export function createBootLoader() {
             el.classList.add("media-boot-hidden");
         },
         show() {
+            el.classList.remove("media-boot-hidden");
+        },
+        fail(message) {
+            if (title) title.textContent = message;
+            if (pct) pct.textContent = "";
+            if (fill) fill.style.width = "0";
             el.classList.remove("media-boot-hidden");
         },
     };

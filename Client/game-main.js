@@ -11,8 +11,10 @@ import { createBootLoader } from "./bootLoader.js";
 inject();
 
 const boot = createBootLoader();
-await loadMediaBundle({ onProgress: (p) => boot.setProgress(p) });
+try {
+await loadMediaBundle();
 applyPackedMediaStyles();
+boot.setProgress(0);
 
 await Promise.all([
     import("./Assets/entities/entities.js"),
@@ -28,7 +30,7 @@ await Promise.all([
 const { initializeTextures } = await import(
     "./Assets/utils/texturePackLoader.js"
 );
-await initializeTextures();
+await initializeTextures((progress) => boot.setProgress(progress));
 
 const { initButtonCenterImages } = await import("./buttonUtils.js");
 initButtonCenterImages();
@@ -70,3 +72,7 @@ Object.assign(window, {
 });
 
 boot.hide();
+} catch (error) {
+    console.error("Game resources could not load:", error);
+    boot.fail("Could not load game resources. Check the console and reload.");
+}

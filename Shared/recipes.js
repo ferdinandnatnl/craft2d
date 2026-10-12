@@ -5,6 +5,50 @@ import { BlockCategory } from "./blockType.js";
 import { Blocks } from "./blocks.js";
 
 export const recipes = [
+    // Boat
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ count: 0 }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+            ],
+            [
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+            ],
+        ],
+        output: new InventoryItem({ itemId: Items.Boat, count: 1 }),
+    }),
+
+    // Doors
+    ...[
+        [Blocks.OakPlanks, Items.OakDoor],
+        [Blocks.SprucePlanks, Items.SpruceDoor],
+        [Blocks.BirchPlanks, Items.BirchDoor],
+        [Blocks.JunglePlanks, Items.JungleDoor],
+        [Blocks.AcaciaPlanks, Items.AcaciaDoor],
+    ].map(([plankId, doorItemId]) => new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [new RecipeItem({ blockId: plankId }), new RecipeItem({ blockId: plankId })],
+            [new RecipeItem({ blockId: plankId }), new RecipeItem({ blockId: plankId })],
+            [new RecipeItem({ blockId: plankId }), new RecipeItem({ blockId: plankId })],
+        ],
+        output: new InventoryItem({ itemId: doorItemId, count: 3 }),
+    })),
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ itemId: Items.IronIngot })],
+            [new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ itemId: Items.IronIngot })],
+            [new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ itemId: Items.IronIngot })],
+        ],
+        output: new InventoryItem({ itemId: Items.IronDoor, count: 3 }),
+    }),
+
     //#region Planks
     // Oak Planks
     new Recipe({
@@ -78,6 +122,28 @@ export const recipes = [
     }),
 
     //#region Tools
+    // Fishing Rod
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [
+                new RecipeItem({ count: 0 }),
+                new RecipeItem({ count: 0 }),
+                new RecipeItem({ itemId: Items.Stick }),
+            ],
+            [
+                new RecipeItem({ count: 0 }),
+                new RecipeItem({ itemId: Items.Stick }),
+                new RecipeItem({ itemId: Items.String }),
+            ],
+            [
+                new RecipeItem({ itemId: Items.Stick }),
+                new RecipeItem({ count: 0 }),
+                new RecipeItem({ itemId: Items.String }),
+            ],
+        ],
+        output: new InventoryItem({ itemId: Items.FishingRod, count: 1 }),
+    }),
     //#region Wooden Tools
     // Wooden Axe
     new Recipe({
@@ -1063,6 +1129,35 @@ export const recipes = [
             ],
         ],
         output: new InventoryItem({ itemId: Items.GoldenCarrot, count: 1 }),
+    }),
+
+    // Sugar from sugar cane
+    new Recipe({
+        type: RecipeType.Shapeless,
+        input: [new RecipeItem({ itemId: Items.SugarCane })],
+        output: new InventoryItem({ itemId: Items.Sugar, count: 1 }),
+    }),
+
+    // Pumpkin pie
+    new Recipe({
+        type: RecipeType.Shapeless,
+        input: [
+            new RecipeItem({ blockId: Blocks.Pumpkin }),
+            new RecipeItem({ itemId: Items.Sugar }),
+            new RecipeItem({ itemId: Items.Egg }),
+        ],
+        output: new InventoryItem({ itemId: Items.PumpkinPie, count: 1 }),
+    }),
+
+    // Cookies
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [[
+            new RecipeItem({ itemId: Items.Wheat }),
+            new RecipeItem({ itemId: Items.CocoaBeans }),
+            new RecipeItem({ itemId: Items.Wheat }),
+        ]],
+        output: new InventoryItem({ itemId: Items.Cookie, count: 8 }),
     }),
 
     //#endregion

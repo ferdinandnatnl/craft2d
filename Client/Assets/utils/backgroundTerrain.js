@@ -133,9 +133,13 @@ export class BackgroundTerrain {
                 const biome = biomeAt(x);
                 if (!biome) continue;
                 const detail = random(column, layerSeed + 89);
-                if (detail > 0.48 && biome.grassType.length) {
-                    const plant = biome.grassType[Math.floor(detail * biome.grassType.length) % biome.grassType.length];
-                    this.drawSprite(getBlock(plant).sprite, x, y - tile, tile);
+                if (detail > 0.96 && biome.grassType.length) {
+                    const plantType = biome.grassType[Math.floor(random(column, layerSeed + 433) * biome.grassType.length)];
+                    const plant = getBlock(plantType);
+                    const sparsePlant = plant.sprite === "deadbush" || plant.sprite.startsWith("flower_") || plant.sprite.startsWith("double_plant_");
+                    if (!sparsePlant || random(column, layerSeed + 241) < 0.15) {
+                        this.drawSprite(plant.sprite, x, y - tile, tile);
+                    }
                 }
                 if (((column % 19) + 19) % 19 === 5 && detail > 0.30 && biome.treeType.length) {
                     const tree = biome.treeType[Math.floor(detail * biome.treeType.length) % biome.treeType.length];

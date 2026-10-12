@@ -50,7 +50,6 @@ export class Pig extends Mob {
 
     hit(damage, hitfromX = 0, kb = 0) {
         if (!this.health) return;
-        this.knockBack(hitfromX, kb);
         if (!this.damage(damage)) return;
         this.knockBack(hitfromX, kb);
         playRandomSoundFromArray({

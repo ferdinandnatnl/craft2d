@@ -17,6 +17,7 @@ export class Item {
         playMusicInJukebox = null,
         projectile = null,
         throwPower = 0,
+        spawnEntity = null,
         excludeFromCreativeInventory = false,
         durability = null,
 
@@ -41,6 +42,7 @@ export class Item {
 
         this.projectile = projectile;
         this.throwPower = throwPower;
+        this.spawnEntity = spawnEntity;
 
         this.fuelTime = fuelTime;
         this.smeltOutput = smeltOutput;

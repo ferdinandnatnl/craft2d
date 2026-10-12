@@ -210,6 +210,32 @@ body {
     text-shadow: 0.2vh 0.2vh rgba(0, 0, 0, 0.395);
 }
 
+.seed-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    width: 100%;
+}
+
+.seed-presets .btn {
+    --btn-height: 40px;
+    flex: 1 1 8rem;
+    width: auto;
+    font-size: 1rem;
+}
+
+.seed-presets .btn[aria-pressed="true"] {
+    --btn-img: url("Assets/sprites/menu/menu_button_hover.png");
+    --btn-center-img: var(--btn-center-img-hover);
+}
+
+.seed-presets .btn:focus-visible,
+#world-seed-input:focus-visible {
+    outline: 2px solid white;
+    outline-offset: 2px;
+}
+
 .modal-container {
     width: 100%;
     height: 100%;
@@ -244,6 +270,33 @@ body {
     align-items: center;
 
     gap: 35px;
+}
+
+#world-create-container {
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+#world-create-container .center-modal {
+    position: relative;
+    height: auto;
+    min-height: 100%;
+    flex-shrink: 0;
+    overflow: visible;
+}
+
+#world-create-container .world-create-background {
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+#world-create-container .world-create-top-container {
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+#world-create-container .world-create-bottom-container {
+    flex-shrink: 0;
 }
 
 .world-create-bottom-container {

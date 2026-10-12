@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getHeadPitch, getLimbPitch, blendSwimming, getSwimPartPitch } from "../Assets/rendering/entityPose.js";
-import { skinBox } from "../Assets/rendering/entityGeometry.js";
+import { getHeadPitch, getLimbPitch, blendSwimming, getSwimPartPitch, updateBendPose } from "../Assets/rendering/entityPose.js";
+import { skinBox, skinLimbHalf } from "../Assets/rendering/entityGeometry.js";
 
 test("skin side textures meet the front texture at the model's front edge", () => {
     for (const [w, h, d, u, v] of [[8, 8, 8, 0, 0], [8, 12, 4, 16, 16], [3, 12, 4, 40, 16]]) {
@@ -19,6 +19,59 @@ test("skin side textures meet the front texture at the model's front edge", () =
             geometry.dispose();
         }
     }
+});
+
+test("bent limb halves meet at the same skin row without stretching pixels", () => {
+    for (const width of [2, 3, 4]) {
+        const image = { width: 64, height: 64 };
+        const upper = skinLimbHalf(width, 4, 40, 16, image);
+        const lower = skinLimbHalf(width, 4, 40, 16, image, true);
+        for (const face of [0, 1, 4, 5]) {
+            const row = (geometry, vertex) =>
+                (1 - geometry.attributes.uv.getY(face * 4 + vertex)) * image.height;
+            assert.equal(row(upper, 2), row(lower, 0));
+            assert.equal(row(upper, 0), 20);
+            assert.equal(row(lower, 2), 32);
+        }
+        upper.dispose();
+        lower.dispose();
+    }
+});
+
+test("bends apply to hostile mobs and leave the player pose alone", () => {
+    const body = {
+        sprite: "player/steve",
+        parts: {
+            leftArm: { isSwinging: false, swingProgress: 0 },
+            rightArm: {}, leftLeg: {}, rightLeg: {},
+        },
+        swimAmount: 0, boatAmount: 0,
+    };
+    const entity = {
+        body, skinModel: "steve", position: { x: 0 },
+        velocity: { x: 128, y: 0 }, grounded: true,
+        abilities: { walkSpeed: 6, flying: false },
+    };
+    assert.equal(updateBendPose(entity, 1), null);
+    assert.equal(body.bendPose, undefined);
+
+    entity.skinModel = undefined;
+    body.sprite = "zombie/zombie";
+    updateBendPose(entity, 1);
+    entity.position.x = 8;
+    const walking = updateBendPose(entity, 1.02);
+    assert.equal(walking.pitch.leftLeg, -walking.pitch.rightLeg);
+    assert.ok(walking.bend.leftLeg > 0);
+    entity.attackPoseUntil = 1.32;
+    const striking = updateBendPose(entity, 1.04);
+    assert.ok(striking.pitch.leftArm < walking.pitch.leftArm);
+    assert.ok(striking.bend.leftArm > walking.bend.leftArm);
+    assert.equal(entity.velocity.x, 128);
+
+    body.sprite = "skeleton/skeleton";
+    const skeleton = updateBendPose(entity, 1.04);
+    assert.ok(skeleton.pitch.leftArm < -1);
+    assert.ok(skeleton.bend.leftArm > 0.12);
 });
 
 test("looking horizontally left or right keeps the head level", () => {

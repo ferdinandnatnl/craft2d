@@ -3,10 +3,10 @@ import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { randomRange } from "../utils/classes.js";
-import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, multiplayer } from "../utils/globals.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, WATER_LEVEL, multiplayer } from "../utils/globals.js";
 import { camera } from "../utils/renderer.js";
 import { AllBiomes, OverworldBiomes } from "@2dcraft.com/shared/biome.js";
-import { Metadata } from "./block.js";
+import { getBlock, Metadata } from "./block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { Chunk } from "./chunk.js";
 import { activeDimension, dimensions } from "./dimension.js";
@@ -15,6 +15,19 @@ import { Structures } from "@2dcraft.com/shared/structures.js";
 import { terrainHeightAt } from "@2dcraft.com/shared/terrainHeight.js";
 import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
 import { isRuinedPortalChunk } from "@2dcraft.com/shared/ruinedPortal.js";
+import { isVillageChunk } from "@2dcraft.com/shared/village.js";
+import { Entities } from "../entities/entities.js";
+import { Vector2 } from "../utils/classes.js";
+
+function pumpkinPatchColumn(seed, chunkIndex) {
+    let hash = 2166136261;
+    for (const character of `pumpkin:${seed}:${chunkIndex}`) {
+        hash ^= character.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+    }
+    const value = hash >>> 0;
+    return value % 29 === 0 ? (value >>> 8) % CHUNK_WIDTH : -1;
+}
 
 export class WorldGenerator {
     constructor(world) {
@@ -64,6 +77,52 @@ export class WorldGenerator {
         }
 
         return false;
+    }
+
+    locateVillage() {
+        if (this.specialWorldProps.noStructures || this.specialWorldProps.void)
+            return null;
+
+        const playerX = runtime.world?.player?.position.x ?? 0;
+        const center = Math.floor(playerX / (CHUNK_WIDTH * BLOCK_SIZE));
+        for (let radius = 0; radius < 10000; radius++) {
+            const candidates = radius === 0
+                ? [center]
+                : [center + radius, center - radius];
+
+            for (const chunkIndex of candidates) {
+                if (!isVillageChunk(this.world.seed, chunkIndex)) continue;
+
+                const biome = this.calculateChunkBiome(
+                    chunkIndex,
+                    Dimensions.Overworld,
+                );
+                if (
+                    biome !== OverworldBiomes.Plains &&
+                    biome !== OverworldBiomes.Savanna
+                ) continue;
+
+                const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
+                    this.getTerrainHeight(
+                        chunkIndex * CHUNK_WIDTH + x,
+                        Dimensions.Overworld,
+                    ) + 1,
+                );
+                const floorY = Math.max(...levels);
+                if (
+                    floorY <= WATER_LEVEL + 1 ||
+                    floorY - Math.min(...levels) > 4
+                ) continue;
+
+                return {
+                    chunkIndex,
+                    x: chunkIndex * CHUNK_WIDTH + 8,
+                    y: floorY,
+                };
+            }
+        }
+
+        return null;
     }
 
     loadCustomSeed(seedInput) {
@@ -547,6 +606,19 @@ export class WorldGenerator {
             return;
         }
 
+        if (chunk.generated) {
+            if (
+                chunk.dimension === Dimensions.Overworld &&
+                !chunk.aquaticSpawningInitialized &&
+                !this.specialWorldProps.noMobs
+            ) {
+                chunk.spawnAquaticMobs();
+            }
+            if (chunk.dimension === Dimensions.Overworld &&
+                runtime.passedTime >= chunk.caveSpawnTime) chunk.spawnCaveMobs();
+            return;
+        }
+
         if (!chunk.generated) {
             chunk.generateOres();
 
@@ -557,9 +629,40 @@ export class WorldGenerator {
             chunk.applyBufferedBlocks();
             chunk.generateWater();
 
+            if (!this.specialWorldProps.flat && !this.specialWorldProps.noStructures) {
+                chunk.generateCaveStructures();
+            }
+
+            const pumpkinColumn = pumpkinPatchColumn(
+                this.world.seed,
+                chunk.x / (CHUNK_WIDTH * BLOCK_SIZE),
+            );
+            if (
+                chunk.dimension === Dimensions.Overworld &&
+                !this.specialWorldProps.flat &&
+                !this.specialWorldProps.noStructures &&
+                !chunk.hasVillage &&
+                pumpkinColumn >= 0 &&
+                [
+                    OverworldBiomes.Plains,
+                    OverworldBiomes.Forest,
+                    OverworldBiomes.Taiga,
+                    OverworldBiomes.Savanna,
+                ].includes(chunk.biome)
+            ) {
+                const groundY = chunk.findGroundLevel(
+                    pumpkinColumn,
+                    false,
+                    true,
+                );
+                if (getBlock(chunk.getBlockType(pumpkinColumn, groundY))?.air) {
+                    chunk.setBlockType(pumpkinColumn, groundY, Blocks.Pumpkin);
+                }
+            }
+
             if (!this.specialWorldProps.noMobs) chunk.spawnMobs(runtime.day);
 
-            if (!this.specialWorldProps.flat) {
+            if (!this.specialWorldProps.flat && !chunk.hasVillage) {
                 chunk.generateTrees();
                 chunk.generateGrass();
             }
@@ -569,6 +672,7 @@ export class WorldGenerator {
             chunk.generateEndShrine();
 
             chunk.generated = true;
+            if (chunk.dimension === Dimensions.Overworld) chunk.spawnCaveMobs();
         }
     }
 
@@ -587,6 +691,14 @@ export class WorldGenerator {
             const ruinedPortal = dimensionIndex === Dimensions.Overworld &&
                 isRuinedPortalChunk(this.world.seed, chunkIndex);
 
+            if (!ruinedPortal && dimensionIndex === Dimensions.Overworld &&
+                (chunk.biome === OverworldBiomes.Plains ||
+                    chunk.biome === OverworldBiomes.Savanna) &&
+                isVillageChunk(this.world.seed, chunkIndex) &&
+                this.generateVillage(chunk, dimensionIndex)) {
+                return;
+            }
+
             if (structureNoiseValue > 10 || ruinedPortal) {
                 const allStructureNames = Object.keys(Structures);
                 const candidates = allStructureNames.filter((name) => {
@@ -600,6 +712,7 @@ export class WorldGenerator {
                 const underground = ruinedPortal ? false : Math.random() < 0.5;
                 const filteredCandidates = candidates.filter((name) => {
                     if (name === "RuinedPortal") return ruinedPortal;
+                    if (name === "Village") return false;
                     const structure = Structures[name];
                     const correctDimension =
                         dimensionIndex === structure.dimension;
@@ -644,6 +757,39 @@ export class WorldGenerator {
                 this.generateStructure(randomName, structureX, structureY, dimensionIndex);
             }
         });
+    }
+
+    generateVillage(chunk, dimensionIndex) {
+        const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
+            chunk.findGroundLevel(x, false, true));
+        const floorY = Math.max(...levels);
+        if (floorY <= WATER_LEVEL + 1 || floorY - Math.min(...levels) > 4) {
+            return false;
+        }
+
+        // Support the lane and floors where the ground dips below the village.
+        levels.forEach((level, x) => {
+            for (let y = level; y < floorY; y++) {
+                chunk.setBlockType(x, y, Blocks.Cobblestone);
+            }
+        });
+        this.generateStructure("Village", chunk.x, floorY * BLOCK_SIZE, dimensionIndex);
+        chunk.hasVillage = true;
+
+        if (!this.specialWorldProps.noMobs && runtime.GAMERULES.doMobSpawning) {
+            for (const x of [6, 9]) {
+                const villager = this.world.summonEntity(
+                    Entities.Villager,
+                    new Vector2(chunk.x + (x + 0.2) * BLOCK_SIZE, 0),
+                    { myChunkX: chunk.x, homeX: chunk.x + 8 * BLOCK_SIZE },
+                );
+                villager.dimension = dimensionIndex;
+                villager.position.y = this.world.userBlockYToWorld(floorY) -
+                    villager.hitbox.y;
+                chunk.entities.push(villager);
+            }
+        }
+        return true;
     }
 
     fill(

@@ -64,7 +64,7 @@ export class Biome {
 
 export const BiomeMobs = Object.freeze({
     CommonMobs: ["Pig", "Cow", "Sheep"],
-    Googlies: ["Zombie", "Zombie", "Creeper", "Enderman"],
+    Googlies: ["Zombie", "Zombie", "Skeleton", "Creeper", "Enderman"],
 });
 
 export const OverworldBiomes = Object.freeze({
@@ -92,6 +92,7 @@ export const OverworldBiomes = Object.freeze({
         name: "Desert",
         heightNoise: NoisePresets.Flat,
         mobs: [],
+        googlies: ["Husk", "Husk", "Skeleton", "Creeper"],
         topLayer: Blocks.Sand,
         secondLayer: Blocks.SandStone,
         firstLayerWidth: 2,
@@ -235,6 +236,7 @@ export const OverworldBiomes = Object.freeze({
         minMount: 0,
         maxMount: 0.35,
         waterLevel: 12,
+        googlies: ["Zombie", "Drowned", "Drowned", "Skeleton", "Creeper"],
     }),
     RainForest: new Biome({
         name: "Rain Forest",

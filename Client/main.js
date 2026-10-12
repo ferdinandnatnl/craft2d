@@ -9,8 +9,8 @@ initTouchControls();
 
 drawLoadScreen();
 
-// Don't use window.onload — game-main awaits media.zip first, so the load
-// event has usually already fired by the time this module runs.
+// The game entry loads its modules before this file runs, so the load event
+// may already have fired.
 await runtime.game.initGame().catch((error) => {
     console.error("Failed to initialize game:", error);
 });

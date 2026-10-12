@@ -5,6 +5,46 @@ import { Dimensions } from "./dimensions.js";
 import { Structure } from "./structure.js";
 
 export const Structures = Object.freeze({
+    Village: new Structure({
+        biome: OverworldBiomes.Plains,
+        shift: { x: 0, y: 0 },
+        // Two walk-in plains cottages with a shared cobblestone lane.
+        blocks: [
+            [Blocks.StructureAir, Blocks.StructureAir, Blocks.SpruceSlab, Blocks.SpruceSlab,
+                ...Array(8).fill(Blocks.StructureAir),
+                Blocks.SpruceSlab, Blocks.SpruceSlab, Blocks.StructureAir, Blocks.StructureAir],
+            [Blocks.StructureAir, ...Array(4).fill(Blocks.SprucePlanks),
+                ...Array(6).fill(Blocks.StructureAir),
+                ...Array(4).fill(Blocks.SprucePlanks), Blocks.StructureAir],
+            [...Array(6).fill(Blocks.SprucePlanks),
+                ...Array(4).fill(Blocks.StructureAir),
+                ...Array(6).fill(Blocks.SprucePlanks)],
+            [Blocks.OakLog, ...Array(4).fill(Blocks.StructureAir), Blocks.OakLog,
+                ...Array(4).fill(Blocks.StructureAir),
+                Blocks.OakLog, ...Array(4).fill(Blocks.StructureAir), Blocks.OakLog],
+            [Blocks.OakLog, ...Array(2).fill(Blocks.StructureAir), Blocks.Torch,
+                ...Array(8).fill(Blocks.StructureAir), Blocks.Torch,
+                ...Array(2).fill(Blocks.StructureAir), Blocks.OakLog],
+            [Blocks.Cobblestone, Blocks.CraftingTable, ...Array(3).fill(Blocks.StructureAir),
+                ...Array(9).fill(Blocks.StructureAir), Blocks.Furnace, Blocks.Cobblestone],
+            [Blocks.Cobblestone, ...Array(4).fill(Blocks.OakPlanks),
+                ...Array(6).fill(Blocks.Cobblestone),
+                ...Array(4).fill(Blocks.OakPlanks), Blocks.Cobblestone],
+        ],
+        walls: [
+            ...Array.from({ length: 3 }, () => Array(16).fill(Blocks.Air)),
+            [Blocks.Air, ...Array(4).fill(Blocks.OakPlanks),
+                ...Array(6).fill(Blocks.Air),
+                ...Array(4).fill(Blocks.OakPlanks), Blocks.Air],
+            [Blocks.Air, Blocks.OakPlanks, Blocks.Glass, Blocks.OakPlanks, Blocks.OakPlanks,
+                ...Array(6).fill(Blocks.Air),
+                Blocks.OakPlanks, Blocks.OakPlanks, Blocks.Glass, Blocks.OakPlanks, Blocks.Air],
+            [Blocks.Air, ...Array(4).fill(Blocks.OakPlanks),
+                ...Array(6).fill(Blocks.Air),
+                ...Array(4).fill(Blocks.OakPlanks), Blocks.Air],
+            Array(16).fill(Blocks.Air),
+        ],
+    }),
     RuinedPortal: new Structure({
         blocks: [
             [Blocks.Air, Blocks.Obsidian, Blocks.StructureAir, Blocks.Obsidian, Blocks.Obsidian, Blocks.Air, Blocks.Air],

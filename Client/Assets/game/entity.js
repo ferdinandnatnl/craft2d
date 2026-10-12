@@ -9,10 +9,11 @@ import {
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, GRAVITY } from "../utils/globals.js";
 import { camera } from "../utils/renderer.js";
 import { getSpriteAverageColor } from "../utils/texturePackLoader.js";
-import { SpecialType, getBlock } from "../world/block.js";
+import { SpecialType, getBlock, hasBlockCollision } from "../world/block.js";
 import { Dimensions, activeDimension, enterEnd, getDimensionChunks, gotoDimension, leaveEnd } from "../world/dimension.js";
 import { entityRegistry } from "../entities/entityRegistry.js";
 import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
+import { updateBendPose } from "../rendering/entityPose.js";
 
 export const EntityTypes = Object.freeze({
     Drop: 0,
@@ -205,12 +206,11 @@ export class Entity {
         );
 
         const checkBlockWithCutoff = (block, x, y) => {
-            if (!block || !this.canStandOn(block.blockType)) return null;
-            const blockDef = getBlock(block.blockType);
+            if (!block || !this.canStandOn(block)) return null;
             const effectiveHeight = BLOCK_SIZE * (1 - block.cutoff);
             const blockTopY =
                 block.transform.position.y + (BLOCK_SIZE - effectiveHeight);
-            if (!blockDef.collision) {
+            if (!hasBlockCollision(block)) {
                 if (this.velocity.y < 0) return null;
                 const currentBottomY = this.position.y + this.hitbox.y;
                 if (currentBottomY > blockTopY) return null;
@@ -221,7 +221,7 @@ export class Entity {
                 if (blockAbove) {
                     const aboveDef = getBlock(blockAbove.blockType);
                     if (aboveDef && !aboveDef.air) {
-                        if (aboveDef.collision || !aboveDef.transparent) {
+                        if (hasBlockCollision(blockAbove) || !aboveDef.transparent) {
                             return null;
                         }
                     }
@@ -267,9 +267,8 @@ export class Entity {
         const blockLeftTop = this.getBlockAtPosition(futureX, this.position.y);
 
         const checkBlockWithCutoff = (block, x, y) => {
-            if (!block || !this.isSolid(block.blockType)) return null;
-            const def = getBlock(block.blockType);
-            if (!def.collision) return null;
+            if (!block || !this.isSolid(block)) return null;
+            if (!hasBlockCollision(block)) return null;
             const effectiveHeight = BLOCK_SIZE * (1 - block.cutoff);
             const blockTopY =
                 block.transform.position.y + (BLOCK_SIZE - effectiveHeight);
@@ -316,9 +315,8 @@ export class Entity {
         );
 
         const checkBlockWithCutoff = (block, x, y) => {
-            if (!block || !this.isSolid(block.blockType)) return null;
-            const def = getBlock(block.blockType);
-            if (!def.collision) return null;
+            if (!block || !this.isSolid(block)) return null;
+            if (!hasBlockCollision(block)) return null;
             const effectiveHeight = BLOCK_SIZE * (1 - block.cutoff);
             const blockTopY =
                 block.transform.position.y + (BLOCK_SIZE - effectiveHeight);
@@ -369,10 +367,10 @@ export class Entity {
         );
         const blockUpLeft = this.getBlockAtPosition(this.position.x, futureY);
 
-        if (blockUpLeft && this.isSolid(blockUpLeft.blockType)) {
+        if (blockUpLeft && this.isSolid(blockUpLeft)) {
             return blockUpLeft;
         }
-        if (blockUpRight && this.isSolid(blockUpRight.blockType)) {
+        if (blockUpRight && this.isSolid(blockUpRight)) {
             return blockUpRight;
         }
         return null;
@@ -396,7 +394,14 @@ export class Entity {
         if (this.hurtCooldown) return false;
         this.hurtCooldown = 0.3;
         this.flashColor();
+        const previousHealth = this.health;
         this.decreaseHealth(damage);
+        if (this.type === EntityTypes.Mob && Number.isFinite(damage) && damage > 0) {
+            const actualDamage = Math.min(damage, Math.max(0, previousHealth ?? 0));
+            if (actualDamage > 0) {
+                this.world?.addDamageIndicator?.(this, actualDamage);
+            }
+        }
         return true;
     }
 
@@ -464,17 +469,26 @@ export class Entity {
         return getDimensionChunks(this.dimension).get(chunkPosition);
     }
 
-    isSolid(blockType) {
+    isSolid(block) {
+        const blockType = typeof block === "number" ? block : block?.blockType;
         if (getBlock(blockType).fluid) return false;
-        return getBlock(blockType).collision;
+        return typeof block === "number"
+            ? getBlock(blockType).collision
+            : hasBlockCollision(block);
     }
 
-    canStandOn(blockType) {
-        const block = getBlock(blockType);
-        if (!block) return false;
-        if (block.air || block.fluid) return false;
-        if (block.collision) return true;
-        return !block.transparent;
+    canStandOn(blockOrType) {
+        const blockType =
+            typeof blockOrType === "number" ? blockOrType : blockOrType?.blockType;
+        const def = getBlock(blockType);
+        if (!def) return false;
+        if (def.air || def.fluid) return false;
+        if (
+            typeof blockOrType === "number"
+                ? def.collision
+                : hasBlockCollision(blockOrType)
+        ) return true;
+        return !def.transparent;
     }
 
     updateEntity() {
@@ -487,6 +501,7 @@ export class Entity {
             this.grounded,
             this.lookDirection,
         );
+        if (this.body) updateBendPose(this, runtime.passedTime);
     }
 
     footstepEmitterLogic() {
@@ -794,7 +809,7 @@ export class Entity {
                     if (
                         !checkAbove &&
                         (!blockAboveSlab ||
-                            !getBlock(blockAboveSlab.blockType).collision)
+                            !hasBlockCollision(blockAboveSlab))
                     ) {
                         this.position.y = newY;
                         this.velocity.y = 0;
@@ -835,7 +850,7 @@ export class Entity {
                     if (
                         !checkAbove &&
                         (!blockAboveSlab ||
-                            !getBlock(blockAboveSlab.blockType).collision)
+                            !hasBlockCollision(blockAboveSlab))
                     ) {
                         this.position.y = newY;
                         this.velocity.y = 0;
@@ -1031,7 +1046,9 @@ export class Entity {
     filterBlocksByProperty(blocks, property) {
         return blocks.filter((block) => {
             const blockData = getBlock(block.blockType);
-            return blockData && blockData[property];
+            if (!blockData) return false;
+            if (property === "collision") return hasBlockCollision(block);
+            return blockData[property];
         });
     }
 

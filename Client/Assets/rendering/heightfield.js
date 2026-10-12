@@ -6,6 +6,22 @@ export function scenerySeed(seed) {
     return (value >>> 0) % 10007;
 }
 
+// Approximate how much open sky a terrain tile sees. This is computed once
+// when scenery geometry is built, so valleys gain depth without another pass.
+export function terrainSkyExposure(x, depth, heightAt) {
+    const height = heightAt(x, depth);
+    let blocked = 0;
+    for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        let horizon = 0;
+        for (let distance = 1; distance <= 4; distance++) {
+            horizon = Math.max(horizon,
+                (heightAt(x + dx * distance, depth + dz * distance) - height) / distance);
+        }
+        blocked += Math.min(1.5, Math.max(0, horizon));
+    }
+    return Math.max(0.58, 1 - blocked * 0.12);
+}
+
 export function terrainColumnFaces(x, depth, heightAt, floor) {
     const y = heightAt(x, depth), z = -depth - 0.5;
     const faces = [{

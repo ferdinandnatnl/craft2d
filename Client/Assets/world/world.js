@@ -19,6 +19,7 @@ export class World {
         this.name = "New World";
         this.seed = 0;
         this.entities = [];
+        this.damageIndicators = [];
         this.particleEmitters = [];
         this.chunks_in_render_distance = new Map();
         this.player = null;
@@ -30,6 +31,18 @@ export class World {
         this.difficulty = "easy";
 
         this.startTickLoop();
+    }
+
+    addDamageIndicator(entity, amount) {
+        if (!entity || !Number.isFinite(amount) || amount <= 0) return;
+
+        this.damageIndicators.push({
+            amount,
+            x: entity.position.x + entity.hitbox.x / 2,
+            y: entity.position.y - 8,
+            dimension: entity.dimension,
+            createdAt: runtime.passedTime,
+        });
     }
 
     setDifficulty(value) {
@@ -664,6 +677,7 @@ export class World {
         blockType,
         isWall = false,
         dimensionIndex = activeDimension,
+        uploadChunk = true,
     ) {
         if (!multiplayer) return;
         runtime.server.send({
@@ -679,7 +693,7 @@ export class World {
             },
         });
 
-        this.uploadChunkToServer(chunkX, dimensionIndex);
+        if (uploadChunk) this.uploadChunkToServer(chunkX, dimensionIndex);
     }
 
     serverBreakBlock(
@@ -759,11 +773,12 @@ export class World {
             runtime.server.send({
                 type: "summonEntity",
                 message: {
-                    entity: newEntity.name,
+                    entity: newEntity.entityTypeName ?? newEntity.name,
                     props: props,
                     position: position,
                     UUID: UUID,
                 },
+                sender: this.player?.UUID,
             });
         }
 

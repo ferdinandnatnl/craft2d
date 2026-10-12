@@ -43,6 +43,30 @@ body:has(#canvas) {
     touch-action: none;
 }
 
+.creative-search-input {
+    position: fixed;
+    z-index: 7;
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: white;
+    font: 16px "Pixel", sans-serif;
+    outline: 2px solid transparent;
+    cursor: text;
+    touch-action: manipulation;
+}
+
+.creative-search-input::placeholder {
+    color: #999;
+}
+
+.creative-search-input:focus-visible {
+    outline-color: white;
+}
+
 #touch-controls {
     display: none;
 }

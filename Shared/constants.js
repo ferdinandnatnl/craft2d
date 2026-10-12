@@ -10,7 +10,7 @@ export const TERRAIN_HEIGHT = 50; // 50
 export const WATER_LEVEL = 10;
 export const CHUNK_FILE_SIZE = 7.5; // kB
 export const GRAVITY = 30 * BLOCK_SIZE;
-export const INTERACT_DISTANCE = 4;
+export const INTERACT_DISTANCE = 3;
 export const TICK_SPEED = 20;
 
 export const mobSpawnDelay = { min: 10, max: 120 };
@@ -43,4 +43,5 @@ export const ToolType = Object.freeze({
     Sword: 6,
     Hammer: 7,
     Flame: 8,
+    FishingRod: 9,
 });

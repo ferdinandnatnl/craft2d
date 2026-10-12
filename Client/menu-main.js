@@ -55,6 +55,7 @@ const htmlApi = {
     updateMusicVolume: menu.updateMusicVolume,
     updateSFXVolume: menu.updateSFXVolume,
     updateWorldSeed: menu.updateWorldSeed,
+    selectWorldSeed: menu.selectWorldSeed,
     updateWorldName: menu.updateWorldName,
     updateServerName: menu.updateServerName,
     updateServerIP: menu.updateServerIP,

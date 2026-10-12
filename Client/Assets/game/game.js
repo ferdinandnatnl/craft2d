@@ -202,15 +202,17 @@ export class Game {
             }
             return;
         }
-        const cursorDistance = Math.floor(
-            Vector2.Distance(
-                runtime.world.player.position,
-                new Vector2(
-                    input.getMousePositionOnBlockGrid().x,
-                    input.getMousePositionOnBlockGrid().y,
-                ),
-            ) / BLOCK_SIZE,
+        const mousePosition = input.getMousePositionOnBlockGrid();
+        const playerCenter = new Vector2(
+            runtime.world.player.position.x + runtime.world.player.hitbox.x / 2,
+            runtime.world.player.position.y + runtime.world.player.hitbox.y / 2,
         );
+        const blockCenter = new Vector2(
+            mousePosition.x + BLOCK_SIZE / 2,
+            mousePosition.y + BLOCK_SIZE / 2,
+        );
+        const cursorDistance =
+            Vector2.Distance(playerCenter, blockCenter) / BLOCK_SIZE;
         runtime.cursorInRange = !runtime.world.player.abilities.instaBuild
             ? cursorDistance <= INTERACT_DISTANCE
             : true;

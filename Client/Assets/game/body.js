@@ -4,7 +4,11 @@ import { BLOCK_SIZE, ToolType } from "../utils/globals.js";
 import { drawImage } from "../utils/renderer.js";
 import { getSpriteSize, getSpriteUrl, isEqualToOriginal } from "../utils/texturePackLoader.js";
 import { getBlock } from "../world/block.js";
-import { blendSwimming, getSwimPartPitch } from "../rendering/entityPose.js";
+import {
+    blendSwimming,
+    getBoatPartPitch,
+    getSwimPartPitch,
+} from "../rendering/entityPose.js";
 
 export class Body {
     constructor({
@@ -12,13 +16,17 @@ export class Body {
         parts = [],
         flipCorrection = 0,
         sprite = "",
+        renderScale = 1,
     }) {
         this.position = position;
         this.flipCorrection = flipCorrection;
+        this.renderScale = renderScale;
         this.parts = parts;
         this.opacity = 1;
         this.swimAmount = 0;
         this.swimPhase = 0;
+        this.boatAmount = 0;
+        this.boatPhase = 0;
 
         this.flashingColor = null;
 
@@ -52,9 +60,10 @@ export class Body {
             }
         };
 
+        const spritePath = "entity/" + sprite;
         this.image.src = getSpriteUrl(
-            "entity/" + sprite,
-            isEqualToOriginal("entity/" + sprite),
+            spritePath,
+            isEqualToOriginal(spritePath),
         );
     }
 
@@ -147,6 +156,15 @@ export class Body {
         if (this.swimAmount > 0) this.swimPhase = (this.swimPhase + deltaTime * 6) % (Math.PI * 2);
     }
 
+    updateBoating(active, moving = false) {
+        const deltaTime = Math.max(0, Math.min(runtime.deltaTime || 0, 0.1));
+        this.boatAmount = blendSwimming(this.boatAmount, active, deltaTime);
+        if (this.boatAmount > 0) {
+            this.boatPhase = (this.boatPhase + deltaTime *
+                (moving ? 8 : 1.5)) % (Math.PI * 2);
+        }
+    }
+
     draw(ctx, direction, lookDirection, holdItem) {
         const sortedParts = Object.values(this.parts).sort(
             (a, b) => a.zIndex - b.zIndex,
@@ -154,12 +172,25 @@ export class Body {
 
         ctx.save();
         ctx.globalAlpha = this.opacity;
+        if (this.renderScale !== 1) {
+            ctx.translate(this.position.x, this.position.y);
+            ctx.scale(this.renderScale, this.renderScale);
+            ctx.translate(-this.position.x, -this.position.y);
+        }
         if (this.swimAmount > 0) {
             const centerX = this.position.x + BLOCK_SIZE * 0.2;
             const centerY = this.position.y + BLOCK_SIZE * 0.9;
             ctx.translate(centerX, centerY);
             ctx.rotate(direction * Math.PI / 2 * this.swimAmount);
             ctx.translate(-centerX, -centerY);
+        }
+        const bendPose = this.bendPose;
+        if (bendPose?.lean) {
+            const hipX = this.position.x + BLOCK_SIZE * 0.2;
+            const hipY = this.position.y + BLOCK_SIZE * 1.1;
+            ctx.translate(hipX, hipY);
+            ctx.rotate(direction * bendPose.lean);
+            ctx.translate(-hipX, -hipY);
         }
 
         for (const part of sortedParts) {
@@ -178,6 +209,16 @@ export class Body {
                 const swimRotation = getSwimPartPitch(part.id, this.swimPhase) * 180 / Math.PI * direction * side;
                 rotation += (swimRotation - rotation) * this.swimAmount;
             }
+            if (this.boatAmount > 0 && !part.isSwinging) {
+                const side = part.zIndex < 0 ? -1 : 1;
+                const boatRotation = getBoatPartPitch(part.id, this.boatPhase) *
+                    180 / Math.PI * direction * side;
+                rotation += (boatRotation - rotation) * this.boatAmount;
+            }
+            const side = part.zIndex < 0 ? -1 : 1;
+            if (bendPose?.pitch[part.id] != null) {
+                rotation = bendPose.pitch[part.id] * 180 / Math.PI * direction * side;
+            }
             part.draw(
                 ctx,
                 lookDirection,
@@ -187,6 +228,7 @@ export class Body {
                 this.image,
                 direction,
                 rotation,
+                bendPose?.bend[part.id] * direction * side || 0,
             );
         }
 
@@ -274,6 +316,8 @@ export class BodyPart {
         this._cropImage = null;
         this._cropSrc = "";
         this._cropRect = null;
+        this._ownSpriteImage = null;
+        this._ownSpriteSrc = "";
     }
 
     getCroppedSprite(image) {
@@ -335,11 +379,11 @@ export class BodyPart {
         image,
         direction,
         rotation = this.rotation,
+        bendRotation = 0,
     ) {
         const img = this.loadSprite(image);
 
-        if (img == null) {
-            console.warn("image is null for body part " + this.id, this);
+        if (!img?.complete || !img.naturalWidth) {
             return;
         }
 
@@ -374,7 +418,9 @@ export class BodyPart {
         // Render held item and sprite
         this.renderHeldItem(ctx, holdItem, this.direction);
 
-        const spriteSize = getSpriteSize(this.ownSpriteMap || this.sprite);
+        const spriteSize = getSpriteSize(
+            this.ownSpriteMap ? `entity/${this.ownSpriteMap}` : this.sprite,
+        );
         const baseSize = spriteSize.width || 16;
         const scaleFactor = BLOCK_SIZE / baseSize;
         const destWidth = Math.round(this.spriteCrop.width * scaleFactor);
@@ -385,7 +431,34 @@ export class BodyPart {
         // Draw from a pre-cropped canvas so rotation can't bleed adjacent atlas pixels
         // (e.g. left head face sits under the head-bottom face on the skin sheet).
         const cropped = this.getCroppedSprite(img);
-        if (cropped) {
+        if (cropped && bendRotation) {
+            const tint = (x, y, width, height) => {
+                ctx.save();
+                if (this.zIndex < 0) {
+                    ctx.globalAlpha = 0.3;
+                    ctx.fillStyle = "black";
+                    ctx.fillRect(x, y, width, height);
+                }
+                if (flashingColor) {
+                    ctx.globalAlpha = 0.4;
+                    ctx.fillStyle = flashingColor;
+                    ctx.fillRect(x, y, width, height);
+                }
+                ctx.restore();
+            };
+            const halfSource = this.spriteCrop.height / 2;
+            const halfHeight = destHeight / 2;
+            ctx.drawImage(cropped, 0, 0, this.spriteCrop.width, halfSource,
+                destX, destY, destWidth, halfHeight);
+            tint(destX, destY, destWidth, halfHeight);
+            ctx.save();
+            ctx.translate(destX + destWidth / 2, destY + halfHeight);
+            ctx.rotate(bendRotation);
+            ctx.drawImage(cropped, 0, halfSource, this.spriteCrop.width, halfSource,
+                -destWidth / 2, 0, destWidth, halfHeight);
+            tint(-destWidth / 2, 0, destWidth, halfHeight);
+            ctx.restore();
+        } else if (cropped) {
             ctx.drawImage(cropped, destX, destY, destWidth, destHeight);
         } else {
             ctx.drawImage(
@@ -401,17 +474,18 @@ export class BodyPart {
             );
         }
 
-        if (this.zIndex < 0) {
-            ctx.globalAlpha = 0.3;
-            ctx.fillStyle = "black";
-            ctx.fillRect(destX, destY, destWidth, destHeight);
-        }
-
-        if (flashingColor) {
-            ctx.globalAlpha = 0.4;
-            ctx.fillStyle = flashingColor;
-            ctx.fillRect(destX, destY, destWidth, destHeight);
-            ctx.globalAlpha = 1;
+        if (!bendRotation || !cropped) {
+            if (this.zIndex < 0) {
+                ctx.globalAlpha = 0.3;
+                ctx.fillStyle = "black";
+                ctx.fillRect(destX, destY, destWidth, destHeight);
+            }
+            if (flashingColor) {
+                ctx.globalAlpha = 0.4;
+                ctx.fillStyle = flashingColor;
+                ctx.fillRect(destX, destY, destWidth, destHeight);
+                ctx.globalAlpha = 1;
+            }
         }
 
         ctx.restore();
@@ -469,17 +543,19 @@ export class BodyPart {
     }
 
     loadSprite(image) {
-        let img = image;
+        if (!this.ownSpriteMap) return image;
 
-        if (this.ownSpriteMap) {
-            img = new Image();
-            img.src = getSpriteUrl(
-                "entity/" + this.ownSpriteMap,
-                isEqualToOriginal("entity/" + this.ownSpriteMap),
-            );
+        const spritePath = `entity/${this.ownSpriteMap}`;
+        const spriteUrl = getSpriteUrl(
+            spritePath,
+            isEqualToOriginal(spritePath),
+        );
+        if (!this._ownSpriteImage || this._ownSpriteSrc !== spriteUrl) {
+            this._ownSpriteImage = new Image();
+            this._ownSpriteImage.src = spriteUrl;
+            this._ownSpriteSrc = spriteUrl;
         }
-
-        return img;
+        return this._ownSpriteImage;
     }
 
     applyTranslation(ctx) {

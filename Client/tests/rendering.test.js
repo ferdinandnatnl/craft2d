@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PerspectiveCamera, Vector3 } from "three";
 import { syncSliceCamera } from "../Assets/rendering/projection.js";
-import { terrainColumnFaces, scenerySeed } from "../Assets/rendering/heightfield.js";
+import { terrainColumnFaces, terrainSkyExposure, scenerySeed } from "../Assets/rendering/heightfield.js";
 
 test("perspective front faces stay on the break/place grid at every viewport edge", () => {
     for (const [width, height] of [[1920, 1080], [800, 1000], [390, 844], [844, 390]]) {
@@ -63,4 +63,14 @@ test("numeric and text seeds produce stable, finite scenery choices", () => {
     }
     assert.equal(scenerySeed(9001), scenerySeed("9001"));
     assert.notEqual(scenerySeed("forest"), scenerySeed("swamp"));
+});
+
+test("scenery valleys receive less sky light than open terrain", () => {
+    const flat = () => 4;
+    const sheltered = (x, depth) => x === 0 && depth === 0 ? 4 : 6;
+    assert.equal(terrainSkyExposure(0, 0, flat), 1);
+    assert.ok(terrainSkyExposure(0, 0, sheltered) < 0.7);
+    assert.ok(terrainSkyExposure(0, 0, sheltered) >= 0.58);
+    const ridge = (distance) => (x, depth) => x === distance && depth === 0 ? 6 : 4;
+    assert.ok(terrainSkyExposure(0, 0, ridge(1)) < terrainSkyExposure(0, 0, ridge(4)));
 });

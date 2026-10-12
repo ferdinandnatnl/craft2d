@@ -8,6 +8,11 @@ import { getBlock } from "./block.js";
 import { Chunk } from "./chunk.js";
 import { Dimensions, activeDimension, dimensions, getDimension, gotoDimension } from "./dimension.js";
 import { downloadWorldSave } from "../../buttonUtils.js";
+import { Villager } from "../entities/mobs/villager.js";
+import { IronGolem, SnowGolem } from "../entities/mobs/golem.js";
+import { Boat } from "../entities/boat.js";
+import { Warden } from "../entities/mobs/warden.js";
+import { Minecart } from "../entities/minecart.js";
 
 export const AUTOSAVE_INTERVAL = 60000;
 
@@ -34,6 +39,9 @@ export let currentSave = {
     seed: 0,
     pendingBlocks: new Map(),
     dimensions: [], // Array of { index, chunks: [{ x, biome, previousChunk, blocks, walls }] }
+    boats: [],
+    golems: [],
+    playerBoatUUID: null,
 };
 
 export function saveWorld(message = true, toFile = false) {
@@ -99,6 +107,7 @@ export function saveWorld(message = true, toFile = false) {
         currentSave.currentSlot = runtime.hotbar.currentSlot;
         currentSave.activeDimension = activeDimension;
         currentSave.flying = runtime.world.player.abilities.flying;
+        currentSave.playerBoatUUID = runtime.world.player.boat?.UUID ?? null;
         if (runtime.world.player.spawnPoint) {
             currentSave.spawnPoint = JSON.stringify(runtime.world.player.spawnPoint);
         }
@@ -106,6 +115,51 @@ export function saveWorld(message = true, toFile = false) {
 
     currentSave.seed = runtime.world.seed;
     currentSave.dimensions = savedDimensions;
+    currentSave.villagers = runtime.world.entities
+        .filter(entity => entity.name === "Villager" && entity.health > 0)
+        .map(entity => ({
+            UUID: entity.UUID,
+            position: { x: entity.position.x, y: entity.position.y },
+            health: entity.health,
+            homeX: entity.homeX,
+            dimension: entity.dimension,
+        }));
+    currentSave.boats = runtime.world.entities
+        .filter(entity => entity.isBoat)
+        .map(entity => ({
+            UUID: entity.UUID,
+            position: { x: entity.position.x, y: entity.position.y },
+            surfaceY: entity.surfaceY,
+            dimension: entity.dimension,
+        }));
+    currentSave.golems = runtime.world.entities
+        .filter(entity =>
+            ["IronGolem", "SnowGolem"].includes(entity.entityTypeName) &&
+            entity.health > 0,
+        )
+        .map(entity => ({
+            type: entity.entityTypeName,
+            UUID: entity.UUID,
+            position: { x: entity.position.x, y: entity.position.y },
+            health: entity.health,
+            dimension: entity.dimension,
+        }));
+    currentSave.wardens = runtime.world.entities
+        .filter(entity => entity.name === "Warden" && entity.health > 0)
+        .map(entity => ({
+            UUID: entity.UUID,
+            position: { x: entity.position.x, y: entity.position.y },
+            health: entity.health,
+            dimension: entity.dimension,
+        }));
+    currentSave.minecarts = runtime.world.entities
+        .filter(entity => entity.name === "Minecart")
+        .map(entity => ({
+            UUID: entity.UUID,
+            position: { x: entity.position.x, y: entity.position.y },
+            variant: entity.variant,
+            dimension: entity.dimension,
+        }));
 
     // Determine world name and id before serializing so the name is included in the save
     let worldName = runtime.world.name || "New World";
@@ -187,31 +241,20 @@ export function saveChunk(chunk) {
             const block = chunk.blocks[y][x];
             const wall = chunk.walls[y][x];
 
-            // Save block
-            blocks[y][x] = block.blockType;
-            if (block.metaData) {
-                blocks[y][x] = { t: block.blockType, m: block.metaData };
-            }
-            if (block.linkedBlocks && block.linkedBlocks.length > 1) {
-                blocks[y][x] = {
-                    t: block.blockType,
-                    l: block.linkedBlocks,
-                };
-            }
+            // Keep block metadata and multi-block links together in saved cells.
+            const blockState = { t: block.blockType };
+            if (block.metaData) blockState.m = block.metaData;
+            if (block.linkedBlocks?.length > 1) blockState.l = block.linkedBlocks;
+            blocks[y][x] = Object.keys(blockState).length > 1
+                ? blockState
+                : block.blockType;
 
-            // Save wall
-            walls[y][x] = wall.blockType;
-            if (wall.metaData) {
-                walls[y][x] = { t: wall.blockType, m: wall.metaData };
-            }
-            if (wall.linkedBlocks && wall.linkedBlocks.length > 1) {
-                if (!typeof walls[y][x] === "object") {
-                    walls[y][x] = {
-                        t: wall.blockType,
-                        l: JSON.stringify(wall.linkedBlocks),
-                    };
-                } else wall[y][x].l = JSON.stringify(wall.linkedBlocks);
-            }
+            const wallState = { t: wall.blockType };
+            if (wall.metaData) wallState.m = wall.metaData;
+            if (wall.linkedBlocks?.length > 1) wallState.l = wall.linkedBlocks;
+            walls[y][x] = Object.keys(wallState).length > 1
+                ? wallState
+                : wall.blockType;
         }
     }
 
@@ -353,6 +396,150 @@ export async function loadWorld(save) {
         }
     }
 
+    const savedVillagers = Array.isArray(currentSave.villagers)
+        ? currentSave.villagers : [];
+    for (const saved of savedVillagers) {
+        if (!saved || !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) || saved.health <= 0 ||
+            typeof saved.UUID !== "string") continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) {
+            continue;
+        }
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const villager = runtime.world.summonEntity(
+            Villager,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                health: Math.min(saved.health, 20),
+                myChunkX: chunkX,
+                homeX: Number.isFinite(saved.homeX)
+                    ? saved.homeX : saved.position.x,
+            },
+            false,
+            saved.UUID,
+        );
+        villager.dimension = dimensionIndex;
+        chunk.entities.push(villager);
+    }
+
+    const savedGolems = Array.isArray(currentSave.golems)
+        ? currentSave.golems : [];
+    const golemTypes = { IronGolem, SnowGolem };
+    for (const saved of savedGolems) {
+        const golemType = golemTypes[saved?.type];
+        if (!golemType || typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) || saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) {
+            continue;
+        }
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const maxHealth = saved.type === "IronGolem" ? 100 : 4;
+        const golem = runtime.world.summonEntity(
+            golemType,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                health: Math.min(saved.health, maxHealth),
+                myChunkX: chunkX,
+            },
+            false,
+            saved.UUID,
+        );
+        golem.dimension = dimensionIndex;
+        chunk.entities.push(golem);
+    }
+
+    const savedWardens = Array.isArray(currentSave.wardens)
+        ? currentSave.wardens : [];
+    for (const saved of savedWardens) {
+        if (typeof saved?.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) || saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) {
+            continue;
+        }
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const warden = runtime.world.summonEntity(
+            Warden,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                health: Math.min(saved.health, 250),
+                myChunkX: chunkX,
+            },
+            false,
+            saved.UUID,
+        );
+        warden.dimension = dimensionIndex;
+        chunk.entities.push(warden);
+    }
+
+    const savedMinecarts = Array.isArray(currentSave.minecarts)
+        ? currentSave.minecarts : [];
+    for (const saved of savedMinecarts) {
+        if (typeof saved?.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y)) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) {
+            continue;
+        }
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        if (!getDimension(dimensionIndex).chunks.has(chunkX)) continue;
+        const minecart = runtime.world.summonEntity(
+            Minecart,
+            new Vector2(saved.position.x, saved.position.y),
+            { variant: saved.variant === "chest" ? "chest" : "normal" },
+            false,
+            saved.UUID,
+        );
+        minecart.dimension = dimensionIndex;
+    }
+
+    const savedBoats = Array.isArray(currentSave.boats) ? currentSave.boats : [];
+    for (const saved of savedBoats) {
+        if (
+            !saved ||
+            typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y)
+        ) {
+            continue;
+        }
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) {
+            continue;
+        }
+        const boat = runtime.world.summonEntity(
+            Boat,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                surfaceY: Number.isFinite(saved.surfaceY)
+                    ? saved.surfaceY
+                    : saved.position.y + BLOCK_SIZE * 0.25,
+                dimension: dimensionIndex,
+            },
+            false,
+            saved.UUID,
+        );
+        boat.dimension = dimensionIndex;
+    }
+
     runtime.time = currentSave.time;
 
     if (currentSave.gameRules) {
@@ -422,6 +609,11 @@ export async function loadWorld(save) {
 
             if (currentSave.activeDimension !== undefined)
                 gotoDimension(currentSave.activeDimension);
+
+            const savedBoat = currentSave.playerBoatUUID
+                ? runtime.world.getEntityByUUID(currentSave.playerBoatUUID)
+                : null;
+            if (savedBoat?.isBoat) savedBoat.mount(runtime.world.player);
 
             saveWorld(false);
         }, 100);
@@ -497,7 +689,11 @@ export function loadChunk(
             // Walls
             const wallData = chunk.walls[y][x];
             const wallType = wallData.t ? wallData.t : wallData;
-            const wallMetaData = wallData.m ? JSON.parse(wallData.m) : null;
+            const wallMetaData = wallData.m
+                ? typeof wallData.m === "string"
+                    ? JSON.parse(wallData.m)
+                    : wallData.m
+                : null;
 
             constructedChunk.setBlockTypeLocal(
                 x,
@@ -525,7 +721,9 @@ export function loadChunk(
             const wallData = chunk.walls[y][x];
             const wall = constructedChunk.walls[y][x];
             if (wallData.l) {
-                wall.linkedBlocks = wallData.l;
+                wall.linkedBlocks = typeof wallData.l === "string"
+                    ? JSON.parse(wallData.l)
+                    : wallData.l;
             }
         }
     }

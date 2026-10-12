@@ -11,7 +11,31 @@ import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { findNetherPortalFrame } from "@2dcraft.com/shared/netherPortal.js";
 import { Dimensions, activeDimension, getDimension, getDimensionChunks } from "./dimension.js";
 import { Trees } from "@2dcraft.com/shared/trees.js";
+import { caveCellAt, caveColumnAt } from "@2dcraft.com/shared/caves.js";
+import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { END_OUTPOST_X, END_SHRINE_WIDTH, endIslandSurfaceY, isEndShrineChunk } from "@2dcraft.com/shared/endProgression.js";
+import { countMobsNearPlayer, MAX_MOBS_NEAR_PLAYER } from "./mobLimits.js";
+
+const MUTANT_VARIANTS = {
+    Zombie: "MutantZombie",
+    Husk: "MutantZombie",
+    Drowned: "MutantZombie",
+    Creeper: "MutantCreeper",
+    Skeleton: "MutantSkeleton",
+    WitherSkeleton: "MutantSkeleton",
+    Enderman: "MutantEnderman",
+};
+function caveFeatureFor(seed, cellIndex) {
+    let hash = 2166136261;
+    for (const character of `cave:${seed}:${cellIndex}`) {
+        hash ^= character.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+    }
+    const roll = (hash >>> 0) % 6;
+    if (roll === 0) return "warden";
+    if (roll === 2 || roll === 4) return "mineshaft";
+    return null;
+}
 
 export class Chunk {
     constructor(
@@ -38,6 +62,8 @@ export class Chunk {
         this.entities = [];
         this.update = [];
         this.spawnTime = 0;
+        this.caveSpawnTime = 0;
+        this.aquaticSpawningInitialized = false;
 
         this.generateChunk();
     }
@@ -344,6 +370,8 @@ export class Chunk {
         // The Nether and End have no passive mob phase.
         if (this.dimension !== Dimensions.Overworld) passive = false;
 
+        if (this.dimension === Dimensions.Overworld) this.spawnAquaticMobs();
+
         // If peaceful, don't spawn hostile googlies, but allow passive mobs
         if (this.world && this.world.difficulty === "peaceful" && !passive) {
             this.setMobSpawnTime();
@@ -356,7 +384,16 @@ export class Chunk {
         )
             return;
 
-        const count = randomRange(-this.biome.maxMobs, this.biome.maxMobs);
+        const nearbyMobs = countMobsNearPlayer(this.world, this.dimension);
+        if (nearbyMobs >= MAX_MOBS_NEAR_PLAYER) {
+            this.setMobSpawnTime();
+            return;
+        }
+
+        const count = Math.min(
+            randomRange(-this.biome.maxMobs, this.biome.maxMobs),
+            MAX_MOBS_NEAR_PLAYER - nearbyMobs,
+        );
 
         if (count <= 0) {
             this.setMobSpawnTime();
@@ -364,6 +401,7 @@ export class Chunk {
         }
 
         let spawned = 0;
+        let spawnedMutant = false;
         for (let i = 0; i < count; i++) {
             const randomX = randomRange(0, this.width);
 
@@ -392,11 +430,17 @@ export class Chunk {
                 continue;
             }
 
-            const randomEntity = passive
+            const baseEntity = passive
                 ? this.biome.mobs[randomRange(0, this.biome.mobs.length)]
                 : this.biome.googlies[
                       randomRange(0, this.biome.googlies.length)
                   ];
+            const mutantVariant = MUTANT_VARIANTS[baseEntity];
+            const randomEntity = !passive && !spawnedMutant && mutantVariant &&
+                randomRange(0, 12) === 0
+                ? mutantVariant
+                : baseEntity;
+            if (randomEntity !== baseEntity) spawnedMutant = true;
 
             const entity = this.world.summonEntity(
                 Entities[randomEntity],
@@ -418,6 +462,143 @@ export class Chunk {
             }
         }
         if (spawned === 0) this.setMobSpawnTime();
+    }
+
+    spawnCaveMobs() {
+        this.caveSpawnTime = runtime.passedTime + randomRange(25, 46);
+        const player = this.world.player;
+        if (this.dimension !== Dimensions.Overworld ||
+            this.world.generator.specialWorldProps.noMobs ||
+            this.world.difficulty === "peaceful" ||
+            !runtime.GAMERULES.doMobSpawning ||
+            player?.dimension !== this.dimension) return;
+
+        const playerX = Math.floor(player.position.x / BLOCK_SIZE);
+        const playerFeetY = CHUNK_HEIGHT -
+            (player.position.y + player.hitbox.y) / BLOCK_SIZE;
+        if (playerFeetY > this.world.generator.getTerrainHeight(playerX, this.dimension) - 6) return;
+
+        const remaining = Math.min(2,
+            4 - this.entities.filter(entity => entity.isHostile && entity.health > 0).length,
+            MAX_MOBS_NEAR_PLAYER - countMobsNearPlayer(this.world, this.dimension));
+        if (remaining <= 0) return;
+
+        const floors = [];
+        for (let x = 0; x < this.width; x++) {
+            const worldX = this.x / BLOCK_SIZE + x;
+            const distance = Math.abs(worldX - playerX);
+            if (distance < 8 || distance > 32) continue;
+            const surface = this.getHeight(x);
+            const minY = Math.max(3, Math.floor(playerFeetY) - 8);
+            const maxY = Math.min(this.height - 4, Math.ceil(playerFeetY) + 8, surface - 8);
+            for (let y = minY; y <= maxY; y++) {
+                const floor = getBlock(this.getBlockType(x, y - 1));
+                if (!floor?.collision || floor.fluid ||
+                    this.getBlockType(x, y) !== Blocks.Air ||
+                    this.getBlockType(x, y + 1) !== Blocks.Air ||
+                    (this.getBlock(x, y)?.lightLevel ?? 0) > 7) continue;
+                floors.push({ x, y });
+            }
+        }
+        if (!floors.length) return;
+
+        for (let i = 0; i < remaining && floors.length; i++) {
+            const floor = floors.splice(randomRange(0, floors.length), 1)[0];
+            const choices = this.getBlockType(floor.x, floor.y + 2) === Blocks.Air
+                ? this.biome.googlies
+                : this.biome.googlies.filter(name => name !== "Enderman");
+            if (!choices.length) break;
+            const entity = this.world.summonEntity(
+                Entities[choices[randomRange(0, choices.length)]],
+                new Vector2(this.x + floor.x * BLOCK_SIZE, 0),
+                { myChunkX: this.x },
+            );
+            entity.position.y = this.world.userBlockYToWorld(floor.y) - entity.hitbox.y;
+            entity.dimension = this.dimension;
+            this.entities.push(entity);
+        }
+    }
+
+    spawnAquaticMobs() {
+        this.aquaticSpawningInitialized = true;
+        if (
+            this.dimension !== Dimensions.Overworld ||
+            this.world.generator.specialWorldProps.noMobs ||
+            !runtime.GAMERULES.doMobSpawning
+        ) return;
+
+        const existing = this.entities.filter((entity) => entity.isAquatic).length;
+        const spawnLimit = 4;
+        if (existing >= spawnLimit) return;
+        const activeMobCount = countMobsNearPlayer(this.world, this.dimension);
+        if (activeMobCount >= MAX_MOBS_NEAR_PLAYER) return;
+
+        const waterCells = [];
+        const deepWaterCells = [];
+        for (let x = 0; x < this.width; x++) {
+            for (let y = 0; y < this.height; y++) {
+                if (this.getBlockType(x, y) !== Blocks.Water) continue;
+
+                const verticalWater = [
+                    this.getBlockType(x, y - 1) === Blocks.Water,
+                    this.getBlockType(x, y + 1) === Blocks.Water,
+                ];
+                if (!verticalWater.some(Boolean)) continue;
+
+                const position = new Vector2(
+                    this.x + x * BLOCK_SIZE + (BLOCK_SIZE - BLOCK_SIZE * 0.9) / 2,
+                    this.world.userBlockYToWorld(y + 1) + BLOCK_SIZE * 0.25,
+                );
+                waterCells.push(position);
+
+                if (
+                    verticalWater.every(Boolean) &&
+                    this.getBlockType(x, y - 2) === Blocks.Water &&
+                    this.getBlockType(x, y + 2) === Blocks.Water
+                ) {
+                    deepWaterCells.push(position);
+                }
+            }
+        }
+        if (!waterCells.length) return;
+
+        const speciesForBiome = this.biome.minTemp >= 0.65
+            ? ["Cod", "TropicalFish", "TropicalFish", "Pufferfish"]
+            : this.biome.minTemp <= 0.25
+              ? ["Cod", "Salmon", "Salmon"]
+              : ["Cod", "Cod", "Salmon", "TropicalFish", "Pufferfish"];
+        const remaining = spawnLimit - existing;
+        const count = Math.min(
+            remaining,
+            MAX_MOBS_NEAR_PLAYER - activeMobCount,
+            randomRange(1, 3),
+        );
+
+        for (let i = 0; i < count; i++) {
+            const isSquid = deepWaterCells.length > 0 && randomRange(0, 8) === 0;
+            const species = isSquid
+                ? "Squid"
+                : speciesForBiome[randomRange(0, speciesForBiome.length)];
+            const cells = isSquid ? deepWaterCells : waterCells;
+            const position = cells[randomRange(0, cells.length)];
+            const hitbox = species === "Squid"
+                ? BLOCK_SIZE * 0.9
+                : species === "Pufferfish"
+                  ? BLOCK_SIZE * 0.7
+                  : BLOCK_SIZE * 0.5;
+            const entity = this.world.summonEntity(
+                Entities[species],
+                new Vector2(
+                    position.x +
+                        (BLOCK_SIZE * 0.9 - BLOCK_SIZE *
+                            (species === "Pufferfish" ? 0.7 : 0.9)) / 2,
+                    position.y + (BLOCK_SIZE * 0.5 - hitbox) / 2,
+                ),
+                { myChunkX: this.x },
+            );
+            entity.dimension = this.dimension;
+            this.entities.push(entity);
+        }
     }
 
     removeEntityFromChunk(entity) {
@@ -523,7 +704,7 @@ export class Chunk {
             if (
                 getDimension(this.dimension).noiseMaps.grass.getNoise(
                     this.getWorldX(x)
-                ) >= 1
+                ) >= 1 && randomRange(0, 5) === 0
             ) {
                 const y = this.findGroundLevel(x, false, true);
                 if (!getBlock(this.getBlockType(x, y)).air) continue;
@@ -531,6 +712,7 @@ export class Chunk {
                     this.biome.grassType[
                         randomRange(0, this.biome.grassType.length)
                     ];
+                if (randomGrass === Blocks.DeadBush && randomRange(0, 5) !== 0) continue;
 
                 this.setBlockType(x, y, randomGrass);
             }
@@ -564,6 +746,11 @@ export class Chunk {
     }
 
     generateCaves() {
+        if (this.dimension === Dimensions.Overworld) {
+            this.generateOverworldCaves();
+            return;
+        }
+
         const halfwayPoint = this.biome.heightNoise.min / 1.2;
 
         for (let y = 0; y < CHUNK_HEIGHT; y++) {
@@ -589,6 +776,185 @@ export class Chunk {
                 }
             }
         }
+    }
+
+    generateOverworldCaves() {
+        for (let x = 0; x < this.width; x++) {
+            const worldX = this.x / BLOCK_SIZE + x;
+            const surface = this.getHeight(x);
+            const column = caveColumnAt(worldX);
+            const carved = [];
+
+            for (let y = 2; y <= surface; y++) {
+                const cell = caveCellAt(worldX, y, surface, column);
+                carved[y] = cell;
+                if (cell === "air") this.setBlockType(x, y, Blocks.Air);
+                else if (cell === "water") this.setBlockType(x, y, Blocks.Water);
+                else if (cell === "lava") this.setBlockType(x, y, Blocks.Lava);
+            }
+
+            // Dress exposed cavern rock after carving, using the original
+            // profile so new stalagmites cannot grow more stalagmites.
+            for (let y = 3; y < surface - 4; y++) {
+                if (this.getBlockType(x, y) !== this.biome.baseBlock) continue;
+                const cavern = column.caverns.find(room =>
+                    Math.abs(y - room.centerY) < room.radiusY + 4 &&
+                    Math.abs(worldX - room.centerX) < room.radiusX);
+                if (!cavern) continue;
+
+                const feature = tooloud.Perlin.noise(worldX * 0.31, y * 0.23, 3229);
+                if (carved[y + 1] === "air" || carved[y + 1] === "water" ||
+                    carved[y + 1] === "lava") {
+                    const material = carved[y + 1] === "water" ? Blocks.Gravel :
+                        carved[y + 1] === "lava" ? Blocks.SmoothStone :
+                        cavern.style === "moss" ? Blocks.MossyCobblestone :
+                            feature > 0.15 ? Blocks.SmoothStone : this.biome.baseBlock;
+                    this.setBlockType(x, y, material);
+                    if (carved[y + 1] !== "air" || feature < 0.38) continue;
+                    const length = Math.min(3, 1 + Math.floor((feature - 0.38) * 9));
+                    for (let tip = 1; tip <= length && carved[y + tip] === "air"; tip++) {
+                        this.setBlockType(x, y + tip, cavern.style === "moss" ?
+                            Blocks.MossyCobblestone : Blocks.SmoothStone);
+                    }
+                } else if (carved[y - 1] === "air") {
+                    if (cavern.style === "glow" && feature > 0.36) {
+                        this.setBlockType(x, y, Blocks.Glowstone);
+                    } else if (feature > 0.39) {
+                        const length = Math.min(3, 1 + Math.floor((feature - 0.39) * 9));
+                        for (let tip = 1; tip <= length && carved[y - tip] === "air"; tip++) {
+                            this.setBlockType(x, y - tip, cavern.style === "moss" ?
+                                Blocks.MossyCobblestone : Blocks.SmoothStone);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    generateCaveStructures() {
+        if (this.dimension !== Dimensions.Overworld) return;
+
+        const worldStart = this.x / BLOCK_SIZE;
+        const worldEnd = worldStart + this.width;
+        const rooms = new Map();
+        for (let x = 0; x < this.width; x++) {
+            const worldX = worldStart + x;
+            for (const cavern of caveColumnAt(worldX).caverns) {
+                const feature = caveFeatureFor(this.world.seed, cavern.cellIndex);
+                if (feature && cavern.centerX >= worldStart &&
+                    cavern.centerX < worldEnd) {
+                    const localCenterX = Math.max(0, Math.min(this.width - 1,
+                        Math.floor(cavern.centerX - worldStart)));
+                    const centerBlock = this.getBlockType(localCenterX,
+                        Math.floor(cavern.centerY));
+                    if (centerBlock !== Blocks.Air && centerBlock !== Blocks.Water) continue;
+                    rooms.set(cavern.centerX, { ...cavern, feature });
+                }
+            }
+        }
+
+        for (const cavern of rooms.values()) {
+            const centerX = Math.max(5, Math.min(this.width - 6,
+                Math.floor(cavern.centerX - worldStart)));
+            if (cavern.feature === "warden") this.generateWardenDen(cavern, centerX, worldStart);
+            else if (cavern.feature === "mineshaft") this.generateCaveMineshaft(cavern, centerX, worldStart);
+        }
+    }
+
+    findCaveFloorY(x, cavern) {
+        const lowest = Math.max(3, Math.floor(cavern.centerY - cavern.radiusY) + 2);
+        const highest = Math.min(this.height - 4, Math.floor(cavern.centerY) + 2);
+        for (let y = highest; y >= lowest; y--) {
+            if (this.getBlockType(x, y) !== Blocks.Air) continue;
+            const floor = getBlock(this.getBlockType(x, y - 1));
+            if (floor?.collision && !floor.fluid) return y;
+        }
+        return null;
+    }
+
+    generateCaveMineshaft(cavern, centerX, worldStart) {
+        if (cavern.lake) return;
+
+        const startX = centerX - 4;
+        const tracks = [];
+        for (let x = startX; x <= startX + 8; x++) {
+            const floorY = this.findCaveFloorY(x, cavern);
+            if (floorY === null) return;
+            tracks.push({ x, floorY });
+        }
+
+        for (const { x, floorY } of tracks) {
+            this.setBlockType(x, floorY - 1, Blocks.OakPlanks);
+            this.setBlockType(x, floorY, Blocks.Rail);
+        }
+
+        const first = tracks[0];
+        const last = tracks[tracks.length - 1];
+        for (const end of [first, last]) {
+            for (let rise = 1; rise <= 3; rise++) {
+                if (this.getBlockType(end.x, end.floorY + rise) === Blocks.Air) {
+                    this.setBlockType(end.x, end.floorY + rise, Blocks.OakLog);
+                }
+            }
+        }
+        const beamY = Math.min(first.floorY, last.floorY) + 3;
+        for (const { x } of tracks) {
+            if (this.getBlockType(x, beamY) === Blocks.Air) {
+                this.setBlockType(x, beamY, Blocks.OakLog);
+            }
+        }
+
+        for (const [index, variant] of [[1, "normal"], [7, "chest"]]) {
+            const track = tracks[index];
+            const cart = this.world.summonEntity(
+                Entities.Minecart,
+                new Vector2((worldStart + track.x) * BLOCK_SIZE,
+                    this.world.userBlockYToWorld(track.floorY) - 0.8 * BLOCK_SIZE),
+                { variant },
+            );
+            cart.dimension = this.dimension;
+        }
+    }
+
+    generateWardenDen(cavern, centerX, worldStart) {
+        const floorY = cavern.lake ? cavern.waterLevel + 2 :
+            this.findCaveFloorY(centerX, cavern) ?? Math.floor(cavern.centerY - 2);
+        if (floorY < 3 || floorY + 3 >= this.height) return;
+
+        // A raised sculk dais keeps the den dry in flooded chambers.
+        for (let x = centerX - 3; x <= centerX + 3; x++) {
+            this.setBlockType(x, floorY - 1,
+                x === centerX - 1 ? Blocks.SculkCatalyst : Blocks.Sculk);
+        }
+        for (let x = centerX - 1; x <= centerX + 1; x++) {
+            for (let y = floorY; y <= floorY + 3; y++) {
+                this.setBlockType(x, y, Blocks.Air);
+            }
+        }
+        this.setBlockType(centerX - 3, floorY, Blocks.SculkSensor);
+        this.setBlockType(centerX + 2, floorY, Blocks.SculkShrieker);
+        this.setBlockType(centerX + 3, floorY, Blocks.SculkSensor);
+
+        this.world.generator.generateChestWithLoot(new LootTable([
+            new LootItem({ itemId: Items.EchoShard, maxCount: 2 }),
+            new LootItem({ itemId: Items.Diamond, maxCount: 3 }),
+            new LootItem({ itemId: Items.GoldenApple, maxCount: 1 }),
+            new LootItem({ itemId: Items.RedstoneDust, maxCount: 8, subtract: 3 }),
+        ]), (worldStart + centerX + 4) * BLOCK_SIZE,
+        this.world.userBlockYToWorld(floorY), this);
+
+        if (this.world.generator.specialWorldProps.noMobs ||
+            this.world.difficulty === "peaceful" ||
+            !runtime.GAMERULES?.doMobSpawning) return;
+
+        const warden = this.world.summonEntity(
+            Entities.Warden,
+            new Vector2((worldStart + centerX) * BLOCK_SIZE,
+                this.world.userBlockYToWorld(floorY) - 3 * BLOCK_SIZE),
+            { myChunkX: this.x },
+        );
+        warden.dimension = this.dimension;
+        this.entities.push(warden);
     }
 
     generateOres() {
@@ -848,6 +1214,10 @@ export class Chunk {
                 const worldX = this.x + xIndex * BLOCK_SIZE;
                 const worldY = yIndex * BLOCK_SIZE; // Bottom-up world Y
 
+                if (worldY < 0 || worldY >= CHUNK_HEIGHT * BLOCK_SIZE) {
+                    return false;
+                }
+
                 const targetChunk = this.getChunkForBlock(worldX);
                 if (!targetChunk) {
                     this.setBlockTypeAtPosition(
@@ -1007,7 +1377,7 @@ export class Chunk {
             block.linkedBlocks = linkedBlocks;
         }
 
-        if (blockDef.chunkUpdate) {
+        if (!wall && blockDef.chunkUpdate) {
             if (!this.update.includes(block)) {
                 this.update.push(block);
             }
@@ -1025,7 +1395,7 @@ export class Chunk {
         block.dark = wall;
         block.wall = wall;
 
-        if (blockDef.blockId === Blocks.Fire) {
+        if (!wall && blockDef.blockId === Blocks.Fire) {
             this.checkForPortal(x, y);
         }
 

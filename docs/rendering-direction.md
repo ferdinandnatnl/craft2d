@@ -76,5 +76,11 @@ It was generated with the built-in imagegen tool using
 - Water continues across the wall lane. A dense blue back face hides distant
   scenery while the front tint preserves visibility of swimming entities.
   The surface uses Three.js planar reflections with animated normals.
+- Cinematic 3D rendering adds restrained bloom to bright scene light. Distant
+  terrain and trees cast and receive sunlight shadows. Terrain sky exposure is
+  computed from nearby heights. Day, dusk, and night light and fog now blend
+  smoothly, and distant lighting no longer depends on whether the player is
+  standing under cover. This uses rasterized lighting and occlusion rather
+  than hardware ray tracing.
 
 No existing saved blocks are regenerated or removed by these rendering fixes.

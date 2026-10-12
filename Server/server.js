@@ -729,6 +729,48 @@ function processMessage(message, ws) {
             broadcast(data, [data.sender]);
             break;
 
+        case "summonEntity":
+            {
+                const sender = getPlayerByUUID(data.sender);
+                const summon = data.message || {};
+                const allowedEntities = new Set([
+                    "Boat",
+                    "IronGolem",
+                    "SnowGolem",
+                ]);
+                const validPosition =
+                    Number.isFinite(summon.position?.x) &&
+                    Number.isFinite(summon.position?.y);
+                const validIdentity =
+                    typeof summon.UUID === "string" &&
+                    summon.UUID.length > 0 &&
+                    summon.UUID.length <= 64;
+                const props = summon.props ?? {};
+                const validProps =
+                    props !== null &&
+                    typeof props === "object" &&
+                    !Array.isArray(props) &&
+                    (summon.entity === "Boat"
+                        ? Object.keys(props).every((key) =>
+                              ["surfaceY", "dimension"].includes(key),
+                          ) && Number.isFinite(props.surfaceY) &&
+                          Number.isInteger(props.dimension)
+                        : Object.keys(props).every((key) => key === "myChunkX") &&
+                          (props.myChunkX === undefined ||
+                              Number.isFinite(props.myChunkX)));
+
+                if (
+                    sender?.ws === ws &&
+                    allowedEntities.has(summon.entity) &&
+                    validPosition &&
+                    validIdentity &&
+                    validProps
+                ) {
+                    broadcast(data, [data.sender]);
+                }
+            }
+            break;
+
         case "getChunk":
             const chunk = world
                 .getDimension(data.message.data.dimensionIndex)

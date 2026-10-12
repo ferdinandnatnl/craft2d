@@ -13,6 +13,12 @@ import { CANVAS, ctx, drawImage, drawRect, drawText, mouseOverPosition } from ".
 import { getSpriteSize, getSpriteUrl, isEqualToOriginal } from "../utils/texturePackLoader.js";
 import { getBlock } from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
+import { CREATIVE_TABS, canUseAsWallpaper, creativeCategory, creativeMatchesSearch } from "./creativeCatalog.js";
+
+const CREATIVE_SCALE = 3.5;
+const CREATIVE_ROW_SIZE = 9;
+const CREATIVE_VISIBLE_ROWS = 5;
+const CREATIVE_SLOT_STEP = 18 * CREATIVE_SCALE;
 
 export class Inventory {
     constructor() {
@@ -22,12 +28,14 @@ export class Inventory {
         this.craftingSlots = null;
         this.creativeSlots = null;
 
-        this.currentCreativePage = 0;
+        this.creativeTab = "building";
+        this.creativeScrollRow = 0;
+        this.creativeSearch = "";
+        this.creativeSearchInput = null;
 
         this.storageSlots = null;
 
         this.creativeItems = [];
-        this.creativeMaxPages = 0;
         this.inventoryText = null;
 
         this.showItems = true;
@@ -209,11 +217,13 @@ export class Inventory {
     }
 
     isSlotHovered(x, y) {
+        const slotSize = this.openUIImage.url.startsWith("creative_inventory/")
+            ? CREATIVE_SLOT_STEP : 16 * 3;
         return mouseOverPosition(
             this.inventoryUI.x + x + this.openUIOffset.x,
             this.inventoryUI.y + y + this.openUIOffset.y,
-            16 * 3,
-            16 * 3,
+            slotSize,
+            slotSize,
         );
     }
 
@@ -234,6 +244,7 @@ export class Inventory {
     }
 
     closeInventory() {
+        this.removeCreativeSearchInput();
         let leftOver = [];
 
         for (let y = 0; y < this.craftingSlots.length; y++) {
@@ -282,11 +293,15 @@ export class Inventory {
             crop: { x: 0, y: 0, width: 176, height: 166 },
         };
 
+        this.positionPlayerInventorySlots(false);
         this.createCraftingArray();
 
         this.clearButtons();
 
         this.creativeSlots = null;
+        this.creativeTab = "building";
+        this.creativeScrollRow = 0;
+        this.creativeSearch = "";
 
         this.storageSlots = null;
 
@@ -634,14 +649,15 @@ export class Inventory {
 
         if (!leftItem) {
             this.wasItemInConverterOutput = false;
+            rightSlot.clear();
             return;
         }
 
-        // Check if the left slot contains a valid input item
-        if (
-            leftItem.cannotBeConverted === undefined ||
-            leftItem.cannotBeConverted
-        ) {
+        // Any textured block can become inert background wallpaper.
+        const blockId = leftSlot.item.blockId || leftItem.placeBlock;
+        const wallpaperBlock = blockId ? getBlock(blockId) : null;
+        if (!canUseAsWallpaper(wallpaperBlock)) {
+            this.wasItemInConverterOutput = false;
             rightSlot.clear();
             return;
         }
@@ -668,7 +684,9 @@ export class Inventory {
             leftSlot.item.props && leftSlot.item.props.wall === true
         );
 
-        rightSlot.item.props = { wall: becomesWall };
+        rightSlot.item.props = { ...leftSlot.item.props };
+        if (becomesWall) rightSlot.item.props.wall = true;
+        else delete rightSlot.item.props.wall;
         rightSlot.item.count = leftSlot.item.count;
 
         this.wasItemInConverterOutput = true;
@@ -689,107 +707,187 @@ export class Inventory {
     }
 
     openCreativeInventory() {
+        this.removeCreativeSearchInput();
+        this.creativeTab = "building";
+        this.creativeScrollRow = 0;
+        this.creativeSearch = "";
+        this.openUIOffset = { x: 0, y: 0 };
+        this.openUIImageOffset = { x: 0, y: 0 };
+        this.setCreativeBackground();
+        this.positionPlayerInventorySlots(true);
+        this.clearButtons();
+        this.createCreativeSlots();
+        this.inventoryText = null;
+    }
+
+    setCreativeBackground() {
+        const image = this.creativeTab === "inventory"
+            ? "tab_inventory"
+            : this.creativeTab === "search"
+              ? "tab_item_search"
+              : "tab_items";
         this.openUIImage = {
-            url: "generic_54",
-            crop: { x: 0, y: 0, width: 176, height: 222 },
+            url: `creative_inventory/${image}`,
+            crop: { x: 0, y: 0, width: 195, height: 136 },
         };
+    }
 
-        this.openUIImageOffset.y = -80;
-        this.openUIOffset.y = 196;
-
+    selectCreativeTab(tab) {
+        if (this.creativeTab === tab) return;
+        this.removeCreativeSearchInput();
+        this.creativeTab = tab;
+        this.creativeScrollRow = 0;
+        this.setCreativeBackground();
+        this.positionPlayerInventorySlots(true);
         this.createCreativeSlots();
-
-        this.createCreativeButtons();
-
-        this.inventoryText = new TextElement({
-            position: { x: 300, y: -152 },
-            text: `Creative - Page ${this.currentCreativePage + 1}/${
-                this.creativeMaxPages
-            }`,
-
-            size: 27,
-        });
+        if (tab === "search") this.createCreativeSearchInput();
     }
 
-    createCreativeButtons() {
-        this.addButton({
-            position: { x: -50, y: 16 },
-            spriteScale: 5,
-            size: { x: 50, y: 65 },
-            image: "arrow_left",
-            hoverImage: "arrow_left_hovered",
-            callback: () => this.goLeftInCreativeMenu(),
+    createCreativeSearchInput() {
+        const field = document.createElement("input");
+        field.className = "creative-search-input";
+        field.type = "text";
+        field.setAttribute("aria-label", "Search creative items");
+        field.placeholder = "Search Items";
+        field.maxLength = 32;
+        field.value = this.creativeSearch;
+        field.addEventListener("input", () => {
+            this.creativeSearch = field.value;
+            this.creativeScrollRow = 0;
+            this.createCreativeSlots();
         });
-
-        this.addButton({
-            position: { x: 618, y: 16 },
-            spriteScale: 5,
-            size: { x: 50, y: 65 },
-            image: "arrow_right",
-            hoverImage: "arrow_right_hovered",
-            callback: () => this.goRightInCreativeMenu(),
+        field.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                runtime.world.player.closeInventory();
+            }
         });
+        document.body.append(field);
+        this.creativeSearchInput = field;
+        this.positionCreativeSearchInput();
+        field.focus();
     }
 
-    goRightInCreativeMenu() {
-        this.currentCreativePage++;
+    removeCreativeSearchInput() {
+        this.creativeSearchInput?.remove();
+        this.creativeSearchInput = null;
+    }
 
-        if (this.currentCreativePage >= this.creativeMaxPages) {
-            this.currentCreativePage = this.creativeMaxPages - 1;
+    positionCreativeSearchInput() {
+        if (!this.creativeSearchInput) return;
+        const rect = CANVAS.getBoundingClientRect();
+        const scaleX = rect.width / CANVAS.width;
+        const scaleY = rect.height / CANVAS.height;
+        this.creativeSearchInput.style.left = `${rect.left +
+            (this.inventoryUI.x + 81 * CREATIVE_SCALE) * scaleX}px`;
+        this.creativeSearchInput.style.top = `${rect.top +
+            (this.inventoryUI.y + 5 * CREATIVE_SCALE) * scaleY}px`;
+        this.creativeSearchInput.style.width = `${87 * CREATIVE_SCALE * scaleX}px`;
+        this.creativeSearchInput.style.height = `${Math.max(24,
+            10 * CREATIVE_SCALE * scaleY)}px`;
+    }
+
+    positionPlayerInventorySlots(creative) {
+        for (let y = 0; y < this.items.length; y++) {
+            for (let x = 0; x < this.items[y].length; x++) {
+                this.items[y][x].position = creative
+                    ? { x: 8 * CREATIVE_SCALE + x * CREATIVE_SLOT_STEP,
+                        y: (y === 3 ? 112 : 54 + y * 18) * CREATIVE_SCALE }
+                    : { x: 32 + x * 63, y: y === 3 ? 501 : 298 + y * 63 };
+            }
+        }
+    }
+
+    getVisibleCreativeItems() {
+        if (this.creativeTab === "search") {
+            return this.creativeItems.filter(({ name }) =>
+                creativeMatchesSearch(name, this.creativeSearch),
+            );
+        }
+        return this.creativeItems.filter(
+            ({ category }) => category === this.creativeTab,
+        );
+    }
+
+    scrollCreative(rows) {
+        if (this.creativeTab === "inventory") return;
+        const maxRow = Math.max(
+            0,
+            Math.ceil(this.getVisibleCreativeItems().length / CREATIVE_ROW_SIZE) -
+                CREATIVE_VISIBLE_ROWS,
+        );
+        const nextRow = Math.max(0, Math.min(maxRow, this.creativeScrollRow + rows));
+        if (nextRow === this.creativeScrollRow) return;
+        this.creativeScrollRow = nextRow;
+        this.createCreativeSlots();
+    }
+
+    getCreativeTabBounds(index) {
+        const top = index < 6;
+        return {
+            x: this.inventoryUI.x + (8 + (top ? index : index - 6) * 29) * CREATIVE_SCALE,
+            y: this.inventoryUI.y + (top ? -28 : 132) * CREATIVE_SCALE,
+            width: 28 * CREATIVE_SCALE,
+            height: 32 * CREATIVE_SCALE,
+        };
+    }
+
+    updateCreativeMenu() {
+        const { deltaY } = input.getScrollDelta();
+        if (deltaY) this.scrollCreative(Math.sign(deltaY));
+
+        for (let i = 0; i < CREATIVE_TABS.length; i++) {
+            const bounds = this.getCreativeTabBounds(i);
+            if (mouseOverPosition(bounds.x, bounds.y, bounds.width, bounds.height) &&
+                input.isLeftMouseButtonPressed()) {
+                this.selectCreativeTab(CREATIVE_TABS[i].id);
+                return;
+            }
         }
 
-        this.inventoryText.text = `Creative - Page ${
-            this.currentCreativePage + 1
-        }/${this.creativeMaxPages}`;
-
-        this.createCreativeSlots();
-    }
-
-    goLeftInCreativeMenu() {
-        this.currentCreativePage--;
-
-        if (this.currentCreativePage < 0) {
-            this.currentCreativePage = 0;
+        if (this.creativeTab === "inventory") {
+            if (mouseOverPosition(this.inventoryUI.x + 173 * CREATIVE_SCALE,
+                this.inventoryUI.y + 111 * CREATIVE_SCALE,
+                18 * CREATIVE_SCALE, 18 * CREATIVE_SCALE) &&
+                input.isLeftMouseButtonPressed()) this.holdingItem = null;
+            return;
         }
 
-        this.inventoryText.text = `Creative - Page ${
-            this.currentCreativePage + 1
-        }/${this.creativeMaxPages}`;
-
-        this.createCreativeSlots();
+        const trackX = this.inventoryUI.x + 174 * CREATIVE_SCALE;
+        const trackY = this.inventoryUI.y + 18 * CREATIVE_SCALE;
+        if (mouseOverPosition(trackX, trackY, 15 * CREATIVE_SCALE,
+            90 * CREATIVE_SCALE) && input.isLeftMouseDown()) {
+            const maxRow = Math.max(0,
+                Math.ceil(this.getVisibleCreativeItems().length / CREATIVE_ROW_SIZE) -
+                CREATIVE_VISIBLE_ROWS);
+            const mouseY = input.getMousePosition().y;
+            const ratio = Math.max(0, Math.min(1,
+                (mouseY - trackY) / (90 * CREATIVE_SCALE)));
+            const nextRow = Math.round(ratio * maxRow);
+            this.scrollCreative(nextRow - this.creativeScrollRow);
+            input.isLeftMouseButtonPressed();
+        }
     }
 
     createCreativeSlots() {
+        if (this.creativeTab === "inventory") {
+            this.creativeSlots = null;
+            return;
+        }
         const slots = [];
-        const itemsPerPage = 9 * 6; // 54 items per page
-        const startIndex = this.currentCreativePage * itemsPerPage;
-        const endIndex = Math.min(
-            startIndex + itemsPerPage,
-            this.creativeItems.length,
-        );
+        const visibleItems = this.getVisibleCreativeItems();
+        const startIndex = this.creativeScrollRow * CREATIVE_ROW_SIZE;
 
-        // Create a 6x9 grid
-        for (let y = 0; y < 6; y++) {
+        for (let y = 0; y < CREATIVE_VISIBLE_ROWS; y++) {
             slots[y] = [];
-            for (let x = 0; x < 9; x++) {
-                const index = startIndex + y * 9 + x;
-                const position = { x: 32 + x * 63, y: y * 63 - 129 };
-
-                // Only add a slot if there's an item at this index
-                if (index < endIndex && this.creativeItems[index]) {
-                    slots[y][x] = new InventorySlot({
-                        position: position,
-                        item: this.creativeItems[index],
-                        infiniteTake: true,
-                    });
-                } else {
-                    // Fill empty slots with a blank slot
-                    slots[y][x] = new InventorySlot({
-                        position: position,
-                        item: new InventoryItem(),
-                        infiniteTake: true,
-                    });
-                }
+            for (let x = 0; x < CREATIVE_ROW_SIZE; x++) {
+                const entry = visibleItems[startIndex + y * CREATIVE_ROW_SIZE + x];
+                slots[y][x] = new InventorySlot({
+                    position: { x: 8 * CREATIVE_SCALE + x * CREATIVE_SLOT_STEP,
+                        y: 18 * CREATIVE_SCALE + y * CREATIVE_SLOT_STEP },
+                    item: entry?.item ?? new InventoryItem(),
+                    infiniteTake: true,
+                });
             }
         }
 
@@ -834,28 +932,33 @@ export class Inventory {
 
     populateCreativeInventory() {
         // Get all blocks
-        const blocks = Object.values(Blocks);
-
-        // Get all items
-        const items = Object.values(Items);
-
-        // First we take all blocks and add them to the creative inventory
-        for (let i = 0; i < blocks.length; i++) {
-            if (getBlock(blocks[i]).excludeFromCreativeInventory) continue;
-            this.creativeItems.push(
-                new InventoryItem({ blockId: blocks[i], count: 1 }),
-            );
+        const seenWallpapers = new Set();
+        for (const [key, id] of Object.entries(Blocks)) {
+            const block = getBlock(id);
+            if (!block) continue;
+            if (!block.excludeFromCreativeInventory) {
+                this.creativeItems.push(
+                    { item: new InventoryItem({ blockId: id, count: 1 }),
+                        name: block.name, category: creativeCategory(key, block, true) },
+                );
+            }
+            if (canUseAsWallpaper(block) && !seenWallpapers.has(id)) {
+                seenWallpapers.add(id);
+                this.creativeItems.push({
+                    item: new InventoryItem({ blockId: id, count: 1, props: { wall: true } }),
+                    name: `${block.name} Wallpaper`, category: "wallpaper",
+                });
+            }
         }
 
-        // Then we take all items and add them to the creative inventory
-        for (let i = 0; i < items.length; i++) {
-            if (getItem(items[i]).excludeFromCreativeInventory) continue;
+        for (const [key, id] of Object.entries(Items)) {
+            const item = getItem(id);
+            if (!item || item.excludeFromCreativeInventory) continue;
             this.creativeItems.push(
-                new InventoryItem({ itemId: items[i], count: 1 }),
+                { item: new InventoryItem({ itemId: id, count: 1 }),
+                    name: item.name, category: creativeCategory(key, item, false) },
             );
         }
-
-        this.creativeMaxPages = Math.ceil(this.creativeItems.length / (9 * 6));
     }
 
     openSingleChest(storage) {
@@ -920,7 +1023,8 @@ export class Inventory {
     }
 
     refreshInventory() {
-        if (this.furnace || this.storageSlots || this.creativeSlots) {
+        if (this.furnace || this.storageSlots ||
+            this.openUIImage.url.startsWith("creative_inventory/")) {
             this.craftingSlots = [];
             return;
         }
@@ -1045,6 +1149,7 @@ export class Inventory {
             if (slot.infiniteTake) {
                 // Infinite take: copy item without removing from slot
                 this.holdingItem = this.cloneItem(item);
+                this.holdingItem.count = this.getStackSize(item);
             } else {
                 // Normal take: remove item from slot
                 this.holdingItem = this.cloneItem(item);
@@ -1227,6 +1332,9 @@ export class Inventory {
     }
 
     update() {
+        if (this.openUIImage.url.startsWith("creative_inventory/")) {
+            this.updateCreativeMenu();
+        }
         if (this.showItems) {
             this.mouseHoverOverSlotsLogic();
 
@@ -1257,6 +1365,8 @@ export class Inventory {
     handleHotbarAssignment() {
         // Only proceed if an item is hovered and the inventory UI is open
         if (!this.hoverItem || !runtime.world.player.windowOpen) return;
+        if (this.openUIImage.url.startsWith("creative_inventory/") &&
+            this.creativeTab === "search") return;
 
         // Map number keys to hotbar slots
         for (let i = 1; i <= 9; i++) {
@@ -1346,6 +1456,7 @@ export class Inventory {
         this.mouseOverCheck(this.storageSlots);
 
         if (
+            !this.openUIImage.url.startsWith("creative_inventory/") &&
             this.isSlotHovered(
                 this.craftingOutputSlot.position.x,
                 this.craftingOutputSlot.position.y,
@@ -1358,6 +1469,9 @@ export class Inventory {
     mouseOverCheck(array) {
         if (!array) return;
         for (let y = 0; y < array.length; y++) {
+            if (array === this.items &&
+                this.openUIImage.url.startsWith("creative_inventory/") &&
+                this.creativeTab !== "inventory" && y !== 3) continue;
             for (let x = 0; x < array[y].length; x++) {
                 const item = array[y][x];
                 if (this.isSlotHovered(item.position.x, item.position.y)) {
@@ -1583,11 +1697,7 @@ export class Inventory {
         const slot = array[y][x];
         this.holdingItem = this.cloneItem(item);
         if (slot.infiniteTake) {
-            // Infinite take: set holdingItem to half count without modifying slot
-            // Get Max stack size
-            const maxStackSize = this.getStackSize(item);
-
-            this.holdingItem.count = maxStackSize;
+            this.holdingItem.count = 1;
         } else {
             // Normal take: reduce slot count by half
             const half = Math.round(item.count / 2);
@@ -1722,7 +1832,9 @@ export class Inventory {
         const drawParams = {
             url: spriteUrl,
             x: CANVAS.width / 2 + this.openUIImageOffset.x,
-            y: CANVAS.height / 6 + this.openUIImageOffset.y,
+            y: path.startsWith("creative_inventory/")
+                ? (CANVAS.height - 136 * CREATIVE_SCALE) / 2
+                : CANVAS.height / 6 + this.openUIImageOffset.y,
             scale: 3.5,
         };
 
@@ -1732,9 +1844,16 @@ export class Inventory {
 
         this.inventoryUI = drawImage(drawParams);
 
+        if (path.startsWith("creative_inventory/")) {
+            this.drawCreativeTabs();
+            this.positionCreativeSearchInput();
+            this.drawCreativeScrollbar(ctx);
+        }
+
         if (this.showItems) {
             this.drawItems();
-            if (this.openUIImage.url === "inventory") {
+            if (this.openUIImage.url === "inventory" ||
+                this.creativeTab === "inventory" && path.startsWith("creative_inventory/")) {
                 this.drawPlayerSkin(ctx);
             }
             this.drawHoldItem();
@@ -1795,8 +1914,11 @@ export class Inventory {
         )
             return;
 
-        const INVENTORY_PLAYER_OFFSET = { x: 128, y: 48 };
-        const INVENTORY_PLAYER_SCALE = 6.65;
+        const creative = this.openUIImage.url.startsWith("creative_inventory/");
+        const INVENTORY_PLAYER_OFFSET = creative
+            ? { x: 31 * CREATIVE_SCALE, y: 4 * CREATIVE_SCALE }
+            : { x: 128, y: 48 };
+        const INVENTORY_PLAYER_SCALE = creative ? 5 : 6.65;
 
         const baseX =
             this.inventoryUI.x +
@@ -1824,14 +1946,67 @@ export class Inventory {
         }
     }
 
+    drawCreativeTabs() {
+        const tabsUrl = getSpriteUrl("gui/container/creative_inventory/tabs");
+        for (let i = 0; i < CREATIVE_TABS.length; i++) {
+            const tab = CREATIVE_TABS[i];
+            const bounds = this.getCreativeTabBounds(i);
+            const selected = this.creativeTab === tab.id;
+            const top = i < 6;
+            drawImage({
+                url: tabsUrl,
+                x: bounds.x,
+                y: bounds.y,
+                crop: { x: (top ? i : i - 6) * 28,
+                    y: top ? (selected ? 32 : 0) : (selected ? 96 : 64),
+                    width: 28, height: 32 },
+                scale: CREATIVE_SCALE,
+                centerX: false,
+            });
+            const icon = new InventorySlot({
+                position: { x: bounds.x + 25, y: bounds.y + (top ? 28 : 26) },
+                item: new InventoryItem({ ...tab.icon, count: 1 }),
+            });
+            icon.draw();
+            if (mouseOverPosition(bounds.x, bounds.y, bounds.width, bounds.height)) {
+                const mouse = input.getMousePosition();
+                drawText({ text: tab.label, x: mouse.x + 12, y: mouse.y - 8,
+                    size: 22, textAlign: "left" });
+            }
+        }
+    }
+
+    drawCreativeScrollbar(ctx) {
+        if (this.creativeTab === "inventory") return;
+        const maxRow = Math.max(0,
+            Math.ceil(this.getVisibleCreativeItems().length / CREATIVE_ROW_SIZE) -
+            CREATIVE_VISIBLE_ROWS);
+        const x = this.inventoryUI.x + 175 * CREATIVE_SCALE;
+        const y = this.inventoryUI.y + (18 +
+            (maxRow ? (this.creativeScrollRow / maxRow) * 75 : 0)) * CREATIVE_SCALE;
+        ctx.fillStyle = "#c6c6c6";
+        ctx.fillRect(x, y, 13 * CREATIVE_SCALE, 15 * CREATIVE_SCALE);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x, y, 13 * CREATIVE_SCALE, CREATIVE_SCALE);
+        ctx.fillStyle = "#555555";
+        ctx.fillRect(x, y + 14 * CREATIVE_SCALE,
+            13 * CREATIVE_SCALE, CREATIVE_SCALE);
+    }
+
     drawItems() {
         this.drawHoverSlot();
-        this.drawSlots(this.items);
+        if (this.openUIImage.url.startsWith("creative_inventory/") &&
+            this.creativeTab !== "inventory") {
+            this.drawSlots([this.items[3]]);
+        } else {
+            this.drawSlots(this.items);
+        }
 
         if (this.craftingTable) {
             this.drawCraftingGuide();
         }
-        this.drawCraftingSlots();
+        if (!this.openUIImage.url.startsWith("creative_inventory/"))
+            this.drawCraftingSlots();
         this.drawSlots(this.creativeSlots);
         this.drawSlots(this.storageSlots);
         this.drawFurnaceExtras();
@@ -2338,7 +2513,7 @@ export class Inventory {
         let text = title;
         // if (Object.keys(hoverInventoryItem.props).length > 0)
         //     text += ` (${JSON.stringify(hoverInventoryItem.props)})`;
-        if (hoverInventoryItem.props.wall) text += " (Wall)";
+        if (hoverInventoryItem.props.wall) text += " Wallpaper";
 
         drawText({
             text: text,

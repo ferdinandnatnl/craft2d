@@ -37,7 +37,8 @@ export class Chat {
         this.suggestions = [];
         this.suggestionIndex = -1;
         this.originalInput = "";
-        this.autocompletePart = "";
+        this.completionStart = 0;
+        this.completionEnd = 0;
 
         this.loadLog();
         this._boundKeyHandler = this._handleChatKeyDown.bind(this);
@@ -59,6 +60,8 @@ export class Chat {
             capture: true,
         });
         this.currentMessage = "";
+        this.cursorPosition = 0;
+        this.resetAutocomplete();
     }
 
     _handleChatKeyDown(event) {
@@ -79,6 +82,7 @@ export class Chat {
             return;
         }
         if (key === "Backspace") {
+            this.resetAutocomplete();
             if (this.cursorPosition > 0) {
                 this.currentMessage =
                     this.currentMessage.slice(0, this.cursorPosition - 1) +
@@ -88,6 +92,7 @@ export class Chat {
             return;
         }
         if (key === "Delete") {
+            this.resetAutocomplete();
             if (this.cursorPosition < this.currentMessage.length) {
                 this.currentMessage =
                     this.currentMessage.slice(0, this.cursorPosition) +
@@ -96,10 +101,12 @@ export class Chat {
             return;
         }
         if (key === "ArrowLeft") {
+            this.resetAutocomplete();
             this.cursorPosition = Math.max(0, this.cursorPosition - 1);
             return;
         }
         if (key === "ArrowRight") {
+            this.resetAutocomplete();
             this.cursorPosition = Math.min(
                 this.currentMessage.length,
                 this.cursorPosition + 1,
@@ -107,6 +114,7 @@ export class Chat {
             return;
         }
         if (key === "ArrowUp") {
+            this.resetAutocomplete();
             if (
                 this.chatLog.length > 0 &&
                 this.historyIndex < this.chatLog.length
@@ -120,6 +128,7 @@ export class Chat {
             return;
         }
         if (key === "ArrowDown") {
+            this.resetAutocomplete();
             if (this.historyIndex > 1) {
                 this.historyIndex--;
                 this.currentMessage =
@@ -234,6 +243,7 @@ export class Chat {
             { name: "help", args: [] },
             { name: "progress", args: [] },
             { name: "structure", args: ["structure"] },
+            { name: "locate", args: ["structure"] },
             { name: "locatebiome", args: ["biome"] },
             { name: "seed", args: [] },
             { name: "hit", args: ["damage"] },
@@ -251,12 +261,39 @@ export class Chat {
         this.suggestions = [];
         this.suggestionIndex = -1;
         this.originalInput = "";
-        this.autocompletePart = "";
+        this.completionStart = 0;
+        this.completionEnd = 0;
     }
 
-    generateSuggestions(input, argIndex) {
+    getCompletionContext() {
+        if (!this.currentMessage.startsWith("/")) return null;
+
+        const beforeCursor = this.currentMessage.slice(0, this.cursorPosition);
+        const token = beforeCursor.match(/\S+$/)?.[0] ?? "";
+        const start = this.cursorPosition - token.length;
+        const end = this.currentMessage.slice(this.cursorPosition).match(/^\S*/)[0]
+            .length + this.cursorPosition;
+        const argIndex = beforeCursor.slice(0, start).trim().split(/\s+/)
+            .filter(Boolean).length;
+
+        return { start, end, argIndex, prefix: token };
+    }
+
+    getAvailableSuggestions(context) {
+        return this.generateSuggestions(
+            this.currentMessage.slice(0, this.cursorPosition),
+            context.argIndex,
+            context.prefix,
+        ).filter((suggestion) =>
+            this.currentMessage.length - (context.end - context.start) +
+                suggestion.length + (context.argIndex === 0 ? 1 : 0) <=
+            this.maxLength,
+        );
+    }
+
+    generateSuggestions(input, argIndex, currentPrefix = "") {
         const commands = this.getCommandSuggestions();
-        const parts = input.trim().split(/\s+/); // Split on any whitespace
+        const parts = input.trim().split(/\s+/);
         const isCommand = input.startsWith("/") && argIndex === 0;
 
         if (isCommand) {
@@ -275,7 +312,7 @@ export class Chat {
             }
 
             const argType = command.args[argIndex - 1];
-            const prefix = parts[argIndex]?.toLowerCase() || "";
+            const prefix = currentPrefix.toLowerCase();
 
             if (
                 commandName === "time" &&
@@ -285,6 +322,7 @@ export class Chat {
                 return ["day"].filter((time) => time.startsWith(prefix));
             }
 
+            let suggestions;
             switch (argType) {
                 case "category.item":
                     const blockItems = Object.keys(Blocks).map(
@@ -296,12 +334,14 @@ export class Chat {
                     const itemSuggestions = [...blockItems, ...items].filter(
                         (item) => item.toLowerCase().startsWith(prefix),
                     );
-                    return itemSuggestions;
+                    suggestions = itemSuggestions;
+                    break;
                 case "count":
                 case "damage":
-                    return ["1", "64"];
+                    suggestions = ["1", "64"];
+                    break;
                 case "mode":
-                    return [
+                    suggestions = [
                         "survival",
                         "creative",
                         "adventure",
@@ -311,59 +351,74 @@ export class Chat {
                         "2",
                         "3",
                     ];
+                    break;
 
                 case "x":
                 case "y":
-                    return [
+                    suggestions = [
                         "~",
                         "0",
                         runtime.world.player
-                            ? Math.floor(
-                                  runtime.world.player.position.x / BLOCK_SIZE,
-                              ).toString()
+                            ? runtime.world.worldToBlocks(
+                                  runtime.world.player.position,
+                              )[argType].toString()
                             : "0",
                     ];
+                    break;
 
                 case "entity":
                     const entitySuggestions = Object.keys(Entities).filter(
                         (entity) => entity.toLowerCase().startsWith(prefix),
                     );
-                    return entitySuggestions;
+                    suggestions = entitySuggestions;
+                    break;
                 case "structure":
                     const structureSuggestions = Object.keys(Structures).filter(
                         (structure) =>
                             structure.toLowerCase().startsWith(prefix),
                     );
-                    return structureSuggestions;
+                    suggestions = structureSuggestions;
+                    break;
                 case "biome":
                     const biomeSuggestions = Object.keys(AllBiomes).filter(
                         (biome) => biome.toLowerCase().startsWith(prefix),
                     );
-                    return biomeSuggestions;
+                    suggestions = biomeSuggestions;
+                    break;
                 case "rule":
                     const ruleSuggestions = [
                         ...Object.keys(runtime.GAMERULES),
                         "list",
                     ].filter((rule) => rule.toLowerCase().startsWith(prefix));
-                    return ruleSuggestions;
+                    suggestions = ruleSuggestions;
+                    break;
                 case "value":
-                    return ["true", "false"];
+                    suggestions = ["true", "false"];
+                    break;
                 case "dimension":
-                    return ["overworld", "nether", "0", "1"];
+                    suggestions = ["overworld", "nether", "end", "0", "1", "2"];
+                    break;
                 case "time":
-                    return ["set", "1", "3", "5", "7.5"].filter((time) =>
-                        time.startsWith(prefix),
-                    );
+                    suggestions = ["set", "1", "3", "5", "7.5"];
+                    break;
                 case "block":
                     const blockSuggestions = Object.keys(Blocks).filter(
                         (block) => block.toLowerCase().startsWith(prefix),
                     );
-                    return blockSuggestions;
+                    suggestions = blockSuggestions;
+                    break;
                 case "difficulty":
-                    return ["peaceful", "easy"];
+                    suggestions = ["peaceful", "easy"];
+                    break;
+                case "lighting":
+                    suggestions = ["true", "false"];
+                    break;
                 default:
                     return [];
             }
+            return [...new Set(suggestions)].filter((suggestion) =>
+                suggestion.toLowerCase().startsWith(prefix),
+            );
         }
     }
 
@@ -391,45 +446,28 @@ export class Chat {
     }
 
     autocomplete() {
-        if (!this.inChat) return; // Prevent autocomplete when chat is closed
+        if (!this.inChat) return;
 
-        const parts = this.currentMessage.trim().split(/\s+/);
-        const cursorWordIndex =
-            this.currentMessage.slice(0, this.cursorPosition).split(/\s+/)
-                .length - 1;
-        const currentPart =
-            parts[cursorWordIndex] ||
-            (this.currentMessage.startsWith("/") ? "/" : "");
-
-        // Initialize or continue autocomplete cycle
         if (this.suggestionIndex === -1) {
+            const context = this.getCompletionContext();
+            if (!context) return;
             this.originalInput = this.currentMessage;
-            this.autocompletePart = currentPart;
-            this.suggestions = this.generateSuggestions(
-                this.currentMessage,
-                cursorWordIndex,
-            );
+            this.completionStart = context.start;
+            this.completionEnd = context.end;
+            this.suggestions = this.getAvailableSuggestions(context);
         }
 
         if (this.suggestions.length === 0) return;
 
-        // Cycle to the next suggestion
         this.suggestionIndex =
             (this.suggestionIndex + 1) % this.suggestions.length;
         const suggestion = this.suggestions[this.suggestionIndex];
-
-        // Reconstruct the message
-        if (cursorWordIndex === 0 && this.currentMessage.startsWith("/")) {
-            parts[cursorWordIndex] = "/" + suggestion;
-        } else {
-            parts[cursorWordIndex] = suggestion;
-        }
-
-        this.currentMessage = parts.join(" ");
-        this.cursorPosition =
-            parts.slice(0, cursorWordIndex).join(" ").length +
-            (cursorWordIndex > 0 ? 1 : 0) +
-            (parts[cursorWordIndex] || "").length;
+        const replacement = this.completionStart === 0 ? `/${suggestion}` : suggestion;
+        this.currentMessage =
+            this.originalInput.slice(0, this.completionStart) +
+            replacement +
+            this.originalInput.slice(this.completionEnd);
+        this.cursorPosition = this.completionStart + replacement.length;
     }
 
     addToLog(message) {
@@ -473,6 +511,28 @@ export class Chat {
         } else {
             this.message("Biome not found.", "", Colors.Red);
         }
+    }
+
+    locate(messageArray) {
+        if (messageArray[1]?.toLowerCase() !== "village") {
+            this.invalidCommand("/locate village");
+            return;
+        }
+
+        const village = runtime.world.generator.locateVillage();
+        if (!village) {
+            this.message("No village found in this world.", "", Colors.Red);
+            return;
+        }
+
+        const playerX = Math.floor(runtime.world.player.position.x / BLOCK_SIZE);
+        const distance = village.x - playerX;
+        const direction = distance > 0 ? "east" : distance < 0 ? "west" : "here";
+        this.message(
+            `Nearest village: x ${village.x}, y ${village.y} (${Math.abs(distance)} blocks ${direction}; Overworld).`,
+            "",
+            Colors.Green,
+        );
     }
 
     clearLog() {
@@ -526,6 +586,9 @@ export class Chat {
                 break;
             case "locatebiome":
                 this.locateBiome(messageArray);
+                break;
+            case "locate":
+                this.locate(messageArray);
                 break;
             case "seed":
                 this.message(`Seed: ${runtime.world.seed}`);
@@ -1055,6 +1118,10 @@ export class Chat {
         this.message("5. Craft eyes. Use one to find the End shrine.", "", Colors.Aqua);
         this.message("6. Fill its three frames; enter the End.", "", Colors.Aqua);
         this.message("7. Defeat the dragon.", "", Colors.Aqua);
+        this.message("Use /locate village to find the nearest village.", "", Colors.Aqua);
+        this.message("Shear a pumpkin and place it last to build a golem.", "", Colors.Aqua);
+        this.message("Snow golem: 2 snow blocks below the pumpkin.", "", Colors.Aqua);
+        this.message("Iron golem: an iron T (4 blocks) below it.", "", Colors.Aqua);
     }
 
     message(message, sender = "", color = Colors.White, force = false) {
@@ -1188,6 +1255,45 @@ export class Chat {
                 textAlign: "left",
             });
         }
+
+        const context = this.getCompletionContext();
+        if (!context) return;
+        const suggestions = this.suggestionIndex >= 0
+            ? this.suggestions
+            : this.getAvailableSuggestions(context);
+        const firstVisible = Math.max(0, this.suggestionIndex - 4);
+        const visible = suggestions.slice(firstVisible, firstVisible + 5);
+        if (visible.length === 0) return;
+
+        const top = CANVAS.height - 50 - visible.length * 30 - 28;
+        const width = Math.min(1000, CANVAS.width - 20);
+        ctx.fillStyle = "rgb(0, 0, 0, .7)";
+        ctx.fillRect(10, top, width, visible.length * 30 + 28);
+        drawText({
+            text: "Tab to complete",
+            x: 17,
+            y: top + 20,
+            size: 18,
+            color: Colors.Gray,
+            shadow: false,
+            textAlign: "left",
+        });
+        visible.forEach((suggestion, index) => {
+            if (firstVisible + index === this.suggestionIndex) {
+                ctx.fillStyle = "rgb(255, 255, 255, .2)";
+                ctx.fillRect(10, top + index * 30 + 28, width, 30);
+            }
+            drawText({
+                text: context.argIndex === 0 ? `/${suggestion}` : suggestion,
+                x: 17,
+                y: top + index * 30 + 52,
+                size: 25,
+                color: firstVisible + index === this.suggestionIndex
+                    ? Colors.Yellow : Colors.White,
+                shadow: false,
+                textAlign: "left",
+            });
+        });
     }
 
     measureTextWidth(text, fontSize) {

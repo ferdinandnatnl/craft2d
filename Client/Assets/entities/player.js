@@ -4,6 +4,7 @@ import { Body, BodyPart } from "../game/body.js";
 import { Colors } from "../game/chat.js";
 import { showDeathScreen } from "../game/deathScreen.js";
 import { Entity, EntityTypes } from "../game/entity.js";
+import { FishingBobber } from "./fishingBobber.js";
 import { Inventory } from "../game/inventory.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { getItem } from "@2dcraft.com/shared/item.js";
@@ -14,11 +15,12 @@ import { Vector2, calculateDirection, lerp, randomRange, uuidv4 } from "../utils
 import { BLOCK_SIZE, CHUNK_HEIGHT, INTERACT_DISTANCE, ToolType, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
 import { camera, drawText, isColliding, mouseOverPosition } from "../utils/renderer.js";
-import { SpecialType, getBlock } from "../world/block.js";
+import { SpecialType, getBlock, hasBlockCollision } from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { activeDimension, getDimensionChunks, gotoDimension } from "../world/dimension.js";
 import { nearestEndShrineX } from "@2dcraft.com/shared/endProgression.js";
 import { createParticleEmitter } from "../world/particleEmitter.js";
+import { countMobsNearPlayer, MAX_MOBS_NEAR_PLAYER } from "../world/mobLimits.js";
 
 export class Player extends Entity {
     constructor(
@@ -109,6 +111,10 @@ export class Player extends Entity {
         this.windowOpen = false;
 
         this.wasSwimming = false;
+        this.fishingBobber = null;
+        this.boat = null;
+        this.boatUUID = null;
+        this.boatPhysics = null;
 
         this.canMove = true;
         this.isDead = false;
@@ -425,7 +431,47 @@ export class Player extends Entity {
             if (Number.isFinite(data.swimPhase)) {
                 this.body.swimPhase = data.swimPhase % (Math.PI * 2);
             }
+            if (Number.isFinite(data.boatAmount)) {
+                this.body.boatAmount = Math.max(0, Math.min(1, data.boatAmount));
+            }
+            if (Number.isFinite(data.boatPhase)) {
+                this.body.boatPhase = data.boatPhase % (Math.PI * 2);
+            }
             this.applyLimbTextures();
+        }
+
+        if (Object.hasOwn(data, "boatUUID")) {
+            this.boatUUID = data.boatUUID;
+            if (this.boat && this.boat.UUID !== this.boatUUID) {
+                if (this.boat.passenger === this) this.boat.passenger = null;
+                this.boat = null;
+            }
+            const boat = this.world?.entities?.find((entity) =>
+                entity.UUID === this.boatUUID && entity.isBoat,
+            );
+            let syncedBoat = boat;
+            if (
+                !syncedBoat &&
+                typeof this.boatUUID === "string" &&
+                Number.isFinite(data.boatPosition?.x) &&
+                Number.isFinite(data.boatPosition?.y)
+            ) {
+                syncedBoat = runtime.world.summonEntity(
+                    Entities.Boat,
+                    new Vector2(data.boatPosition.x, data.boatPosition.y),
+                    {
+                        surfaceY: data.boatSurfaceY,
+                        dimension: this.dimension,
+                    },
+                    false,
+                    this.boatUUID,
+                );
+                syncedBoat.dimension = this.dimension;
+            }
+            if (syncedBoat) {
+                this.boat = syncedBoat;
+                syncedBoat.passenger = this;
+            }
         }
     }
 
@@ -455,6 +501,13 @@ export class Player extends Entity {
             data.lookDirection = this.lookDirection;
             data.swimAmount = this.body.swimAmount;
             data.swimPhase = this.body.swimPhase;
+            data.boatAmount = this.body.boatAmount;
+            data.boatPhase = this.body.boatPhase;
+        }
+        data.boatUUID = this.boat?.UUID ?? null;
+        if (this.boat) {
+            data.boatPosition = this.boat.position;
+            data.boatSurfaceY = this.boat.surfaceY;
         }
 
         runtime.server.send({
@@ -566,6 +619,21 @@ export class Player extends Entity {
 
         if (!item) return;
 
+        if (item.spawnEntity) {
+            this.spawnEntityFromEgg(item.spawnEntity);
+            return;
+        }
+
+        if (item.toolType === ToolType.FishingRod) {
+            this.useFishingRod();
+            return;
+        }
+
+        if (item.itemId === Items.Boat) {
+            this.placeBoat();
+            return;
+        }
+
         if (item.itemId === Items.EyeOfEnder) {
             if (this.hoverBlock?.blockType === Blocks.EndPortalFrame) return;
             if (activeDimension !== 0) return;
@@ -609,6 +677,227 @@ export class Player extends Entity {
             this.useBucket();
             return;
         }
+    }
+
+    spawnEntityFromEgg(entityTypeName) {
+        const EntityType = Entities[entityTypeName];
+        const groundBlock = this.hoverBlock;
+        const spawnSize = EntityType?.spawnSize;
+        if (!EntityType || !groundBlock || !spawnSize) return;
+
+        const groundDefinition = getBlock(groundBlock.blockType);
+        if (!hasBlockCollision(groundBlock) || groundDefinition.fluid) return;
+
+        if (countMobsNearPlayer(this.world, activeDimension) >= MAX_MOBS_NEAR_PLAYER) {
+            const now = runtime.passedTime || 0;
+            if (now - (this.mobSpawnLimitNoticeTime ?? -Infinity) >= 2) {
+                runtime.game.chat.message(
+                    `There are already ${MAX_MOBS_NEAR_PLAYER} mobs nearby. Move away before spawning more.`,
+                );
+                this.mobSpawnLimitNoticeTime = now;
+            }
+            return;
+        }
+
+        const width = spawnSize.width * BLOCK_SIZE;
+        const height = spawnSize.height * BLOCK_SIZE;
+        const position = new Vector2(
+            groundBlock.transform.position.x + (BLOCK_SIZE - width) / 2,
+            groundBlock.transform.position.y - height,
+        );
+        if (position.y < 0) return;
+
+        const firstX = Math.floor(position.x / BLOCK_SIZE);
+        const lastX = Math.floor((position.x + width - 1) / BLOCK_SIZE);
+        const firstY = Math.floor(position.y / BLOCK_SIZE);
+        const lastY = Math.floor((position.y + height - 1) / BLOCK_SIZE);
+        for (let x = firstX; x <= lastX; x++) {
+            for (let y = firstY; y <= lastY; y++) {
+                const block = this.world.getBlockAtWorldPosition(
+                    x * BLOCK_SIZE,
+                    y * BLOCK_SIZE,
+                    false,
+                    activeDimension,
+                );
+                if (!block) return;
+                const definition = getBlock(block.blockType);
+                if (hasBlockCollision(block) && !definition.fluid) return;
+            }
+        }
+
+        const chunk = this.world.getChunkForX(position.x, activeDimension);
+        if (!chunk) return;
+
+        const entity = this.world.summonEntity(
+            EntityType,
+            position,
+            { myChunkX: chunk.x, dimension: activeDimension },
+            multiplayer,
+        );
+        if (!entity) return;
+        chunk.entities.push(entity);
+        this.playerSwing();
+        if (!this.abilities.instaBuild) this.removeFromCurrentSlot();
+        this.inventory.syncInventoryMultiplayer();
+    }
+
+    useFishingRod() {
+        const activeBobber = this.fishingBobber;
+        if (activeBobber?.active) {
+            if (activeBobber.dimension !== this.dimension) {
+                activeBobber.remove();
+            } else {
+                const caught = activeBobber.getCatch();
+                activeBobber.remove();
+                this.playerSwing();
+                if (!caught) return;
+
+                const leftOver = this.inventory.addItem(
+                    new InventoryItem({
+                        itemId: caught.itemId,
+                        count: caught.count,
+                    }),
+                );
+                if (leftOver > 0) {
+                    this.world.spawnDrop(
+                        new Vector2(activeBobber.position.x, activeBobber.position.y),
+                        { itemId: caught.itemId, count: leftOver },
+                    );
+                }
+                this.reduceDurability();
+                this.inventory.syncInventoryMultiplayer();
+                playPositionalSound(this.position, "misc/pop.ogg", 8);
+                runtime.game.chat.message(`Caught ${getItem(caught.itemId).name}.`);
+                return;
+            }
+        }
+
+        const waterBlock = this.findFishingWater();
+        if (!waterBlock) {
+            runtime.game.chat.message("Aim the fishing rod at open water.");
+            return;
+        }
+
+        this.playerSwing();
+        this.fishingBobber = this.world.summonEntity(
+            FishingBobber,
+            new Vector2(
+                waterBlock.transform.position.x + BLOCK_SIZE / 2,
+                waterBlock.transform.position.y + BLOCK_SIZE * 0.08,
+            ),
+            { owner: this },
+        );
+        this.fishingBobber.dimension = this.dimension;
+        playRandomSoundFromArray({
+            array: Sounds.Water_Enter,
+            positional: true,
+            origin: this.fishingBobber.position,
+            volume: 0.35,
+        });
+    }
+
+    findFishingWater() {
+        const mouse = input.getMouseWorldPosition();
+        const origin = new Vector2(
+            this.position.x + this.hitbox.x / 2,
+            this.position.y + this.hitbox.y * 0.35,
+        );
+        const deltaX = mouse.x - origin.x;
+        const deltaY = mouse.y - origin.y;
+        const distance = Math.hypot(deltaX, deltaY);
+        if (distance < 1) return null;
+
+        const reach = Math.min(distance, BLOCK_SIZE * 12);
+        const step = BLOCK_SIZE / 8;
+        for (let travelled = step; travelled <= reach; travelled += step) {
+            const x = origin.x + (deltaX / distance) * travelled;
+            const y = origin.y + (deltaY / distance) * travelled;
+            const block = this.world.getBlockAtWorldPosition(
+                x,
+                y,
+                false,
+                this.dimension,
+            );
+            if (!block) return null;
+            if (block.blockType === Blocks.Water) return block;
+            const definition = getBlock(block.blockType);
+            if (!definition.air && !definition.fluid) return null;
+        }
+        return null;
+    }
+
+    placeBoat() {
+        const water = this.hoverBlock;
+        if (!water || water.blockType !== Blocks.Water || this.boat) return;
+
+        const mouse = input.getMousePositionOnBlockGrid();
+        const playerCenter = new Vector2(
+            this.position.x + this.hitbox.x / 2,
+            this.position.y + this.hitbox.y / 2,
+        );
+        if (
+            !this.abilities.instaBuild &&
+            Vector2.Distance(playerCenter, mouse) / BLOCK_SIZE > INTERACT_DISTANCE
+        ) {
+            return;
+        }
+
+        const surfaceY = water.transform.position.y +
+            (Number.isFinite(water.cutoff) ? water.cutoff : 0) * BLOCK_SIZE;
+        const position = new Vector2(
+            water.transform.position.x + BLOCK_SIZE / 2 - BLOCK_SIZE * 0.9,
+            surfaceY - BLOCK_SIZE * 0.25,
+        );
+        const boat = runtime.world.summonEntity(
+            Entities.Boat,
+            position,
+            { surfaceY, dimension: activeDimension },
+            multiplayer,
+        );
+        if (!boat) return;
+
+        boat.mount(this);
+        this.playerSwing();
+        if (!this.abilities.instaBuild) this.removeFromCurrentSlot();
+    }
+
+    mountBoat(boat) {
+        if (!this.isLocal() || !boat?.isBoat || this.boat) return;
+        this.boat = boat;
+        this.boatUUID = boat.UUID;
+        this.boatPhysics = {
+            noGravity: this.noGravity,
+            noCollision: this.noCollision,
+        };
+        boat.passenger = this;
+        this.noGravity = true;
+        this.noCollision = true;
+        this.velocity = new Vector2();
+        this.targetVelocity = new Vector2();
+        this.swimming = false;
+        this.wasSwimming = false;
+        this.grounded = false;
+        this.boat.ride(this, 0, false, 0);
+        runtime.game.chat.message("Use left/right to row. Jump to leave the boat.");
+    }
+
+    dismountBoat(boat, jump = false) {
+        if (this.boat !== boat) return;
+        this.boat = null;
+        this.boatUUID = null;
+        this.noGravity = this.boatPhysics?.noGravity ?? false;
+        this.noCollision = this.boatPhysics?.noCollision ?? false;
+        this.boatPhysics = null;
+        this.position.x = boat.position.x +
+            (boat.hitbox.x - this.hitbox.x) / 2;
+        this.position.y = boat.surfaceY - this.hitbox.y + BLOCK_SIZE * 0.35;
+        this.velocity = new Vector2(
+            boat.velocity.x,
+            jump ? -this.abilities.jumpForce * BLOCK_SIZE : 0,
+        );
+        this.targetVelocity = new Vector2();
+        this.swimming = false;
+        this.wasSwimming = false;
     }
 
     useFlame() {
@@ -885,6 +1174,10 @@ export class Player extends Entity {
 
     finishEating(item) {
         this.addFood(item.foodValue, item.foodSaturation);
+        if (item.itemId === Items.Pufferfish) {
+            this.deathCause = "Pufferfish poisoning";
+            this.forceDamage(2);
+        }
         this.eating = false;
         this.eatTimer = 0;
 
@@ -922,6 +1215,7 @@ export class Player extends Entity {
     }
 
     dieEvent() {
+        if (this.boat) this.boat.dismount(this);
         if (!this.deathCause) {
             this.deathCause = `${this.name || "Player"} was killed`;
         }
@@ -961,7 +1255,16 @@ export class Player extends Entity {
 
         const usePressed = input.isActionPressed("place");
 
+        if (usePressed && this.checkForEntityOnMouse()?.isBoat) {
+            this.tryEntityInteract();
+            return;
+        }
+
         if (usePressed) this.useItemInHand();
+
+        // Placing a boat boards the player immediately. Do not treat the same
+        // click as a second interaction with the newly created boat.
+        if (usePressed && this.boat) return;
 
         if (usePressed) this.tryEntityInteract();
 
@@ -1322,7 +1625,7 @@ export class Player extends Entity {
         // console.log(entity);
         if (entity === this) return;
 
-        entity.hit(this.calculateDamage(), this.position.x, 2);
+        entity.hit(this.calculateDamage(), this.position.x, 4);
 
         if (entity.health) {
             let reduceDurabilityBy = 1;
@@ -1363,6 +1666,7 @@ export class Player extends Entity {
     }
 
     checkWallForPlacing() {
+        if (!this.hoverBlock || !this.hoverWall) return false;
         const chunk = getDimensionChunks(activeDimension).get(
             this.hoverBlock.chunkX,
         );
@@ -1380,7 +1684,8 @@ export class Player extends Entity {
             runtime.world.checkAdjacentBlocks(mousePos, true) ||
             runtime.world.checkAdjacentBlocks(mousePos);
 
-        return isAdjacentToBlock;
+        return this.abilities.instaBuild ||
+            !getBlock(this.hoverBlock.blockType).air || isAdjacentToBlock;
     }
 
     placingLogic() {
@@ -1424,19 +1729,22 @@ export class Player extends Entity {
         );
 
         // Place the block
+        const placementMetaData =
+            !isWall && blockToPlace.specialType === SpecialType.Door
+                ? { open: false } : null;
         const newBlock = chunk.setBlockTypeLocal(
             this.hoverBlock.x,
             this.hoverBlock.y,
             blockToPlace.blockId,
             isWall,
-            null,
+            placementMetaData,
             true,
         );
 
         if (!newBlock) return;
 
         // Sign UI
-        if (blockToPlace.specialType === SpecialType.Sign) {
+        if (!isWall && blockToPlace.specialType === SpecialType.Sign) {
             this.openSign(newBlock);
         }
 
@@ -1458,6 +1766,10 @@ export class Player extends Entity {
 
         this.playerSwing();
 
+        if (!isWall && blockToPlace.blockId === Blocks.CarvedPumpkin) {
+            this.tryCreateGolem(newBlock);
+        }
+
         // Early return for walls
         if (isWall) {
             if (!this.abilities.instaBuild) {
@@ -1470,6 +1782,91 @@ export class Player extends Entity {
         if (!this.abilities.instaBuild) {
             this.removeFromCurrentSlot();
         }
+    }
+
+    tryCreateGolem(pumpkinBlock) {
+        if (!pumpkinBlock || pumpkinBlock.blockType !== Blocks.CarvedPumpkin)
+            return false;
+
+        const originX = pumpkinBlock.transform.position.x;
+        const originY = pumpkinBlock.transform.position.y;
+        const getAt = (x, y) =>
+            this.world.getBlockAtWorldPosition(
+                originX + x * BLOCK_SIZE,
+                originY + y * BLOCK_SIZE,
+                false,
+                activeDimension,
+            );
+
+        const center = getAt(0, 1);
+        const lowerCenter = getAt(0, 2);
+        const leftArm = getAt(-1, 1);
+        const rightArm = getAt(1, 1);
+        const ironPattern =
+            center?.blockType === Blocks.IronBlock &&
+            lowerCenter?.blockType === Blocks.IronBlock &&
+            leftArm?.blockType === Blocks.IronBlock &&
+            rightArm?.blockType === Blocks.IronBlock;
+        const snowPattern =
+            center?.blockType === Blocks.SnowBlock &&
+            lowerCenter?.blockType === Blocks.SnowBlock;
+
+        if (!ironPattern && !snowPattern) return false;
+
+        const entityType = ironPattern ? Entities.IronGolem : Entities.SnowGolem;
+        const hitboxWidth = (ironPattern ? 1.4 : 0.8) * BLOCK_SIZE;
+        const spawnPosition = new Vector2(
+            originX + (BLOCK_SIZE - hitboxWidth) / 2,
+            originY,
+        );
+        const spawnChunkX = this.world.getChunkXForWorldX(spawnPosition.x);
+        const spawnChunk = getDimensionChunks(activeDimension).get(spawnChunkX);
+        if (!spawnChunk) return false;
+
+        const consumedBlocks = ironPattern
+            ? [pumpkinBlock, center, lowerCenter, leftArm, rightArm]
+            : [pumpkinBlock, center, lowerCenter];
+        const affectedChunks = new Set();
+        const adjacentBlocks = new Set();
+        for (const block of consumedBlocks) {
+            this.world.setBlockType(block, Blocks.Air, false);
+            affectedChunks.add(block.chunkX);
+            this.world.serverPlaceBlock(
+                block.chunkX,
+                block.x,
+                block.y,
+                Blocks.Air,
+                false,
+                activeDimension,
+                false,
+            );
+
+            const { x, y } = block.transform.position;
+            for (const [dx, dy] of [[0, -BLOCK_SIZE], [0, BLOCK_SIZE], [-BLOCK_SIZE, 0], [BLOCK_SIZE, 0]]) {
+                const adjacent = this.world.getBlockAtWorldPosition(
+                    x + dx,
+                    y + dy,
+                    false,
+                    activeDimension,
+                );
+                if (adjacent && !consumedBlocks.includes(adjacent)) {
+                    adjacentBlocks.add(adjacent);
+                }
+            }
+        }
+        for (const adjacent of adjacentBlocks) adjacent.blockUpdate();
+        for (const chunkX of affectedChunks) {
+            this.world.uploadChunkToServer(chunkX, activeDimension);
+        }
+
+        const golem = this.world.summonEntity(
+            entityType,
+            spawnPosition,
+            { myChunkX: spawnChunkX, dimension: activeDimension },
+            true,
+        );
+        spawnChunk.entities.push(golem);
+        return true;
     }
 
     removeFromCurrentSlot(count = 1) {
@@ -1499,19 +1896,31 @@ export class Player extends Entity {
         }
 
         let collidingWithEntity = false;
+        const collisionCells = block.collision
+            ? [new Vector2(mousePos.x, mousePos.y)]
+            : [];
+        for (const extended of block.extendedBlock || []) {
+            if (!getBlock(extended.blockId).collision) continue;
+            collisionCells.push(
+                new Vector2(
+                    mousePos.x + extended.offset.x * BLOCK_SIZE,
+                    mousePos.y - extended.offset.y * BLOCK_SIZE,
+                ),
+            );
+        }
 
-        if (block.collision) {
+        if (collisionCells.length > 0) {
             for (let i = 0; i < this.entities.length; i++) {
                 const entity = this.entities[i];
                 if (entity.type === 0) continue;
-                if (
+                if (collisionCells.some((position) =>
                     isColliding(
                         new Vector2(entity.position.x, entity.position.y),
                         new Vector2(entity.hitbox.x, entity.hitbox.y),
-                        new Vector2(mousePos.x, mousePos.y),
+                        position,
                         new Vector2(BLOCK_SIZE, BLOCK_SIZE),
                     )
-                ) {
+                )) {
                     collidingWithEntity = true;
                     break;
                 }
@@ -1524,6 +1933,15 @@ export class Player extends Entity {
             this.hoverBlock.transform.position.x,
             this.hoverBlock.transform.position.y + BLOCK_SIZE,
         );
+
+        if (
+            block.specialType === SpecialType.Door &&
+            (!blockBeneath ||
+                !hasBlockCollision(blockBeneath) ||
+                getBlock(blockBeneath.blockType).fluid)
+        ) {
+            return false;
+        }
 
         // Check if block can be placed without block underneath
         if (block.breakWithoutBlockUnderneath) {
@@ -1541,7 +1959,7 @@ export class Player extends Entity {
                 return true;
 
             if (
-                !blockBeneathDef.collision &&
+                !hasBlockCollision(blockBeneath) &&
                 block.onlyPlacableOn === null &&
                 blockBeneathDef.transparent
             )
@@ -1784,6 +2202,28 @@ export class Player extends Entity {
     movementLogic() {
         if (this.windowOpen) return;
 
+        if (this.boat) {
+            if (!this.canMove || runtime.game.pauseMenu?.getActive()) return;
+            if (
+                input.isActionPressed("jump") ||
+                input.isActionPressed("moveUp")
+            ) {
+                this.boat.dismount(this, true);
+            }
+            if (this.boat) {
+                const direction = Number(input.isActionDown("moveRight")) -
+                    Number(input.isActionDown("moveLeft"));
+                this.boat.ride(
+                    this,
+                    direction,
+                    input.isActionDown("sprint"),
+                    runtime.deltaTime,
+                );
+                this.lookAtCursor();
+                return;
+            }
+        }
+
         this.handleSwimming();
         if (!this.canMove) return;
         this.handleHorizontalMovement();
@@ -1868,6 +2308,16 @@ export class Player extends Entity {
     }
 
     updateSwimmingAnimation() {
+        if (this.boat) {
+            this.body.updateSwimming(false);
+            this.body.updateBoating(
+                true,
+                Math.abs(this.boat.velocity.x) > 5,
+            );
+            return;
+        }
+
+        this.body.updateBoating(false);
         const torsoY = this.position.y + this.hitbox.y / 2;
         const inWater = this.swimming && this.collidingWithBlocks.some((block) =>
             block.blockType === Blocks.Water && block.transform.position.y <= torsoY,

@@ -1,5 +1,6 @@
 import { runtime } from "../utils/runtime.js";
 import { Drop } from "../entities/drop.js";
+import { Entities } from "../entities/entities.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { Vector2 } from "../utils/classes.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT } from "../utils/globals.js";
@@ -148,13 +149,26 @@ export function processMessage(data) {
             break;
         case "summonEntity":
             console.log("Summoning entity:", message);
-            const newEntity = runtime.world.summonEntity(
-                message.entity,
+            const entityType = Entities[message.entity];
+            if (!entityType || runtime.world.getEntityByUUID(message.UUID)) break;
+            const summonedEntity = runtime.world.summonEntity(
+                entityType,
                 message.position,
                 message.props,
                 false,
                 message.UUID,
             );
+            if (Number.isInteger(message.props?.dimension)) {
+                summonedEntity.dimension = message.props.dimension;
+            }
+            if (summonedEntity.myChunkX !== null) {
+                const chunk = runtime.world
+                    .getDimensionChunks(summonedEntity.dimension)
+                    .get(summonedEntity.myChunkX);
+                if (chunk && !chunk.entities.includes(summonedEntity)) {
+                    chunk.entities.push(summonedEntity);
+                }
+            }
             return;
 
         case "response":

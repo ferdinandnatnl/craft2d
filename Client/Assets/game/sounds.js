@@ -1,7 +1,7 @@
 import { runtime } from "../utils/runtime.js";
 import { Vector2, randomRange, uuidv4 } from "../utils/classes.js";
 import { BLOCK_SIZE } from "../utils/globals.js";
-import { isMediaPacked, resolveAssetUrl } from "../utils/assetBundle.js";
+import { resolveAssetUrl } from "../utils/assetBundle.js";
 import { Sounds } from "@2dcraft.com/shared/sounds.js";
 export { Sounds };
 
@@ -20,7 +20,7 @@ export let messySounds = [];
 
 function createPreloadedAudio(url, mime = "audio/ogg") {
     const audio = new Audio();
-    audio.preload = "auto";
+    audio.preload = "none";
     // <source type> helps browsers decode blob: URLs
     if (url.startsWith("blob:") || url.startsWith("data:")) {
         const source = document.createElement("source");
@@ -33,36 +33,14 @@ function createPreloadedAudio(url, mime = "audio/ogg") {
     return audio;
 }
 
-// Preload all sounds at game initialization
-export function preloadSounds() {
-    const allSounds = Object.values(Sounds).flat();
-    allSounds.forEach((sound) => {
-        const logical = `${AUDIO_BASE_URL}${sound}.ogg`;
-        const url = resolveAssetUrl(logical);
-        if (soundCache[url]) return;
-
-        // Packed build: skip paths that never made it into media.zip
-        if (
-            isMediaPacked() &&
-            !url.startsWith("blob:") &&
-            !url.startsWith("data:")
-        ) {
-            console.warn(`Sound missing from media pack: ${logical}`);
-            return;
-        }
-
-        const audio = createPreloadedAudio(url, "audio/ogg");
+function getSoundTemplate(url) {
+    let audio = soundCache[url];
+    if (!audio) {
+        audio = createPreloadedAudio(url, "audio/ogg");
         soundCache[url] = audio;
-        audio.onerror = () => {
-            console.warn(`Failed to preload sound: ${logical}`);
-            delete soundCache[url];
-        };
-        audio.load();
-    });
+    }
+    return audio;
 }
-
-// Call this at game startup (after media.zip is unpacked in production)
-preloadSounds();
 
 // Play a random sound from an array
 export function playRandomSoundFromArray({
@@ -128,45 +106,18 @@ export function playSound(sound, volume = 1, pitch = 1, loop = false) {
     volume = volume * sfxMultiplier;
 
     const url = resolveAssetUrl(`${AUDIO_BASE_URL}${sound}`);
-    const cachedAudio = soundCache[url];
-
-    if (cachedAudio) {
-        // Clone the cached audio to allow multiple simultaneous plays
-        const audio = cachedAudio.cloneNode(true);
-        audio.volume = volume;
-        audio.preservesPitch = false;
-        audio.webkitPreservesPitch = false;
-        audio.mozPreservesPitch = false;
-        audio.playbackRate = pitch;
-
-        audio.loop = loop;
-
-        audio.onerror = () => {
-            console.error(`Error loading sound: ${url}`);
-        };
-        audio.play().catch((err) => {
-            console.error(`Error playing sound ${url}: ${err}`);
-        });
-
-        return audio;
-    } else {
-        console.warn(`Sound not preloaded or failed to load: ${url}`);
-        // Fallback: attempt to play directly
-        const audio = createPreloadedAudio(url, "audio/ogg");
-        audio.volume = volume;
-        audio.preservesPitch = false;
-        audio.webkitPreservesPitch = false;
-        audio.mozPreservesPitch = false;
-        audio.playbackRate = pitch;
-
-        audio.loop = loop;
-
-        audio.play().catch((err) => {
-            console.error(`Fallback play failed for ${url}: ${err}`);
-        });
-
-        return audio;
-    }
+    const audio = getSoundTemplate(url).cloneNode(true);
+    audio.volume = volume;
+    audio.preservesPitch = false;
+    audio.webkitPreservesPitch = false;
+    audio.mozPreservesPitch = false;
+    audio.playbackRate = pitch;
+    audio.loop = loop;
+    audio.onerror = () => console.error(`Error loading sound: ${url}`);
+    audio.play().catch((err) => {
+        console.error(`Error playing sound ${url}: ${err}`);
+    });
+    return audio;
 }
 
 // Play a positional sound with Web Audio API
@@ -187,15 +138,7 @@ export function playPositionalSound(
     }
 
     const url = resolveAssetUrl(`${AUDIO_BASE_URL}${sound}`);
-    const cachedAudio = soundCache[url];
-
-    let audioElem;
-    if (cachedAudio) {
-        audioElem = cachedAudio.cloneNode(true);
-    } else {
-        // console.warn(`Positional sound not preloaded: ${url}`);
-        audioElem = createPreloadedAudio(url, "audio/ogg");
-    }
+    const audioElem = getSoundTemplate(url).cloneNode(true);
 
     audioElem.preservesPitch = false;
     audioElem.webkitPreservesPitch = false;

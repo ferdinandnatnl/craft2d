@@ -213,6 +213,7 @@ export function draw(chunks, frames) {
     drawParticleEmitters();
 
     drawEntities();
+    drawDamageIndicators();
 
     if (!voxelActive && shaderRenderer.mode !== "off") {
         waterSurface.draw(ctx, terrainDepth, camera, runtime.passedTime);
@@ -256,6 +257,7 @@ export function drawLoadScreen() {
 export function drawEntities() {
     runtime.world.entities.forEach((entity) => {
         if (entity.dimension !== activeDimension) return;
+        if (voxelActive && entity.isBoat) return;
         if (
             Math.abs(
                 Vector2.XDistance(
@@ -285,6 +287,39 @@ export function drawEntities() {
     });
 
     if (runtime.drawHitbox) drawHitboxes();
+}
+
+function drawDamageIndicators() {
+    const indicators = runtime.world?.damageIndicators;
+    if (!indicators?.length) return;
+
+    const visibleIndicators = [];
+    for (const indicator of indicators) {
+        const age = runtime.passedTime - indicator.createdAt;
+        if (age < 0 || age >= 0.9) continue;
+        visibleIndicators.push(indicator);
+        if (indicator.dimension !== activeDimension) continue;
+
+        const progress = age / 0.9;
+        const label = `-${Number.isInteger(indicator.amount) ? indicator.amount : indicator.amount.toFixed(1)} hp`;
+        const x = indicator.x - camera.x;
+        const y = indicator.y - camera.y - progress * 42;
+
+        ctx.save();
+        ctx.globalAlpha = 1 - progress * progress;
+        ctx.font = "20px Pixel";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#351b1b";
+        ctx.fillStyle = "#ff6961";
+        ctx.strokeText(label, x, y);
+        ctx.fillText(label, x, y);
+        ctx.restore();
+    }
+
+    runtime.world.damageIndicators = visibleIndicators;
 }
 
 export function drawBreakAndPlaceCursor(inRange = false) {
