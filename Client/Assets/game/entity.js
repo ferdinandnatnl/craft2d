@@ -817,6 +817,26 @@ export class Entity {
     }
 
     updatePositionWithVelocity(delta = runtime.deltaTime) {
+        const minionCarrier = this.carriedByMinionUUID
+            ? this.world?.entities?.find(entity =>
+                entity.isMinion &&
+                entity.UUID === this.carriedByMinionUUID &&
+                entity.carriedEntityUUID === this.UUID,
+            )
+            : null;
+        if (minionCarrier) {
+            this.position = minionCarrier.getCarryPosition(this);
+            this.velocity.x = 0;
+            if (this.type === EntityTypes.Player) {
+                this.targetVelocity.y = 0;
+            } else {
+                this.velocity.y = 0;
+                this.targetVelocity.x = 0;
+                this.targetVelocity.y = 0;
+            }
+            return;
+        }
+        if (this.carriedByMinionUUID) this.carriedByMinionUUID = null;
         if (!this.getCurrentChunk()?.generated) return;
 
         const maxStepDeltaTime = 1 / 30;

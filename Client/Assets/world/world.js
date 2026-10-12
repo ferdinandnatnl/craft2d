@@ -110,6 +110,15 @@ export class World {
                 if (typeof entity.tickUpdate === "function" && tick)
                     entity.tickUpdate();
                 else entity.update();
+            } else if (!tick && entity.isMinion) {
+                // Worker jobs continue in loaded chunks when the camera moves away.
+                entity.update();
+            } else if (!tick && ["Item", "Block"].includes(entity.name) &&
+                this.entities.some((worker) => worker.isMinion &&
+                    worker.dimension === entity.dimension &&
+                    Math.abs(worker.position.x - entity.position.x) <= 16 * BLOCK_SIZE)) {
+                // Drops from tree canopies still fall to nearby workers off camera.
+                entity.update();
             } else if (!tick && entity.dyingTime > 0) {
                 entity.update();
             }
@@ -710,6 +719,8 @@ export class World {
         isWall = false,
         shouldDrop = false,
         dimensionIndex = activeDimension,
+        minionUUID = null,
+        uploadChunk = true,
     ) {
         if (!multiplayer) return;
         runtime.server.send({
@@ -723,13 +734,20 @@ export class World {
                 chunkX: chunkX,
                 shouldDrop: shouldDrop,
                 dimensionIndex: dimensionIndex,
+                ...(typeof minionUUID === "string" ? { minionUUID } : {}),
             },
         });
 
-        this.uploadChunkToServer(chunkX, dimensionIndex);
+        if (uploadChunk) {
+            this.uploadChunkToServer(chunkX, dimensionIndex, minionUUID);
+        }
     }
 
-    async uploadChunkToServer(chunkX, dimensionIndex = activeDimension) {
+    async uploadChunkToServer(
+        chunkX,
+        dimensionIndex = activeDimension,
+        minionUUID = null,
+    ) {
         if (!this.player) return;
         if (!multiplayer) return;
         const chunk = this.getChunkForX(chunkX, dimensionIndex);
@@ -739,6 +757,7 @@ export class World {
                 x: chunkX,
                 chunk: saveChunk(chunk),
                 dimensionIndex: dimensionIndex,
+                ...(typeof minionUUID === "string" ? { minionUUID } : {}),
             },
             sender: this.player.UUID,
         });
@@ -771,7 +790,9 @@ export class World {
             position: position,
             ...props,
         });
-        newEntity.dimension = activeDimension;
+        newEntity.dimension = Number.isInteger(props?.dimension)
+            ? props.dimension
+            : activeDimension;
 
         this.entities.push(newEntity);
 

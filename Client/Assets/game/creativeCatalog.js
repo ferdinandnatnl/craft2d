@@ -19,6 +19,7 @@ export function canUseAsWallpaper(block) {
 }
 
 export function creativeCategory(key, definition, isBlock) {
+    if (key === "MasterStaff") return "tools";
     if (isBlock) {
         if (/Redstone|PressurePlate|Hopper|Lever|TNT|NoteBlock/.test(key))
             return "redstone";

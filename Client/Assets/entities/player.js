@@ -21,6 +21,7 @@ import { activeDimension, getDimensionChunks, gotoDimension } from "../world/dim
 import { nearestEndShrineX } from "@2dcraft.com/shared/endProgression.js";
 import { createParticleEmitter } from "../world/particleEmitter.js";
 import { countMobsNearPlayer, MAX_MOBS_NEAR_PLAYER } from "../world/mobLimits.js";
+import { handleMasterStaffAttack, handleMasterStaffInput, toggleMinionMenu } from "./minions/commands.js";
 
 export class Player extends Entity {
     constructor(
@@ -99,6 +100,8 @@ export class Player extends Entity {
 
         this.score = score;
         this.xpLevel = xpLevel;
+        this.minionProgress = { evilDeeds: 0, unlocked: false };
+        this.minionMenuOpen = false;
 
         this.gamemode = gamemode;
 
@@ -297,11 +300,21 @@ export class Player extends Entity {
 
         if (this.isDead) return;
 
+        if (!this.windowOpen && input.isActionPressed("minionMenu")) {
+            toggleMinionMenu(this);
+        }
+        if (this.minionMenuOpen) {
+            this.updateEntity();
+            this.collisionLogic();
+            this.hurtCooldownLogic();
+            return;
+        }
+
         this.interactLogic();
         this.climbingCollisingLogic();
         this.movementLogic();
         this.hoverBlockLogic();
-        this.breakingAndPlacingLogic();
+        if (!handleMasterStaffAttack(this)) this.breakingAndPlacingLogic();
         this.updateEntity();
         this.updateSwimmingAnimation();
         this.flyingToggleLogic();
@@ -488,6 +501,8 @@ export class Player extends Entity {
             health: this.health,
             food: this.foodLevel,
             gamemode: this.gamemode,
+            xpLevel: this.xpLevel,
+            minionProgress: this.minionProgress,
         };
 
         if (this.body) {
@@ -1348,6 +1363,8 @@ export class Player extends Entity {
         if (this.windowOpen) return;
         if (runtime.game.pauseMenu?.getActive()) return;
 
+        if (handleMasterStaffInput(this)) return;
+
         const usePressed = input.isActionPressed("place");
 
         if (usePressed && this.checkForEntityOnMouse()?.isBoat) {
@@ -1718,7 +1735,9 @@ export class Player extends Entity {
         if (entity === this) return;
         if (!this.isEntityInInteractionRange(entity)) return;
 
+        const previousHealth = entity.health;
         entity.hit(this.calculateDamage(), this.position.x, 4);
+        if (previousHealth > 0 && entity.health <= 0) this.gainExperienceLevel(1);
 
         if (entity.health) {
             let reduceDurabilityBy = 1;
@@ -1746,6 +1765,12 @@ export class Player extends Entity {
 
             this.reduceDurability();
         }
+    }
+
+    gainExperienceLevel(amount = 1) {
+        if (!Number.isFinite(amount) || amount <= 0) return this.xpLevel;
+        this.xpLevel = Math.max(0, Math.min(9999, this.xpLevel + Math.floor(amount)));
+        return this.xpLevel;
     }
 
     calculateDamage() {

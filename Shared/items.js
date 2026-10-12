@@ -172,6 +172,7 @@ export const Items = Object.freeze({
     EyeOfEnder: 2005,
     FishingRod: 2006,
     EchoShard: 2007,
+    MasterStaff: 2009,
 
     RawCod: 1514,
     CookedCod: 1515,
@@ -662,6 +663,7 @@ export const items = [
     new Item({ itemId: Items.EnderPearl, name: "Ender Pearl", sprite: "ender_pearl" }),
     new Item({ itemId: Items.EyeOfEnder, name: "Eye of Ender", sprite: "ender_eye" }),
     new Item({ itemId: Items.EchoShard, name: "Echo Shard", sprite: "echo_shard.svg" }),
+    new Item({ itemId: Items.MasterStaff, name: "Master's Staff", sprite: "minion/masterstaff", heldInHand: true, stackSize: 1 }),
     new Item({
         itemId: Items.FishingRod,
         name: "Fishing Rod",

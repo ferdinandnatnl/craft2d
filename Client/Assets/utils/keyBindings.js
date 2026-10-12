@@ -37,12 +37,13 @@ export const DEFAULT_KEY_BINDINGS = {
     debugChunkBorders: ["KeyB"],
     debugCamera: ["KeyN"],
     debugHitbox: ["KeyH"],
-    debugPrintBlock: ["KeyM"],
+    debugPrintBlock: ["KeyV"],
     debugFileSize: ["KeyF"],
     debugFps: ["KeyI"],
     debugCoordinates: ["KeyC"],
     debugSave: ["KeyO"],
     debugSaveBackup: ["KeyP"],
+    minionMenu: ["KeyM"],
 };
 
 export const ACTION_LABELS = {
@@ -89,6 +90,7 @@ export const ACTION_LABELS = {
     debugCoordinates: "Coordinates",
     debugSave: "Save World",
     debugSaveBackup: "Save Backup",
+    minionMenu: "Minion Orders / Evil Deeds",
 };
 
 export const GAMEPLAY_ACTIONS = [
@@ -104,6 +106,7 @@ export const GAMEPLAY_ACTIONS = [
     "use",
     "drop",
     "toggleHud",
+    "minionMenu",
     "hotbarUp",
     "hotbarDown",
     "hotbar1",
@@ -221,6 +224,11 @@ export function loadKeyBindings() {
             if (Array.isArray(parsed[action])) {
                 out[action] = parsed[action];
             }
+        }
+        // Key M was the old debug block-print shortcut; reserve it for minion orders.
+        if (!Array.isArray(parsed.minionMenu) &&
+            out.debugPrintBlock.includes("KeyM")) {
+            out.debugPrintBlock = DEFAULT_KEY_BINDINGS.debugPrintBlock;
         }
         return out;
     } catch (e) {

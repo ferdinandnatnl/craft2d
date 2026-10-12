@@ -20,6 +20,7 @@ let serverIcon = null;
 let userCache = [];
 let bannedIPs = [];
 let players = [];
+const minionOwners = new Map();
 
 const properties = {};
 
@@ -340,6 +341,64 @@ function getDefaultPlayerPosition() {
     return new Vector2(0, (CHUNK_HEIGHT / 2) * BLOCK_SIZE);
 }
 
+function normalizeSavedMinion(data, ownerUUID, previousOwnerUUID = null) {
+    if (!data || typeof data.UUID !== "string" || data.UUID.length > 64 ||
+        !Number.isFinite(data.position?.x) || !Number.isFinite(data.position?.y) ||
+        Math.abs(data.position.x) > 1_000_000_000 || data.position.y < 0 ||
+        data.position.y >= CHUNK_HEIGHT * BLOCK_SIZE ||
+        !Number.isFinite(data.health) || data.health <= 0) return null;
+    const dimension = Number.isInteger(data.dimension) ? data.dimension : 0;
+    if (dimension < 0 || dimension > 2) return null;
+    if (data.carriedEntityUUID != null &&
+        (typeof data.carriedEntityUUID !== "string" ||
+            data.carriedEntityUUID.length > 64)) return null;
+    const sourceInventory = Array.isArray(data.inventory) ? data.inventory : [];
+    if (sourceInventory.length > 24) return null;
+    const inventory = sourceInventory.map((item) => {
+        if (!item || !Number.isInteger(item.count) || item.count < 0 || item.count > 64 ||
+            (item.blockId != null && !Number.isInteger(item.blockId)) ||
+            (item.itemId != null && !Number.isInteger(item.itemId)) ||
+            (item.blockId != null && item.itemId != null)) return null;
+        const props = item.props && typeof item.props === "object" && !Array.isArray(item.props)
+            ? item.props : {};
+        if (JSON.stringify(props).length > 1024) return null;
+        return { blockId: item.blockId ?? null, itemId: item.itemId ?? null,
+            count: item.count, props };
+    });
+    if (inventory.some((item) => !item)) return null;
+    let job = data.job && typeof data.job === "object" ? data.job : null;
+    if (job && JSON.stringify(job).length > 20_000) return null;
+    if (job?.type === "carry" && job.targetUUID === previousOwnerUUID) {
+        job = { ...job, targetUUID: ownerUUID };
+    }
+    const destination = data.deliveryDestination &&
+        Number.isInteger(data.deliveryDestination.x) &&
+        Number.isInteger(data.deliveryDestination.y) &&
+        Number.isInteger(data.deliveryDestination.dimension) &&
+        data.deliveryDestination.y >= 0 && data.deliveryDestination.y < CHUNK_HEIGHT &&
+        data.deliveryDestination.dimension >= 0 && data.deliveryDestination.dimension <= 2
+        ? data.deliveryDestination
+        : null;
+    return {
+        UUID: data.UUID,
+        ownerUUID,
+        position: { x: data.position.x, y: data.position.y },
+        health: Math.min(20, data.health),
+        dimension,
+        direction: data.direction < 0 ? -1 : 1,
+        job,
+        inventory,
+        deliveryDestination: destination,
+        carriedEntityUUID: data.carriedEntityUUID === previousOwnerUUID
+            ? ownerUUID
+            : typeof data.carriedEntityUUID === "string"
+                ? data.carriedEntityUUID
+                : null,
+        deliveryActive: data.deliveryActive === true,
+    };
+}
+
+
 function savePlayerData(player, ip) {
     if (!player || !ip || !player.position) {
         serverLog(`Cannot save player data: Invalid player object or IP`);
@@ -369,6 +428,9 @@ function savePlayerData(player, ip) {
                     : properties.gamemode,
             health: Number.isFinite(player.health) ? player.health : 20,
             food: Number.isFinite(player.food) ? player.food : 20,
+            xpLevel: Number.isFinite(player.xpLevel) ? player.xpLevel : 0,
+            minionProgress: player.minionProgress || { evilDeeds: 0, unlocked: false },
+            minions: Array.isArray(player.minions) ? player.minions.slice(0, 4) : [],
         };
         fs.writeFileSync(playerFile, JSON.stringify(playerData, null, 2));
     } catch (error) {
@@ -440,6 +502,30 @@ function loadPlayerData(player, ip) {
                 typeof playerData.health === "number" ? playerData.health : 20;
             player.food =
                 typeof playerData.food === "number" ? playerData.food : 20;
+            player.xpLevel = Number.isFinite(playerData.xpLevel)
+                ? Math.max(0, Math.min(9999, Math.floor(playerData.xpLevel))) : 0;
+            const progress = playerData.minionProgress;
+            player.minionProgress = progress && typeof progress === "object"
+                ? {
+                    evilDeeds: Number.isFinite(progress.evilDeeds)
+                        ? Math.max(0, Math.min(4, Math.floor(progress.evilDeeds))) : 0,
+                    unlocked: progress.unlocked === true,
+                }
+                : { evilDeeds: 0, unlocked: false };
+            const previousOwnerUUID = Array.isArray(playerData.minions)
+                ? playerData.minions[0]?.ownerUUID
+                : null;
+            player.minions = (Array.isArray(playerData.minions) ? playerData.minions : [])
+                .slice(0, 4)
+                .map((minion) => normalizeSavedMinion(
+                    minion,
+                    player.UUID,
+                    previousOwnerUUID,
+                ))
+                .filter(Boolean);
+            for (const minion of player.minions) {
+                minionOwners.set(minion.UUID, player.UUID);
+            }
         } else {
             // Set default values for new players
             player.position = getDefaultPlayerPosition();
@@ -449,6 +535,9 @@ function loadPlayerData(player, ip) {
             player.gamemode = properties.gamemode;
             player.health = 20;
             player.food = 20;
+            player.xpLevel = 0;
+            player.minionProgress = { evilDeeds: 0, unlocked: false };
+            player.minions = [];
         }
     } catch (error) {
         console.error(
@@ -462,6 +551,9 @@ function loadPlayerData(player, ip) {
         player.gamemode = properties.gamemode;
         player.health = 20;
         player.food = 20;
+        player.xpLevel = 0;
+        player.minionProgress = { evilDeeds: 0, unlocked: false };
+        player.minions = [];
     }
 }
 
@@ -521,6 +613,9 @@ function playerJoined(ws, playerData) {
             gamemode: newPlayer.gamemode,
             health: newPlayer.health,
             food: newPlayer.food,
+            xpLevel: newPlayer.xpLevel,
+            minionProgress: newPlayer.minionProgress,
+            minions: newPlayer.minions,
         },
     });
 
@@ -540,6 +635,11 @@ function playerJoined(ws, playerData) {
 
 function playerLeft(player) {
     if (!player) return;
+    for (const [UUID, ownerUUID] of minionOwners) {
+        if (ownerUUID !== player.UUID) continue;
+        minionOwners.delete(UUID);
+        broadcast({ type: "removeEntity", message: { UUID } }, [player.UUID]);
+    }
     // Save player data before removing
     const ip = getPlayerIpFromSocket(player.ws);
     savePlayerData(player, ip);
@@ -623,6 +723,18 @@ function processMessage(message, ws) {
                     if (typeof message.food === "number") {
                         player.food = message.food;
                     }
+                    if (Number.isFinite(message.xpLevel)) {
+                        player.xpLevel = Math.max(0,
+                            Math.min(9999, Math.floor(message.xpLevel)));
+                    }
+                    if (message.minionProgress && typeof message.minionProgress === "object") {
+                        player.minionProgress = {
+                            evilDeeds: Number.isFinite(message.minionProgress.evilDeeds)
+                                ? Math.max(0, Math.min(4, Math.floor(message.minionProgress.evilDeeds)))
+                                : 0,
+                            unlocked: message.minionProgress.unlocked === true,
+                        };
+                    }
                 }
             }
             broadcast(data, [data.sender]);
@@ -703,6 +815,27 @@ function processMessage(message, ws) {
                 );
             }
 
+            if (Number.isFinite(message.xpLevel)) {
+                player.xpLevel = Math.max(0, Math.min(9999, Math.floor(message.xpLevel)));
+            }
+            if (message.minionProgress && typeof message.minionProgress === "object") {
+                player.minionProgress = {
+                    evilDeeds: Number.isFinite(message.minionProgress.evilDeeds)
+                        ? Math.max(0, Math.min(4, Math.floor(message.minionProgress.evilDeeds)))
+                        : 0,
+                    unlocked: message.minionProgress.unlocked === true,
+                };
+            }
+            if (Array.isArray(message.minions) && message.minions.length <= 4) {
+                const minions = message.minions.map((entry) =>
+                    minionOwners.get(entry?.UUID) === player.UUID
+                        ? normalizeSavedMinion(entry, player.UUID, player.UUID)
+                        : null,
+                );
+                if (!minions.some((entry) => !entry)) player.minions = minions;
+            }
+
+
             savePlayerData(player, getPlayerIpFromSocket(ws));
 
             break;
@@ -729,12 +862,82 @@ function processMessage(message, ws) {
             broadcast(data, [data.sender]);
             break;
 
+        case "minionState": {
+            const sender = getPlayerByUUID(data.sender);
+            const state = data.message || {};
+            const validPosition = Number.isFinite(state.position?.x) &&
+                Number.isFinite(state.position?.y) &&
+                Math.abs(state.position.x) <= 1_000_000_000 &&
+                state.position.y >= 0 && state.position.y < CHUNK_HEIGHT * BLOCK_SIZE;
+            const validState = new Set([
+                "idle", "following-owner", "moving-to-target", "searching-resources",
+                "mining", "woodcutting", "excavating", "collecting-items",
+                "carrying-entity", "delivering-resources", "returning-to-owner",
+                "unreachable",
+            ]).has(state.state);
+            const validCarriedEntity = state.carriedEntityUUID == null ||
+                (typeof state.carriedEntityUUID === "string" &&
+                    state.carriedEntityUUID.length <= 64);
+            if (sender?.ws === ws && minionOwners.get(state.UUID) === data.sender &&
+                validPosition && validState && [-1, 1].includes(state.direction) &&
+                Number.isInteger(state.dimension) && state.dimension === sender.dimension &&
+                validCarriedEntity) {
+                broadcast(data, [data.sender]);
+                const persisted = sender.minions.find((minion) => minion.UUID === state.UUID);
+                if (persisted) {
+                    persisted.position = state.position;
+                    persisted.direction = state.direction;
+                    persisted.dimension = state.dimension;
+                    persisted.carriedEntityUUID = state.carriedEntityUUID ?? null;
+                }
+            }
+            break;
+        }
+
+        case "minionPersist": {
+            const sender = getPlayerByUUID(data.sender);
+            const state = data.message || {};
+            if (sender?.ws !== ws || !Array.isArray(state.minions) || state.minions.length > 4) {
+                break;
+            }
+            const minions = state.minions.map((entry) => {
+                if (minionOwners.get(entry?.UUID) !== data.sender) return null;
+                return normalizeSavedMinion(entry, data.sender, data.sender);
+            });
+            if (minions.some((entry) => !entry)) break;
+            sender.minions = minions;
+            if (Number.isFinite(state.xpLevel)) {
+                sender.xpLevel = Math.max(0, Math.min(9999, Math.floor(state.xpLevel)));
+            }
+            if (state.minionProgress && typeof state.minionProgress === "object") {
+                sender.minionProgress = {
+                    evilDeeds: Number.isFinite(state.minionProgress.evilDeeds)
+                        ? Math.max(0, Math.min(4, Math.floor(state.minionProgress.evilDeeds)))
+                        : 0,
+                    unlocked: state.minionProgress.unlocked === true,
+                };
+            }
+            savePlayerData(sender, getPlayerIpFromSocket(ws));
+            break;
+        }
+
+        case "removeEntity": {
+            const UUID = data.message?.UUID;
+            if (minionOwners.has(UUID)) {
+                if (minionOwners.get(UUID) !== data.sender) break;
+                minionOwners.delete(UUID);
+            }
+            broadcast(data, [data.sender]);
+            break;
+        }
+
         case "summonEntity":
             {
                 const sender = getPlayerByUUID(data.sender);
                 const summon = data.message || {};
                 const allowedEntities = new Set([
                     "Boat",
+                    "Minion",
                     "IronGolem",
                     "SnowGolem",
                 ]);
@@ -746,6 +949,15 @@ function processMessage(message, ws) {
                     summon.UUID.length > 0 &&
                     summon.UUID.length <= 64;
                 const props = summon.props ?? {};
+                const validMinionProps =
+                    summon.entity === "Minion" &&
+                    Object.keys(props).every((key) =>
+                        ["ownerUUID", "myChunkX", "dimension", "direction"].includes(key),
+                    ) && props.ownerUUID === data.sender &&
+                    Number.isFinite(props.myChunkX) &&
+                    Number.isInteger(props.dimension) &&
+                    props.dimension >= 0 && props.dimension <= 2 &&
+                    [-1, 1].includes(props.direction);
                 const validProps =
                     props !== null &&
                     typeof props === "object" &&
@@ -755,17 +967,28 @@ function processMessage(message, ws) {
                               ["surfaceY", "dimension"].includes(key),
                           ) && Number.isFinite(props.surfaceY) &&
                           Number.isInteger(props.dimension)
-                        : Object.keys(props).every((key) => key === "myChunkX") &&
-                          (props.myChunkX === undefined ||
-                              Number.isFinite(props.myChunkX)));
+                        : summon.entity === "Minion"
+                            ? validMinionProps
+                            : Object.keys(props).every((key) => key === "myChunkX") &&
+                              (props.myChunkX === undefined ||
+                                  Number.isFinite(props.myChunkX)));
 
                 if (
                     sender?.ws === ws &&
                     allowedEntities.has(summon.entity) &&
                     validPosition &&
                     validIdentity &&
-                    validProps
+                    validProps &&
+                    (summon.entity !== "Minion" ||
+                        (minionOwners.get(summon.UUID) === data.sender ||
+                            (!minionOwners.has(summon.UUID) &&
+                                [...minionOwners.values()].filter((ownerUUID) =>
+                                    ownerUUID === data.sender,
+                                ).length < 4)))
                 ) {
+                    if (summon.entity === "Minion") {
+                        minionOwners.set(summon.UUID, data.sender);
+                    }
                     broadcast(data, [data.sender]);
                 }
             }
@@ -798,19 +1021,35 @@ function processMessage(message, ws) {
             );
             break;
 
-        case "uploadChunk":
+        case "uploadChunk": {
+            const minionUUID = data.message?.minionUUID;
+            if (minionUUID !== undefined &&
+                (typeof minionUUID !== "string" ||
+                    minionOwners.get(minionUUID) !== data.sender ||
+                    getPlayerByUUID(data.sender)?.ws !== ws)) {
+                break;
+            }
             world
                 .getDimension(data.message.dimensionIndex)
                 .uploadChunk(data.message.chunk, data.message.x);
             break;
+        }
 
         case "placeBlock":
             broadcast(data, [data.sender]);
             break;
 
-        case "breakBlock":
+        case "breakBlock": {
+            const minionUUID = data.message?.minionUUID;
+            if (minionUUID !== undefined &&
+                (typeof minionUUID !== "string" ||
+                    minionOwners.get(minionUUID) !== data.sender ||
+                    getPlayerByUUID(data.sender)?.ws !== ws)) {
+                break;
+            }
             broadcast(data, [data.sender]);
             break;
+        }
 
         case "playerDimension": {
             const player = getPlayerByUUID(data.message.player);

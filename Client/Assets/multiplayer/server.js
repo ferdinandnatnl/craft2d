@@ -150,6 +150,12 @@ export function buildMultiplayerLeaveSnapshot() {
                   ? runtime.world.player.food
                   : 20,
         inventory: inventoryPayload,
+        xpLevel: runtime.world.player.xpLevel,
+        minionProgress: runtime.world.player.minionProgress,
+        minions: runtime.world.entities
+            .filter((entity) => entity.isMinion &&
+                entity.ownerUUID === runtime.world.player.UUID && entity.health > 0)
+            .map((entity) => entity.createSaveData()),
     };
 }
 

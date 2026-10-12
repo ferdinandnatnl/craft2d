@@ -210,10 +210,12 @@ export function draw(chunks, frames) {
         drawDestroyStage();
     }
 
+    drawMinionDestroyStages();
     drawParticleEmitters();
 
     drawEntities();
     drawDamageIndicators();
+    drawMinionBlindness();
 
     if (!voxelActive && shaderRenderer.mode !== "off") {
         waterSurface.draw(ctx, terrainDepth, camera, runtime.passedTime);
@@ -227,6 +229,18 @@ export function draw(chunks, frames) {
 
     drawLoadScreen();
 }
+
+function drawMinionBlindness() {
+    const player = runtime.world?.player;
+    const remaining = (player?.minionBlindnessUntil || 0) - runtime.passedTime;
+    if (remaining <= 0) return;
+    const fade = Math.min(1, remaining / 2);
+    ctx.save();
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.42 * fade})`;
+    ctx.fillRect(0, 0, CANVAS.width, CANVAS.height);
+    ctx.restore();
+}
+
 
 export function drawLoadScreen() {
     if (!runtime.isTexturePackLoaded || runtime.world?.generator?.loadingWorld) {
@@ -450,6 +464,26 @@ export function drawDestroyStage() {
         centerX: false,
     });
 }
+
+export function drawMinionDestroyStages() {
+    for (const minion of runtime.world?.entities || []) {
+        const target = minion.miningBlockPosition;
+        const stage = minion.miningStage;
+        if (!minion.isMinion || minion.dimension !== activeDimension ||
+            !target || !Number.isInteger(stage) || stage < 1 || stage > 10) continue;
+
+        const texture = `blocks/destroy_stage_${stage - 1}`;
+        const spriteSize = getSpriteSize(texture).width;
+        drawImage({
+            url: getSpriteUrl(texture),
+            x: target.x * BLOCK_SIZE - Math.floor(camera.x),
+            y: target.y * BLOCK_SIZE - Math.floor(camera.y),
+            scale: BLOCK_SIZE / spriteSize,
+            centerX: false,
+        });
+    }
+}
+
 
 export function drawChunkLine(chunk) {
     const chunkX = chunk.x;

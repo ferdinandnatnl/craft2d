@@ -16,6 +16,7 @@ import { Minecart } from "../entities/minecart.js";
 import { CreeperMinion, CreeperMinionEgg } from "../entities/mobs/creeperMinion.js";
 import { Catfish } from "../entities/mobs/catfish.js";
 import { Centipede } from "../entities/mobs/centipede.js";
+import { Minion, normalizeMinionSaveData } from "../entities/mobs/minion.js";
 
 export const AUTOSAVE_INTERVAL = 60000;
 
@@ -46,6 +47,9 @@ export let currentSave = {
     golems: [],
     catfish: [],
     centipedes: [],
+    minions: [],
+    xpLevel: 0,
+    minionProgress: { evilDeeds: 0, unlocked: false },
     playerBoatUUID: null,
     playerStatusEffects: null,
 };
@@ -115,6 +119,10 @@ export function saveWorld(message = true, toFile = false) {
         currentSave.flying = runtime.world.player.abilities.flying;
         currentSave.playerBoatUUID = runtime.world.player.boat?.UUID ?? null;
         currentSave.playerStatusEffects = runtime.world.player.getStatusEffectSaveData();
+        currentSave.xpLevel = runtime.world.player.xpLevel;
+        currentSave.minionProgress = structuredClone(
+            runtime.world.player.minionProgress || { evilDeeds: 0, unlocked: false },
+        );
         if (runtime.world.player.spawnPoint) {
             currentSave.spawnPoint = JSON.stringify(runtime.world.player.spawnPoint);
         }
@@ -165,6 +173,10 @@ export function saveWorld(message = true, toFile = false) {
         .map(entity => entity.createSaveData());
     currentSave.centipedes = runtime.world.entities
         .filter(entity => entity.isCentipede && entity.health > 0)
+        .map(entity => entity.createSaveData());
+    currentSave.minions = runtime.world.entities
+        .filter(entity => entity.isMinion &&
+            entity.ownerUUID === runtime.world.player?.UUID && entity.health > 0)
         .map(entity => entity.createSaveData());
     currentSave.minecarts = runtime.world.entities
         .filter(entity => entity.name === "Minecart")
@@ -708,6 +720,19 @@ export async function loadWorld(save) {
             runtime.world.player.setGamemode(currentSave.gamemode);
             runtime.world.player.loadStatusEffectSaveData(currentSave.playerStatusEffects);
 
+            if (Number.isFinite(currentSave.xpLevel)) {
+                runtime.world.player.xpLevel = Math.max(0,
+                    Math.min(9999, Math.floor(currentSave.xpLevel)));
+            }
+            const savedMinionProgress = currentSave.minionProgress;
+            if (savedMinionProgress && typeof savedMinionProgress === "object") {
+                runtime.world.player.minionProgress = {
+                    evilDeeds: Number.isFinite(savedMinionProgress.evilDeeds)
+                        ? Math.max(0, Math.min(4, Math.floor(savedMinionProgress.evilDeeds)))
+                        : 0,
+                    unlocked: savedMinionProgress.unlocked === true,
+                };
+            }
             if (currentSave.health !== undefined)
                 runtime.world.player.health = currentSave.health;
 
@@ -741,6 +766,31 @@ export async function loadWorld(save) {
             if (currentSave.activeDimension !== undefined)
                 gotoDimension(currentSave.activeDimension);
 
+
+            for (const saved of Array.isArray(currentSave.minions)
+                ? currentSave.minions : []) {
+                const data = normalizeMinionSaveData(saved, runtime.world.player.UUID);
+                if (!data || runtime.world.getEntityByUUID(data.UUID)) continue;
+                const chunkX = Math.floor(data.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+                    CHUNK_WIDTH * BLOCK_SIZE;
+                const chunk = getDimension(data.dimension).chunks.get(chunkX);
+                if (!chunk) continue;
+                const minion = runtime.world.summonEntity(Minion, data.position, {
+                    ownerUUID: data.ownerUUID,
+                    health: data.health,
+                    dimension: data.dimension,
+                    direction: data.direction,
+                    job: data.job,
+                    inventory: data.inventory,
+                    deliveryDestination: data.deliveryDestination,
+                    carriedEntityUUID: data.carriedEntityUUID,
+                    deliveryActive: data.deliveryActive,
+                    myChunkX: chunkX,
+                }, false, data.UUID);
+                minion.dimension = data.dimension;
+                minion.myChunkX = chunkX;
+                if (!chunk.entities.includes(minion)) chunk.entities.push(minion);
+            }
             const savedBoat = currentSave.playerBoatUUID
                 ? runtime.world.getEntityByUUID(currentSave.playerBoatUUID)
                 : null;

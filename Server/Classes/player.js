@@ -19,5 +19,8 @@ export class Player {
         this.health = 20;
         this.food = 20;
         this.inventory = [[]];
+        this.xpLevel = 0;
+        this.minionProgress = { evilDeeds: 0, unlocked: false };
+        this.minions = [];
     }
 }

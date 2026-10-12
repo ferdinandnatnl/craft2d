@@ -3,9 +3,10 @@ import { Drop } from "../entities/drop.js";
 import { Entities } from "../entities/entities.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { Vector2 } from "../utils/classes.js";
-import { BLOCK_SIZE, CHUNK_HEIGHT } from "../utils/globals.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, multiplayer } from "../utils/globals.js";
 import { getDimensionChunks, gotoDimension } from "../world/dimension.js";
 import { loadChunk } from "../world/saving.js";
+import { Minion, normalizeMinionSaveData } from "../entities/mobs/minion.js";
 
 // This object will store callbacks keyed by requestId
 export const callbacks = {};
@@ -79,15 +80,87 @@ export function applyPlayerDataFromFile(message) {
     playerFromFile.foodLevel =
         typeof message.food === "number" ? message.food : 20;
     playerFromFile.food = typeof message.food === "number" ? message.food : 20;
+    playerFromFile.xpLevel = Number.isFinite(message.xpLevel)
+        ? Math.max(0, Math.min(9999, Math.floor(message.xpLevel))) : 0;
+    if (message.minionProgress && typeof message.minionProgress === "object") {
+        playerFromFile.minionProgress = {
+            evilDeeds: Number.isFinite(message.minionProgress.evilDeeds)
+                ? Math.max(0, Math.min(4, Math.floor(message.minionProgress.evilDeeds))) : 0,
+            unlocked: message.minionProgress.unlocked === true,
+        };
+    }
 
     applyInventoryFromSave(playerFromFile, message.inventory);
 
     gotoDimension(
         typeof message.dimension === "number" ? message.dimension : 0,
     );
+    restoreMinionsForOwner(playerFromFile, message.minions);
 
     return true;
 }
+
+export async function restoreMinionsForOwner(owner, savedMinions) {
+    if (!owner || !Array.isArray(savedMinions)) return;
+    for (const saved of savedMinions.slice(0, 4)) {
+        const data = normalizeMinionSaveData(saved, owner.UUID);
+        if (!data) continue;
+        if (runtime.world.getEntityByUUID(data.UUID)) continue;
+        const chunkX = Math.floor(data.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        let chunk = getDimensionChunks(data.dimension)?.get(chunkX);
+        if (!chunk && runtime.world.getChunkFromServer) {
+            const chunkData = await runtime.world.getChunkFromServer(chunkX, data.dimension);
+            if (chunkData) {
+                await loadChunk(chunkX, chunkData, data.dimension);
+                chunk = getDimensionChunks(data.dimension)?.get(chunkX);
+            }
+        }
+        if (!chunk) continue;
+        const props = {
+            ownerUUID: data.ownerUUID,
+            health: data.health,
+            dimension: data.dimension,
+            direction: data.direction,
+            job: data.job,
+            inventory: data.inventory,
+            deliveryDestination: data.deliveryDestination,
+            carriedEntityUUID: data.carriedEntityUUID,
+            deliveryActive: data.deliveryActive,
+            myChunkX: chunkX,
+        };
+        const localOwner = owner === runtime.world.player;
+        const minion = runtime.world.summonEntity(
+            Minion,
+            data.position,
+            props,
+            false,
+            data.UUID,
+        );
+        minion.dimension = data.dimension;
+        minion.myChunkX = chunkX;
+        if (!chunk.entities.includes(minion)) chunk.entities.push(minion);
+        if (multiplayer && localOwner) {
+            runtime.server.send({
+                type: "summonEntity",
+                sender: owner.UUID,
+                message: {
+                    entity: "Minion",
+                    UUID: minion.UUID,
+                    position: minion.position,
+                    props: {
+                        ownerUUID: owner.UUID,
+                        myChunkX: chunkX,
+                        dimension: data.dimension,
+                        direction: data.direction,
+                    },
+                },
+            });
+            minion.broadcastState();
+        }
+    }
+}
+
 
 export function processMessage(data) {
     const message = data.message;
@@ -115,6 +188,7 @@ export function processMessage(data) {
                 message.player.skin || "player/steve",
                 message.player.model,
             );
+            restoreMinionsForOwner(newPlayer, message.player.minions);
             break;
         case "playerLeft":
             runtime.world.removeEntity(runtime.world.getEntityByUUID(message));
@@ -238,6 +312,37 @@ export function processMessage(data) {
             if (!block) console.log("Block not found:", message.x, message.y);
 
             block.breakBlock(message.shouldDrop, message.isWall, true);
+            break;
+        case "minionState": {
+            const minion = runtime.world.getEntityByUUID(message?.UUID);
+            if (!minion?.isMinion || minion.ownerUUID !== data.sender ||
+                !Number.isFinite(message.position?.x) ||
+                !Number.isFinite(message.position?.y) ||
+                !Number.isInteger(message.dimension) ||
+                (typeof message.carriedEntityUUID === "string" &&
+                    message.carriedEntityUUID.length > 64)) break;
+            minion.position = new Vector2(message.position.x, message.position.y);
+            minion.direction = message.direction < 0 ? -1 : 1;
+            minion.state = message.state;
+            minion.dimension = message.dimension;
+            for (const entity of runtime.world.entities) {
+                if (entity.carriedByMinionUUID === minion.UUID &&
+                    entity.UUID !== message.carriedEntityUUID) {
+                    entity.carriedByMinionUUID = null;
+                }
+            }
+            minion.carriedEntityUUID = typeof message.carriedEntityUUID === "string"
+                ? message.carriedEntityUUID
+                : null;
+            const carriedEntity = minion.carriedEntityUUID
+                ? runtime.world.getEntityByUUID(minion.carriedEntityUUID)
+                : null;
+            if (carriedEntity && carriedEntity !== minion &&
+                carriedEntity.dimension === minion.dimension) {
+                carriedEntity.carriedByMinionUUID = minion.UUID;
+            }
+            break;
+        }
         case "playerDimension":
             const otherPlayer = runtime.world.getEntityByUUID(message.player);
             if (otherPlayer) otherPlayer.dimension = message.dimension;
@@ -361,6 +466,7 @@ export async function iJoined(player, existingPlayers, gamemode = 0) {
             newPlayer.dimension = p.dimension;
 
             newPlayer.setSkin(p.skin || "player/steve", p.model);
+            restoreMinionsForOwner(newPlayer, p.minions);
         });
     }
 }

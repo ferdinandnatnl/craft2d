@@ -8,6 +8,7 @@ export class Villager extends Mob {
     static spawnSize = Object.freeze({ width: 0.6, height: 1.95 });
 
     constructor(world, {
+        UUID,
         health = 20,
         noAi = false,
         position = new Vector2(),
@@ -17,6 +18,7 @@ export class Villager extends Mob {
         body = createVillagerBody(),
     } = {}) {
         super(world, {
+            UUID,
             name: "Villager",
             health,
             noAi,

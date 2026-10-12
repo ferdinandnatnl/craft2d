@@ -14,6 +14,7 @@ import ironGolemModel from "../sprites/entity/golem/iron_golem.geo.json" with { 
 
 // Keep movement side-on while revealing the front of cuboid faces and skins.
 const FACING_YAW = Math.PI / 3;
+const minionModelPosition = ([x, y, z]) => [x / 16, (24 - y) / 16, z / 16];
 
 export class VoxelEntities {
     constructor(scene) {
@@ -33,6 +34,7 @@ export class VoxelEntities {
             return this.createIronGolem(image);
         }
         if (!image?.complete || !image.naturalWidth) return null;
+        if (entity.isMinion) return this.createMinionModel(image);
         if (spriteName === "golem/snow_golem.svg") {
             return this.createSnowGolem(image);
         }
@@ -252,6 +254,94 @@ export class VoxelEntities {
         const record = { group, pose, texture, material, pivots, bends, source: image.src, quadruped, portraitSprite, bodylessSprite, enderman: species === "enderman", tailMaterial, heldKey: null };
         this.scene.add(group);
         return record;
+    }
+
+    createMinionModel(image) {
+        const group = new THREE.Group();
+        const texture = new THREE.Texture(image);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestMipmapLinearFilter;
+        texture.needsUpdate = true;
+        const material = new THREE.MeshStandardMaterial({
+            map: texture,
+            roughness: 0.95,
+            alphaTest: 0.1,
+        });
+        const pivots = {};
+        const addPart = ({
+            name,
+            size,
+            uv,
+            pivot,
+            box,
+            mirror = false,
+            rotationX = 0,
+        }) => {
+            const [width, height, depth] = size;
+            const mesh = new THREE.Mesh(
+                skinBox(width, height, depth, ...uv, image, mirror),
+                material,
+            );
+            mesh.name = name;
+            mesh.castShadow = name === "torso" || name === "backpack";
+            mesh.receiveShadow = true;
+            const joint = new THREE.Group();
+            joint.position.set(...minionModelPosition(pivot));
+            joint.rotation.x = rotationX;
+            mesh.position.set(
+                (box[0] + width / 2) / 16,
+                -(box[1] + height / 2) / 16,
+                (box[2] + depth / 2) / 16,
+            );
+            joint.add(mesh);
+            group.add(joint);
+            pivots[name] = joint;
+        };
+
+        // Direct port of the licensed ModelMinion boxes, pivots, mirroring,
+        // backpack angle, and atlas offsets.
+        addPart({
+            name: "head", size: [6, 5, 4], uv: [0, 0],
+            pivot: [0, 12, 0], box: [-3, -6, -3],
+        });
+        addPart({
+            name: "torso", size: [8, 8, 4], uv: [22, 0],
+            pivot: [0, 14, 2], box: [-4, -3, -2],
+        });
+        addPart({
+            name: "rightLeg", size: [2, 5, 3], uv: [0, 10],
+            pivot: [-1, 12, 0.1], box: [-2, 7, 0],
+        });
+        addPart({
+            name: "leftLeg", size: [2, 5, 3], uv: [0, 10],
+            pivot: [1, 12, 0.1], box: [0, 7, 0], mirror: true,
+        });
+        addPart({
+            name: "rightArm", size: [2, 7, 3], uv: [0, 19],
+            pivot: [-5, 11, 0], box: [-1, 0, -1],
+        });
+        addPart({
+            name: "leftArm", size: [2, 7, 3], uv: [0, 19],
+            pivot: [5, 11, 0], box: [-1, 0, -1], mirror: true,
+        });
+        addPart({
+            name: "backpack", size: [6, 7, 5], uv: [11, 13],
+            pivot: [0, 13, 4], box: [-3, -2, -2],
+            // Minecraft model Y points down; the voxel rig uses Y up.
+            rotationX: -0.7853982,
+        });
+
+        this.scene.add(group);
+        return {
+            group,
+            texture,
+            material,
+            pivots,
+            source: image.src,
+            minionModel: true,
+            heldKey: null,
+        };
     }
 
     createMutantModel(entity, image) {
@@ -755,7 +845,7 @@ export class VoxelEntities {
         };
     }
 
-    updateHeld(record, entity) {
+    updateHeld(record, entity, armName = "leftArm") {
         const item = entity.holdItem;
         const def = item?.blockId != null ? getBlock(item.blockId) : item?.itemId != null ? getItem(item.itemId) : null;
         const sprite = item?.blockId != null
@@ -771,15 +861,16 @@ export class VoxelEntities {
             record.held = null;
         }
         record.heldKey = key;
-        if (!key || !record.pivots.leftArm) return;
+        const arm = record.pivots[armName];
+        if (!key || !arm) return;
         const map = new THREE.TextureLoader().load(getSpriteUrl(key));
         map.magFilter = THREE.NearestFilter; map.colorSpace = THREE.SRGBColorSpace;
         const material = new THREE.MeshStandardMaterial({ map, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.9 });
         const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.65, 0.65), material);
         mesh.position.set(0, -0.5, 0.28); mesh.rotation.y = -Math.PI / 2;
         mesh.castShadow = true;
-        (record.bends.leftArm || record.pivots.leftArm).add(mesh); record.held = mesh;
-        if (record.bends.leftArm) mesh.position.y = -0.12;
+        (record.bends?.[armName] || arm).add(mesh); record.held = mesh;
+        if (record.bends?.[armName]) mesh.position.y = -0.12;
     }
 
     update(entities, dimension, camera, seconds, lighting) {
@@ -967,6 +1058,76 @@ export class VoxelEntities {
                 record.group.rotation.y = 0;
                 record.group.scale.x = entity.direction < 0 ? -1 : 1;
                 record.material.color.setRGB(light, light, light);
+                continue;
+            }
+            if (record.minionModel) {
+                record.group.rotation.y = entity.direction < 0
+                    ? -FACING_YAW
+                    : FACING_YAW;
+                const walkAmount = entity.walkAnimationAmount || 0;
+                const limbPhase = (entity.walkAnimationPhase || 0) * 0.6662;
+                const working = Boolean(entity.miningKey) && entity.miningTimer > 0;
+                const swing = working
+                    ? Math.max(0, Math.min(1, entity.workSwingProgress || 0))
+                    : 0;
+                const bodyYaw = swing > 0
+                    ? Math.sin(Math.sqrt(swing) * Math.PI * 2) * 0.2
+                    : 0;
+                const ageInTicks = seconds * 20;
+                const headPitch = getHeadPitch(entity.lookDirection);
+                const idleArmSway = Math.cos(ageInTicks * 0.09) * 0.05 + 0.05;
+                const idleArmPitch = Math.sin(ageInTicks * 0.067) * 0.05;
+                record.pivots.torso.rotation.y = bodyYaw;
+                record.pivots.rightArm.position.set(
+                    ...minionModelPosition([
+                        -Math.cos(bodyYaw) * 5,
+                        11,
+                        Math.sin(bodyYaw) * 5,
+                    ]),
+                );
+                record.pivots.leftArm.position.set(
+                    ...minionModelPosition([
+                        Math.cos(bodyYaw) * 5,
+                        11,
+                        -Math.sin(bodyYaw) * 5,
+                    ]),
+                );
+                record.material.color.setRGB(light, light, light);
+                record.material.emissive.set(entity.body.flashingColor || 0);
+                record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+                const carrying = Boolean(entity.carriedEntityUUID);
+                record.pivots.rightLeg.rotation.x =
+                    -Math.cos(limbPhase) * 1.4 * walkAmount;
+                record.pivots.leftLeg.rotation.x =
+                    -Math.cos(limbPhase + Math.PI) * 1.4 * walkAmount;
+                let rightArmPitch =
+                    Math.cos(limbPhase + Math.PI) * walkAmount + idleArmPitch;
+                const leftArmPitch =
+                    Math.cos(limbPhase) * walkAmount - idleArmPitch + bodyYaw;
+                record.pivots.rightArm.rotation.y = bodyYaw * 3;
+                record.pivots.leftArm.rotation.y = bodyYaw;
+                record.pivots.rightArm.rotation.z =
+                    -idleArmSway + Math.sin(swing * Math.PI) * 0.4;
+                record.pivots.leftArm.rotation.z = idleArmSway;
+                if (swing > 0) {
+                    const easedSwing = 1 - (1 - swing) ** 4;
+                    const strike = Math.sin(easedSwing * Math.PI) * 1.2 +
+                        Math.sin(swing * Math.PI) * -(headPitch - 0.7) * 0.75;
+                    rightArmPitch -= strike;
+                }
+                record.pivots.rightArm.rotation.x = -rightArmPitch;
+                record.pivots.leftArm.rotation.x = -leftArmPitch;
+                if (carrying) {
+                    record.pivots.leftArm.rotation.x = Math.PI;
+                    record.pivots.rightArm.rotation.x = Math.PI;
+                }
+                record.pivots.head.rotation.x = headPitch;
+                this.updateHeld(record, entity, "rightArm");
+                if (record.held) {
+                    record.held.rotation.y = entity.direction < 0
+                        ? Math.PI / 2
+                        : -Math.PI / 2;
+                }
                 continue;
             }
             record.group.rotation.y = entity.body.sprite.startsWith("dragon/") || record.portraitSprite
