@@ -8,6 +8,8 @@ import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
 
 export class Pig extends Mob {
+    static spawnSize = Object.freeze({ width: 0.9, height: 0.8 });
+
     constructor(
         world,
         {

@@ -7,6 +7,8 @@ import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
 
 export class Cow extends Mob {
+    static spawnSize = Object.freeze({ width: 0.9, height: 1 });
+
     constructor(
         world,
         {

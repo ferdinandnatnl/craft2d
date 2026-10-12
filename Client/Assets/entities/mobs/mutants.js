@@ -4,6 +4,7 @@ import { BLOCK_SIZE, multiplayer } from "../../utils/globals.js";
 import { runtime } from "../../utils/runtime.js";
 import { getBlock, hasBlockCollision } from "../../world/block.js";
 import { Creeper } from "./creeper.js";
+import { CreeperMinion, CreeperMinionEgg } from "./creeperMinion.js";
 import { Enderman } from "./enderman.js";
 import { SnowGolem } from "./golem.js";
 import { Pig } from "./pig.js";
@@ -11,6 +12,22 @@ import { Skeleton } from "./variants.js";
 import { Zombie } from "./zombie.js";
 import { MutantBoneArrow, MutantIceShard } from "../projectiles/mutantProjectiles.js";
 import { createMutantModelBody } from "./mutantModelBodies.js";
+import { playPositionalSound, playRandomSoundFromArray } from "../../game/sounds.js";
+
+const mutantSounds = (mob, names) => names.map(name => `mobs/${mob}/${name}`);
+const ZOMBIE_AMBIENT = mutantSounds("mutant_zombie", ["ambient1", "ambient2", "ambient3"]);
+const ZOMBIE_HURT = mutantSounds("mutant_zombie", ["hurt1", "hurt2"]);
+const CREEPER_AMBIENT = mutantSounds("mutant_creeper", ["ambient1", "ambient2", "ambient3", "ambient4"]);
+const SKELETON_AMBIENT = mutantSounds("mutant_skeleton", ["ambient1", "ambient2", "ambient3"]);
+const SKELETON_HURT = mutantSounds("mutant_skeleton", ["hurt1", "hurt2", "hurt3", "hurt4"]);
+const SKELETON_DEATH = mutantSounds("mutant_skeleton", ["death1", "death2"]);
+const SKELETON_STEP = mutantSounds("mutant_skeleton", ["step1", "step2", "step3", "step4"]);
+const ENDERMAN_AMBIENT = mutantSounds("mutant_enderman", ["ambient1", "ambient2"]);
+const ENDERMAN_HURT = mutantSounds("mutant_enderman", ["hurt1", "hurt2", "hurt3"]);
+
+function playMutantSound(entity, sounds) {
+    playRandomSoundFromArray({ array: sounds, positional: true, origin: entity.position });
+}
 
 function playerDistance(mob, player) {
     return Vector2.Distance(
@@ -71,6 +88,8 @@ export class MutantZombie extends Zombie {
             MutantZombie.spawnSize.height * BLOCK_SIZE,
         );
         this.burnInSunlight = false;
+        this.ambientSounds = ZOMBIE_AMBIENT;
+        this.footstepSounds = null;
         this.speed = 1.2;
         this.maxVelocity.x = this.speed * BLOCK_SIZE * 1.5;
         this.roarCooldown = randomRange(6, 9);
@@ -85,7 +104,8 @@ export class MutantZombie extends Zombie {
         this.roarCooldown -= runtime.deltaTime;
 
         const player = this.world.player;
-        if (!player || player.dimension !== this.dimension || this.roarCooldown > 0) return;
+        if (!player || !player.abilities.hasHealth ||
+            player.dimension !== this.dimension || this.roarCooldown > 0) return;
         const distance = playerDistance(this, player);
         if (distance < 2.5 * BLOCK_SIZE || distance > 8 * BLOCK_SIZE) return;
 
@@ -98,35 +118,50 @@ export class MutantZombie extends Zombie {
         this.roarCooldown = randomRange(8, 11);
         this.roarMoveUntil = runtime.passedTime + 0.8;
         this.targetVelocity.x = 0;
+        playMutantSound(this, mutantSounds("mutant_zombie", ["roar1", "roar2"]));
         triggerAttackPose(this, 0.8);
     }
 
     hitPlayerLogic() {
         if (this.attackCooldown) return;
         const player = this.entityCollision(EntityTypes.Player);
-        if (!player) return;
-        if (player.abilities.hasHealth && Math.random() < 0.2) {
+        if (!player?.abilities.hasHealth) return;
+        if (Math.random() < 0.2) {
             const direction = Math.sign(player.position.x - this.position.x) || this.direction;
             player.hit(8, this.position.x, 0, `Thrown by ${this.name}`);
             player.velocity.x = direction * 7 * BLOCK_SIZE;
             player.velocity.y = Math.min(player.velocity.y, -15 * BLOCK_SIZE);
             this.attackCooldown = 2.2;
+            playPositionalSound(this.position, "mobs/mutant_zombie/attack.ogg");
             triggerAttackPose(this, 0.9);
             return;
         }
         player.hit(8, this.position.x, 7, `Killed by ${this.name}`);
         this.attackCooldown = 1.6;
+        playPositionalSound(this.position, "mobs/mutant_zombie/attack.ogg");
         triggerAttackPose(this, 0.45);
+    }
+
+    hit(damage, hitfromX = 0, kb = 0, _cause = null, attacker = null) {
+        if (!this.health || !this.damage(damage, attacker)) return;
+        this.knockBack(hitfromX, kb);
+        playMutantSound(this, ZOMBIE_HURT);
+    }
+
+    dieEvent() {
+        this.dropLoot();
+        playMutantSound(this, ZOMBIE_HURT);
+        this.world.removeEntity(this, multiplayer);
     }
 }
 
 export class MutantCreeper extends Creeper {
-    static spawnSize = Object.freeze({ width: 1.35, height: 3.9 });
+    static spawnSize = Object.freeze({ width: 1.98, height: 2.8 });
 
     constructor(world, options = {}) {
         super(world, {
             ...options,
-            health: options.health ?? 60,
+            health: options.health ?? 150,
             body: options.body ?? createMutantModelBody("MutantCreeper"),
         });
         this.name = "Mutant Creeper";
@@ -137,34 +172,76 @@ export class MutantCreeper extends Creeper {
             MutantCreeper.spawnSize.height * BLOCK_SIZE,
         );
         this.maxVelocity.x = Math.max(this.maxVelocity.x, 5 * BLOCK_SIZE);
-        this.jumpAttackCooldown = randomRange(2.5, 4);
+        this.speed = 1.3;
+        this.stepSize = 1;
+        this.jumpAttackCooldown = randomRange(3, 5);
+        this.minionCooldown = randomRange(6, 10);
+        this.chargeCooldown = randomRange(8, 12);
+        this.chargeTime = 0;
+        this.chargeHits = 0;
+        this.lightningPending = false;
+        this.dyingTime = 0;
+        this.powered = options.powered ?? false;
+        this.ambientSounds = CREEPER_AMBIENT;
         this.jumpAttacking = false;
     }
 
     update() {
+        if (this.dyingTime > 0) {
+            this.updateDeath();
+            return;
+        }
+        if (this.chargeTime > 0) {
+            this.updateEntity();
+            this.updateCharge();
+            return;
+        }
         super.update();
+        if (this.noAi || this.health <= 0) return;
         if (this.jumpAttacking) {
             if (this.grounded) {
                 this.jumpAttacking = false;
                 this.explode();
-                return;
-            }
-            else this.targetVelocity.x = this.velocity.x;
+            } else this.targetVelocity.x = this.velocity.x;
+            this.body.flashingColor = Math.floor(runtime.passedTime * 7) % 2 ? "white" : null;
+            return;
         }
         this.jumpAttackCooldown -= runtime.deltaTime;
+        this.minionCooldown -= runtime.deltaTime;
+        this.chargeCooldown -= runtime.deltaTime;
 
         const player = this.world.player;
-        if (!player || player.dimension !== this.dimension) return;
-        if (player.abilities.hasHealth && !this.attackCooldown &&
+        if (!player || !player.abilities.hasHealth ||
+            player.dimension !== this.dimension) {
+            this.addHealth(this.maxHealth * 0.2 * runtime.deltaTime);
+            return;
+        }
+        const distance = playerDistance(this, player);
+        if (distance > 35 * BLOCK_SIZE && this.health < this.maxHealth) {
+            this.addHealth(this.maxHealth * 0.2 * runtime.deltaTime);
+        }
+        if (!this.attackCooldown &&
             this.entityCollision(EntityTypes.Player)) {
-            player.hit(9, this.position.x, 5, `Hit by ${this.name}`);
+            player.hit(5, this.position.x, 5, `Hit by ${this.name}`);
             player.velocity.y = Math.min(player.velocity.y, -3 * BLOCK_SIZE);
             this.attackCooldown = 1.3;
             triggerAttackPose(this, 0.4);
         }
-        if (!this.grounded ||
-            this.jumpAttackCooldown > 0) return;
-        const distance = playerDistance(this, player);
+        if (this.grounded && distance <= 20 * BLOCK_SIZE &&
+            this.health <= this.maxHealth * 5 / 6 && this.chargeCooldown <= 0) {
+            this.chargeTime = 5;
+            this.chargeHits = randomRange(4, 7);
+            this.lightningPending = !this.powered && this.getSkyExposure() > 0.5 &&
+                Math.random() < 1 / 6;
+            this.targetVelocity.x = 0;
+            playPositionalSound(this.position, "mobs/mutant_creeper/charge.ogg");
+            return;
+        }
+        if (this.minionCooldown <= 0 && distance <= 20 * BLOCK_SIZE) {
+            this.summonMinions();
+            this.minionCooldown = randomRange(13, 19);
+        }
+        if (!this.grounded || this.jumpAttackCooldown > 0) return;
         if (distance < 3.5 * BLOCK_SIZE || distance > 9 * BLOCK_SIZE) return;
 
         this.direction = Math.sign(
@@ -177,17 +254,132 @@ export class MutantCreeper extends Creeper {
         triggerAttackPose(this, 0.55);
     }
 
+    updateCharge() {
+        this.targetVelocity.x = 0;
+        this.velocity.x = 0;
+        const player = this.world.player;
+        if (this.lightningPending && player?.dimension === this.dimension &&
+            playerDistance(this, player) < 5 * BLOCK_SIZE &&
+            this.getSkyExposure() > 0.5) {
+            this.powered = true;
+            this.lightningPending = false;
+            this.chargeTime = 0;
+            this.chargeCooldown = randomRange(12, 18);
+            this.body.flashingColor = "#8ed8ff";
+            if (playerDistance(this, player) < 2.5 * BLOCK_SIZE) {
+                player.hit(6, this.position.x, 2, "Struck by Mutant Creeper lightning");
+            }
+            playPositionalSound(this.position, "mobs/mutant_creeper/charge.ogg");
+            return;
+        }
+        this.chargeTime -= runtime.deltaTime;
+        this.body.flashingColor = Math.floor(runtime.passedTime * 5) % 2 ? "white" : null;
+        if (this.chargeTime > 0 && this.chargeHits > 0) return;
+        if (this.chargeHits > 0) this.addHealth(this.maxHealth / 4);
+        this.chargeTime = 0;
+        this.lightningPending = false;
+        this.chargeCooldown = randomRange(12, 18);
+        this.body.flashingColor = null;
+    }
+
+    summonMinions() {
+        const active = this.world.entities.filter(entity =>
+            entity.entityTypeName === "CreeperMinion" &&
+            entity.ownerUUID === this.UUID && entity.health > 0).length;
+        const count = Math.min(4 - active,
+            Math.ceil(this.health / this.maxHealth * 4));
+        const chunk = this.world.getChunkForX(this.position.x, this.dimension);
+        for (let i = 0; i < count; i++) {
+            const minion = this.world.summonEntity(CreeperMinion,
+                new Vector2(this.position.x + this.hitbox.x / 2 +
+                    (i % 2 ? 1 : -1) * BLOCK_SIZE * 0.4,
+                this.position.y + this.hitbox.y - BLOCK_SIZE),
+                { ownerUUID: this.UUID, powered: this.powered,
+                    myChunkX: chunk?.x ?? null }, multiplayer);
+            minion.dimension = this.dimension;
+            minion.velocity.x = (i % 2 ? 1 : -1) * 2 * BLOCK_SIZE;
+            minion.velocity.y = -4 * BLOCK_SIZE;
+            if (chunk && !chunk.entities.includes(minion)) chunk.entities.push(minion);
+        }
+    }
+
+    hit(damage, hitfromX = 0, kb = 0, _cause = null, attacker = null) {
+        if (!this.health || !this.damage(damage, attacker)) return;
+        this.knockBack(hitfromX, kb);
+        playPositionalSound(this.position,
+            `mobs/mutant_creeper/hurt${Math.random() < 0.5 ? 1 : 2}.ogg`);
+        if (this.chargeTime > 0 && --this.chargeHits <= 0) this.updateCharge();
+    }
+
+    hitByExplosion(damage, sourceEntity) {
+        if (this.health <= 0 || sourceEntity?.entityTypeName === "MutantCreeper") return false;
+        this.addHealth(damage / 2);
+        return false;
+    }
+
+    dieEvent() {
+        if (this.dyingTime > 0) return;
+        this.dyingTime = 5;
+        this.despawn = false;
+        this.chargeTime = 0;
+        this.lightningPending = false;
+        this.targetVelocity.x = 0;
+        playPositionalSound(this.position, "mobs/mutant_creeper/death.ogg");
+    }
+
+    updateDeath() {
+        this.dyingTime -= runtime.deltaTime;
+        this.body.flashingColor = Math.floor(runtime.passedTime * 9) % 2 ? "white" : null;
+        const centerX = this.position.x + this.hitbox.x / 2;
+        const centerY = this.position.y + this.hitbox.y / 2;
+        for (const entity of this.world.entities) {
+            if (entity === this || entity.dimension !== this.dimension ||
+                (entity.type !== EntityTypes.Player && entity.type !== EntityTypes.Mob)) continue;
+            const dx = centerX - entity.position.x - entity.hitbox.x / 2;
+            const dy = centerY - entity.position.y - entity.hitbox.y / 2;
+            const distance = Math.hypot(dx, dy);
+            if (distance > 8 * BLOCK_SIZE || distance < 1) continue;
+            const pull = (1 - distance / (8 * BLOCK_SIZE)) * 2 * BLOCK_SIZE * runtime.deltaTime;
+            entity.velocity.x += dx / distance * pull;
+            entity.velocity.y += dy / distance * pull;
+        }
+        if (this.dyingTime > 0) return;
+        this.world.createExplosion(new Vector2(centerX, centerY), {
+            radius: (this.powered ? 12 : 8) * BLOCK_SIZE,
+            damage: this.powered ? 48 : 32,
+            power: this.powered ? 48 : 32,
+            excludeEntity: this,
+            sourceEntity: this,
+            destroyTerrain: runtime.GAMERULES.doMobGriefing,
+        });
+        if (runtime.GAMERULES.doMobLoot && this.world.player?.dimension === this.dimension) {
+            const chunk = this.world.getChunkForX(centerX, this.dimension);
+            const egg = this.world.summonEntity(CreeperMinionEgg,
+                new Vector2(centerX - 0.275 * BLOCK_SIZE,
+                    this.position.y + this.hitbox.y - 0.65 * BLOCK_SIZE),
+                { ownerUUID: this.world.player.UUID, powered: this.powered,
+                    myChunkX: chunk?.x ?? null }, multiplayer);
+            egg.dimension = this.dimension;
+            if (chunk && !chunk.entities.includes(egg)) chunk.entities.push(egg);
+        }
+        this.world.removeEntity(this, multiplayer);
+    }
+
     // The mutant uses melee and a landing blast, not the vanilla creeper fuse.
     checkPrime() {
         return;
     }
 
     explode() {
-        this.world.createExplosion(this.position, {
+        this.world.createExplosion(new Vector2(
+            this.position.x + this.hitbox.x / 2,
+            this.position.y + this.hitbox.y,
+        ), {
             radius: 4 * BLOCK_SIZE,
-            damage: 18,
-            power: 16,
+            damage: this.powered ? 27 : 18,
+            power: this.powered ? 24 : 16,
             excludeEntity: this,
+            sourceEntity: this,
             destroyTerrain: runtime.GAMERULES.doMobGriefing,
         });
     }
@@ -211,6 +403,8 @@ export class MutantSkeleton extends Skeleton {
             MutantSkeleton.spawnSize.height * BLOCK_SIZE,
         );
         this.burnInSunlight = false;
+        this.ambientSounds = SKELETON_AMBIENT;
+        this.footstepSounds = SKELETON_STEP;
         this.volleyCooldown = randomRange(1.5, 3);
         this.speed = 1.15;
         this.maxVelocity.x = this.speed * BLOCK_SIZE * 1.5;
@@ -229,6 +423,7 @@ export class MutantSkeleton extends Skeleton {
         const player = this.world.player;
         if (
             !player ||
+            !player.abilities.hasHealth ||
             player.dimension !== this.dimension ||
             playerDistance(this, player) > 12 * BLOCK_SIZE ||
             playerDistance(this, player) < 2.5 * BLOCK_SIZE ||
@@ -238,6 +433,7 @@ export class MutantSkeleton extends Skeleton {
         }
 
         this.fireVolley(player);
+        playPositionalSound(this.position, "mobs/mutant_skeleton/bow_shoot1.ogg");
         this.volleyCooldown = 2.8;
         this.shootMoveUntil = runtime.passedTime + 0.8;
         this.targetVelocity.x = 0;
@@ -281,7 +477,20 @@ export class MutantSkeleton extends Skeleton {
         player.velocity.x = direction * 7 * BLOCK_SIZE;
         player.velocity.y = Math.min(player.velocity.y, -4 * BLOCK_SIZE);
         this.attackCooldown = 1.3;
+        playPositionalSound(this.position, "mobs/mutant_skeleton/punch1.ogg");
         triggerAttackPose(this, 0.5);
+    }
+
+    hit(damage, hitfromX = 0, kb = 0, _cause = null, attacker = null) {
+        if (!this.health || !this.damage(damage, attacker)) return;
+        this.knockBack(hitfromX, kb);
+        playMutantSound(this, SKELETON_HURT);
+    }
+
+    dieEvent() {
+        this.dropLoot();
+        playMutantSound(this, SKELETON_DEATH);
+        this.world.removeEntity(this, multiplayer);
     }
 }
 
@@ -304,6 +513,7 @@ export class MutantEnderman extends Enderman {
         this.speed = 1.35;
         this.maxVelocity.x = this.speed * BLOCK_SIZE * 1.5;
         this.teleportCooldown = randomRange(7, 11);
+        this.ambientSounds = ENDERMAN_AMBIENT;
     }
 
     update() {
@@ -315,7 +525,8 @@ export class MutantEnderman extends Enderman {
         this.aiUpdate();
 
         const player = this.world.player;
-        if (!player || player.dimension !== this.dimension) return;
+        if (!player || !player.abilities.hasHealth ||
+            player.dimension !== this.dimension) return;
 
         if (!this.attackCooldown && this.entityCollision(EntityTypes.Player)) {
             player.hit(12, this.position.x, 8, `Hit by ${this.name}`);
@@ -336,6 +547,7 @@ export class MutantEnderman extends Enderman {
         if (!destination) return;
 
         this.position = destination;
+        playPositionalSound(this.position, "mobs/mutant_enderman/scream.ogg");
         this.velocity = new Vector2();
         this.targetVelocity = new Vector2();
         this.direction = Math.sign(player.position.x - destination.x) || this.direction;
@@ -410,6 +622,18 @@ export class MutantEnderman extends Enderman {
             entity.velocity.x += direction * 4 * BLOCK_SIZE;
             entity.velocity.y = Math.min(entity.velocity.y, -4 * BLOCK_SIZE);
         }
+    }
+
+    hit(damage, hitFromX = 0, knockback = 0, _cause = null, attacker = null) {
+        if (!this.health || !this.damage(damage, attacker)) return;
+        this.knockBack(hitFromX, knockback);
+        playMutantSound(this, ENDERMAN_HURT);
+    }
+
+    dieEvent() {
+        this.dropLoot();
+        playPositionalSound(this.position, "mobs/mutant_enderman/death.ogg");
+        this.world.removeEntity(this, multiplayer);
     }
 }
 

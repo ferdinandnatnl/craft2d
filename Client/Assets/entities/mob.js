@@ -27,6 +27,7 @@ export class Mob extends Entity {
             ambientSoundRange = { min: 5, max: 20 },
             lootTable = null,
             myChunkX = 0,
+            UUID,
             burnInSunlight = false,
             isHostile = false,
             canSwim = true,
@@ -53,6 +54,7 @@ export class Mob extends Entity {
             direction: randomRange(0, 2) ? 1 : -1,
             maxVelocity: new Vector2(speed * BLOCK_SIZE * 1.5, 1000),
             myChunkX: myChunkX,
+            UUID,
         });
 
         this.health = health;
@@ -78,6 +80,9 @@ export class Mob extends Entity {
         this.attackCooldown = 1;
 
         this.attackCooldownMax = 1;
+
+        this.retaliationTarget = null;
+        this.retaliationUntil = 0;
 
         this.burnInSunlight = burnInSunlight;
         this.isHostile = isHostile;
@@ -106,6 +111,8 @@ export class Mob extends Entity {
         if (this.ai.agressionLevel === Agression.Agressive)
             this.agressionBehaviour();
 
+        this.attackRetaliationTarget();
+
         this.ambientLogic();
 
         this.attackCooldownLogic();
@@ -131,6 +138,11 @@ export class Mob extends Entity {
     }
 
     agressionBehaviour() {
+        if (this.getRetaliationTarget()) {
+            this.state = aiState.Agression;
+            return;
+        }
+
         if (!this.world.player) return;
         if (!this.world.player.abilities.hasHealth) {
             this.state = aiState.Wander;
@@ -150,11 +162,13 @@ export class Mob extends Entity {
     }
 
     agressionWalk() {
-        if (!this.world.player) return;
+        const target = this.getRetaliationTarget() ?? this.world.player;
+        if (!target || (target.type === EntityTypes.Player &&
+            !target.abilities.hasHealth)) return;
 
         this.direction = caculateDirection(
             this.position,
-            this.world.player.position,
+            target.position,
         );
 
         if (this.velocity.x === 0) {
@@ -163,7 +177,7 @@ export class Mob extends Entity {
 
         if (
             Math.abs(
-                Vector2.XDistance(this.position, this.world.player.position),
+                Vector2.XDistance(this.position, target.position),
             ) <
             BLOCK_SIZE / 4
         ) {
@@ -173,6 +187,56 @@ export class Mob extends Entity {
 
         this.targetVelocity.x =
             (this.direction < 0 ? -this.speed : this.speed) * BLOCK_SIZE;
+    }
+
+    getRetaliationTarget() {
+        const target = this.retaliationTarget;
+        if (
+            !target ||
+            runtime.passedTime > this.retaliationUntil ||
+            target.health <= 0 ||
+            target.type !== EntityTypes.Mob ||
+            target.dimension !== this.dimension ||
+            !this.world.entities.includes(target)
+        ) {
+            this.retaliationTarget = null;
+            return null;
+        }
+
+        const distance = Vector2.Distance(
+            new Vector2(
+                this.position.x + this.hitbox.x / 2,
+                this.position.y + this.hitbox.y / 2,
+            ),
+            new Vector2(
+                target.position.x + target.hitbox.x / 2,
+                target.position.y + target.hitbox.y / 2,
+            ),
+        );
+        const aggressionRange = this.ai?.agressionArea ?? 0;
+        if (distance > aggressionRange) {
+            this.retaliationTarget = null;
+            return null;
+        }
+
+        return target;
+    }
+
+    attackRetaliationTarget() {
+        if (!this.isHostile || this.noAi || this.attackCooldown > 0) return;
+        const target = this.getRetaliationTarget();
+        if (!target) return;
+
+        const overlaps =
+            this.position.x < target.position.x + target.hitbox.x &&
+            this.position.x + this.hitbox.x > target.position.x &&
+            this.position.y < target.position.y + target.hitbox.y &&
+            this.position.y + this.hitbox.y > target.position.y;
+        if (!overlaps) return;
+
+        target.hit(4, this.position.x + this.hitbox.x / 2, 3, undefined, this);
+        this.attackPoseUntil = runtime.passedTime + 0.4;
+        this.attackCooldown = this.attackCooldownMax;
     }
 
     ambientLogic() {

@@ -686,7 +686,10 @@ export class Player extends Entity {
         if (!EntityType || !groundBlock || !spawnSize) return;
 
         const groundDefinition = getBlock(groundBlock.blockType);
-        if (!hasBlockCollision(groundBlock) || groundDefinition.fluid) return;
+        const spawnInWater = EntityType.spawnInWater === true;
+        if (spawnInWater) {
+            if (groundBlock.blockType !== Blocks.Water) return;
+        } else if (!hasBlockCollision(groundBlock) || groundDefinition.fluid) return;
 
         if (countMobsNearPlayer(this.world, activeDimension) >= MAX_MOBS_NEAR_PLAYER) {
             const now = runtime.passedTime || 0;
@@ -703,7 +706,9 @@ export class Player extends Entity {
         const height = spawnSize.height * BLOCK_SIZE;
         const position = new Vector2(
             groundBlock.transform.position.x + (BLOCK_SIZE - width) / 2,
-            groundBlock.transform.position.y - height,
+            spawnInWater
+                ? groundBlock.transform.position.y + (BLOCK_SIZE - height) / 2
+                : groundBlock.transform.position.y - height,
         );
         if (position.y < 0) return;
 
@@ -721,7 +726,9 @@ export class Player extends Entity {
                 );
                 if (!block) return;
                 const definition = getBlock(block.blockType);
-                if (hasBlockCollision(block) && !definition.fluid) return;
+                if (spawnInWater) {
+                    if (block.blockType !== Blocks.Water) return;
+                } else if (hasBlockCollision(block) && !definition.fluid) return;
             }
         }
 
@@ -826,21 +833,41 @@ export class Player extends Entity {
         return null;
     }
 
-    placeBoat() {
-        const water = this.hoverBlock;
-        if (!water || water.blockType !== Blocks.Water || this.boat) return;
+    isPositionInInteractionRange(position) {
+        if (!position) return false;
 
-        const mouse = input.getMousePositionOnBlockGrid();
         const playerCenter = new Vector2(
             this.position.x + this.hitbox.x / 2,
             this.position.y + this.hitbox.y / 2,
         );
-        if (
-            !this.abilities.instaBuild &&
-            Vector2.Distance(playerCenter, mouse) / BLOCK_SIZE > INTERACT_DISTANCE
-        ) {
-            return;
-        }
+        return (
+            Vector2.Distance(playerCenter, position) <=
+            BLOCK_SIZE * INTERACT_DISTANCE
+        );
+    }
+
+    isBlockInInteractionRange(block) {
+        if (!block?.transform?.position) return false;
+
+        return this.isPositionInInteractionRange(
+            new Vector2(
+                block.transform.position.x + BLOCK_SIZE / 2,
+                block.transform.position.y + BLOCK_SIZE / 2,
+            ),
+        );
+    }
+
+    isEntityInInteractionRange(entity) {
+        return (
+            Boolean(entity) &&
+            this.isPositionInInteractionRange(input.getMouseWorldPosition())
+        );
+    }
+
+    placeBoat() {
+        const water = this.hoverBlock;
+        if (!water || water.blockType !== Blocks.Water || this.boat) return;
+        if (!this.isBlockInInteractionRange(water)) return;
 
         const surfaceY = water.transform.position.y +
             (Number.isFinite(water.cutoff) ? water.cutoff : 0) * BLOCK_SIZE;
@@ -1305,6 +1332,7 @@ export class Player extends Entity {
         const entity = this.checkForEntityOnMouse();
 
         if (!entity) return;
+        if (!this.isEntityInInteractionRange(entity)) return;
 
         if (typeof entity.interact !== "function") return;
 
@@ -1605,17 +1633,12 @@ export class Player extends Entity {
     }
 
     tryHit() {
-        const mouseWorld = input.getMousePositionOnBlockGrid();
-        const cursorDistance =
-            Vector2.Distance(this.position, mouseWorld) / BLOCK_SIZE;
-
-        runtime.cursorInRange = !this.abilities.instaBuild
-            ? cursorDistance <= INTERACT_DISTANCE
-            : true;
-
+        const entity = this.checkForEntityOnMouse();
+        runtime.cursorInRange = entity
+            ? this.isEntityInInteractionRange(entity)
+            : this.isBlockInInteractionRange(this.hoverBlock);
         if (!runtime.cursorInRange) return;
 
-        const entity = this.checkForEntityOnMouse();
         this.hitEntity(entity);
     }
 
@@ -1624,6 +1647,7 @@ export class Player extends Entity {
 
         // console.log(entity);
         if (entity === this) return;
+        if (!this.isEntityInInteractionRange(entity)) return;
 
         entity.hit(this.calculateDamage(), this.position.x, 4);
 
@@ -1690,6 +1714,7 @@ export class Player extends Entity {
 
     placingLogic() {
         if (!this.abilities.mayBuild) return;
+        if (!this.isBlockInInteractionRange(this.hoverBlock)) return;
 
         // Check if holding either a block or an item with placeBlock property
         if (
@@ -1863,7 +1888,7 @@ export class Player extends Entity {
             entityType,
             spawnPosition,
             { myChunkX: spawnChunkX, dimension: activeDimension },
-            true,
+            multiplayer,
         );
         spawnChunk.entities.push(golem);
         return true;
@@ -2059,6 +2084,11 @@ export class Player extends Entity {
     }
 
     breakingLogic(hover, wall = false) {
+        if (!this.isBlockInInteractionRange(hover)) {
+            this.resetBreaking();
+            return;
+        }
+
         let block = getBlock(hover.blockType);
 
         if (block.air || block.fluid) return;

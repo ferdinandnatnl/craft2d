@@ -8,6 +8,8 @@ import { LootItem, LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { Sounds, playPositionalSound, playRandomSoundFromArray } from "../../game/sounds.js";
 
 export class Warden extends Mob {
+    static spawnSize = Object.freeze({ width: 1.1, height: 3 });
+
     constructor(world, {
         health = 250,
         noAi = false,
@@ -56,8 +58,8 @@ export class Warden extends Mob {
         this.attackCooldown = this.attackCooldownMax;
     }
 
-    hit(damage, hitfromX = 0, kb = 0) {
-        if (!this.health || !this.damage(damage)) return;
+    hit(damage, hitfromX = 0, kb = 0, _cause = null, attacker = null) {
+        if (!this.health || !this.damage(damage, attacker)) return;
         this.knockBack(hitfromX, kb * 0.35);
         playRandomSoundFromArray({
             array: Sounds.Zombie_Hurt,

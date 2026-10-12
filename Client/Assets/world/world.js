@@ -110,6 +110,8 @@ export class World {
                 if (typeof entity.tickUpdate === "function" && tick)
                     entity.tickUpdate();
                 else entity.update();
+            } else if (!tick && entity.dyingTime > 0) {
+                entity.update();
             }
         });
     }
@@ -567,6 +569,8 @@ export class World {
             damage = 15,
             power = 20,
             excludeEntity = null,
+            protectedEntity = null,
+            sourceEntity = null,
             destroyTerrain = true,
         } = {},
     ) {
@@ -578,7 +582,7 @@ export class World {
 
         // Damage and knockback entities in range
         for (const entity of runtime.world.entities) {
-            if (entity === excludeEntity || entity.invulnerable) continue;
+            if (entity === excludeEntity || entity === protectedEntity || entity.invulnerable) continue;
 
             const distance = Vector2.Distance(position, entity.position);
             if (distance > radius) continue;
@@ -588,7 +592,9 @@ export class World {
                 0,
                 Math.round(damage * damageFactor),
             );
-            if (typeof entity.hit === "function") entity.hit(appliedDamage);
+            if (typeof entity.hitByExplosion === "function") {
+                if (entity.hitByExplosion(appliedDamage, sourceEntity) === false) continue;
+            } else entity.hit?.(appliedDamage, 0, 0, undefined, sourceEntity);
 
             if (entity.type === EntityTypes.Drop) {
                 this.removeEntity(entity);

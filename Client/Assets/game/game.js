@@ -2,7 +2,7 @@ import { runtime } from "../utils/runtime.js";
 import { Chat } from "./chat.js";
 import { PauseMenu } from "./pauseMenu.js";
 import { Vector2 } from "../utils/classes.js";
-import { BLOCK_SIZE, INTERACT_DISTANCE, multiplayer } from "../utils/globals.js";
+import { BLOCK_SIZE, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
 import { updateTouchControls } from "../utils/touchControls.js";
 import { draw, setShaderMode, setRendererMode } from "../utils/renderer.js";
@@ -203,26 +203,19 @@ export class Game {
             return;
         }
         const mousePosition = input.getMousePositionOnBlockGrid();
-        const playerCenter = new Vector2(
-            runtime.world.player.position.x + runtime.world.player.hitbox.x / 2,
-            runtime.world.player.position.y + runtime.world.player.hitbox.y / 2,
-        );
+        const player = runtime.world.player;
         const blockCenter = new Vector2(
             mousePosition.x + BLOCK_SIZE / 2,
             mousePosition.y + BLOCK_SIZE / 2,
         );
-        const cursorDistance =
-            Vector2.Distance(playerCenter, blockCenter) / BLOCK_SIZE;
-        runtime.cursorInRange = !runtime.world.player.abilities.instaBuild
-            ? cursorDistance <= INTERACT_DISTANCE
-            : true;
-        runtime.world.player.hoverBlock = runtime.cursorInRange
+        runtime.cursorInRange = player.isPositionInInteractionRange(blockCenter);
+        player.hoverBlock = runtime.cursorInRange
             ? runtime.world.getBlockAtWorldPosition(
                   input.getMousePositionOnBlockGrid().x,
                   input.getMousePositionOnBlockGrid().y,
               )
             : null;
-        runtime.world.player.hoverWall = runtime.cursorInRange
+        player.hoverWall = runtime.cursorInRange
             ? runtime.world.getBlockAtWorldPosition(
                   input.getMousePositionOnBlockGrid().x,
                   input.getMousePositionOnBlockGrid().y,

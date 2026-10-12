@@ -22,7 +22,7 @@ const MODELS = {
     },
     MutantCreeper: {
         texture: "mutantbeasts/mutant_creeper",
-        width: 1.35,
+        width: 1.98,
         cubes: [
             ["pelvis", 0, 0, -5, 0, 10, 14, 8, -2],
             ["body", 36, 0, -4.5, -12, 9, 16, 7, 2],

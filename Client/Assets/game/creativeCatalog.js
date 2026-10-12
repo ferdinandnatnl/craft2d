@@ -8,7 +8,7 @@ export const CREATIVE_TABS = [
     { id: "combat", label: "Combat", icon: { itemId: 5 } },
     { id: "food", label: "Food", icon: { itemId: 1504 } },
     { id: "materials", label: "Ingredients", icon: { itemId: 23 } },
-    { id: "mobs", label: "Spawn Eggs", icon: { itemId: Items.MutantZombieSpawnEgg } },
+    { id: "mobs", label: "Spawn Eggs", icon: { itemId: Items.PigSpawnEgg } },
     { id: "search", label: "Search", icon: { itemId: 2004 } },
     { id: "inventory", label: "Survival Inventory", icon: { blockId: 51 } },
     { id: "wallpaper", label: "Wallpaper", icon: { blockId: 34, props: { wall: true } } },

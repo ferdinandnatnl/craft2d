@@ -1,5 +1,5 @@
 import { runtime } from "../utils/runtime.js";
-import { getItem } from "@2dcraft.com/shared/item.js";
+import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { BLOCK_SIZE, ToolType } from "../utils/globals.js";
 import { drawImage } from "../utils/renderer.js";
 import { getSpriteSize, getSpriteUrl, isEqualToOriginal } from "../utils/texturePackLoader.js";
@@ -642,7 +642,7 @@ export class BodyPart {
             return "blocks/" + getBlock(holdItem.blockId).iconSprite;
         }
         if (holdItem.itemId != null) {
-            return "items/" + getItem(holdItem.itemId).sprite;
+            return "items/" + getItemSpritePath(holdItem.itemId);
         }
         return null;
     }

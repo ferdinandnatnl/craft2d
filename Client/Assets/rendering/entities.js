@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { BLOCK_SIZE } from "../utils/globals.js";
 import { getSpriteUrl } from "../utils/texturePackLoader.js";
-import { getItem } from "@2dcraft.com/shared/item.js";
+import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { getBlock } from "../world/block.js";
 import { getBoatPartPitch, getHeadPitch, getLimbPitch, getSwimPartPitch } from "./entityPose.js";
 import { skinBox, skinLimbHalf } from "./entityGeometry.js";
 import { mutantPartParent, mutantPartPitch, mutantWalkBob } from "./mutantPose.js";
+import { MUTANT_CREEPER_RIG } from "./mutantCreeperRig.js";
 import { renderLightTint } from "./renderLight.js";
 import ironGolemModel from "../sprites/entity/golem/iron_golem.geo.json" with { type: "json" };
 
@@ -17,6 +18,7 @@ export class VoxelEntities {
         this.scene = scene;
         this.models = new Map();
         this.ironGolemResources = null;
+        this.snowGolemResources = null;
         this.mutantResources = new Map();
         this.mutantTextures = new Map();
     }
@@ -29,6 +31,10 @@ export class VoxelEntities {
             return this.createIronGolem(image);
         }
         if (!image?.complete || !image.naturalWidth) return null;
+        if (spriteName === "golem/snow_golem.svg") {
+            return this.createSnowGolem(image);
+        }
+        if (entity.isCreeperEgg) return this.createCreeperEgg(image);
         if (entity.isMutant) return this.createMutantModel(entity, image);
         const group = new THREE.Group();
         const aquaticBodyPart = entity.isAquatic ? entity.body.parts.body : null;
@@ -42,8 +48,8 @@ export class VoxelEntities {
         const pivots = {};
         const bends = {};
         let tailMaterial = null;
-        const part = (name, dims, uv, pos, pivot = false, uvSize = dims) => {
-            const mesh = new THREE.Mesh(skinBox(...dims, ...uv, image, false, uvSize), material);
+        const part = (name, dims, uv, pos, pivot = false, uvSize = dims, mirror = false) => {
+            const mesh = new THREE.Mesh(skinBox(...dims, ...uv, image, mirror, uvSize), material);
             // One caster per mob reduces shadow-map draw calls as mobs gather.
             mesh.castShadow = name === "torso";
             mesh.receiveShadow = true;
@@ -77,7 +83,7 @@ export class VoxelEntities {
         };
         const species = spriteName.split("/")[0];
         const quadruped = ["cow", "pig", "sheep"].includes(species);
-        const creeper = species === "creeper";
+        const creeper = species === "creeper" || entity.isCreeperMinion;
         const bodylessSprite = !entity.body && entity.voxelSprite;
         const portraitSprite = spriteName.includes("-art/") || species === "golem" || entity.isAquatic || bodylessSprite;
         if (bodylessSprite) {
@@ -168,6 +174,18 @@ export class VoxelEntities {
             part("leftLeg", [4, 12, 4], [0, 22], [-0.125, 0.75, 0], true);
             part("rightLeg", [4, 12, 4], [0, 22], [0.125, 0.75, 0], true);
             group.scale.setScalar(entity.hitbox.y / BLOCK_SIZE / 1.95);
+        } else if (species === "enderman") {
+            // Vanilla Endermen use 8x8 heads, an 8x12 torso, and 2x30 limbs.
+            // Their model uses the 64x32 mob atlas, even when the source PNG
+            // has extra rows below it.
+            const limb = [2, 30, 2];
+            part("head", [8, 8, 8], [0, 0], [0, 42 / 16, 0]);
+            part("torso", [8, 12, 4], [32, 16], [0, 33 / 16, 0]);
+            part("rightArm", limb, [56, 0], [-3 / 16, 39 / 16, 0], true);
+            part("leftArm", limb, [56, 0], [5 / 16, 39 / 16, 0], true, limb, true);
+            part("rightLeg", limb, [56, 0], [-2 / 16, 30 / 16, 0], true);
+            part("leftLeg", limb, [56, 0], [2 / 16, 30 / 16, 0], true, limb, true);
+            group.scale.setScalar(entity.hitbox.y / BLOCK_SIZE / (46 / 16));
         } else if (quadruped) {
             const cow = species === "cow", pig = species === "pig";
             const torso = part("torso", [cow ? 12 : 10, 16, 8], cow ? [18, 4] : [28, 8], [0, 0.78, 0]);
@@ -213,12 +231,15 @@ export class VoxelEntities {
             pose.add(child);
         }
         group.add(pose);
-        const record = { group, pose, texture, material, pivots, bends, source: image.src, quadruped, portraitSprite, bodylessSprite, tailMaterial, heldKey: null };
+        const record = { group, pose, texture, material, pivots, bends, source: image.src, quadruped, portraitSprite, bodylessSprite, enderman: species === "enderman", tailMaterial, heldKey: null };
         this.scene.add(group);
         return record;
     }
 
     createMutantModel(entity, image) {
+        if (entity.entityTypeName === "MutantCreeper") {
+            return this.createMutantCreeper(entity, image);
+        }
         const key = `${entity.entityTypeName}:${image.src}`;
         let resources = this.mutantResources.get(key);
         if (!resources) {
@@ -246,6 +267,60 @@ export class VoxelEntities {
             sharedGeometry: false,
             sharedMaterials: true,
         };
+    }
+
+    createMutantCreeper(entity, image) {
+        let texture = this.mutantTextures.get(image.src);
+        if (!texture) {
+            texture = new THREE.Texture(image);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.magFilter = THREE.NearestFilter;
+            texture.minFilter = THREE.NearestMipmapLinearFilter;
+            texture.needsUpdate = true;
+            this.mutantTextures.set(image.src, texture);
+        }
+        const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95 });
+        const group = new THREE.Group();
+        const joints = new Map();
+        for (const definition of MUTANT_CREEPER_RIG) {
+            const part = entity.body.parts[definition.name];
+            const { u, v, width, height, depth } = part.mutantCube;
+            const joint = new THREE.Group();
+            const [px, py, pz] = definition.pivot;
+            joint.position.set(px / 16, -py / 16, -pz / 16);
+            joint.rotation.order = "ZYX";
+            const mesh = new THREE.Mesh(skinBox(width, height, depth, u, v, image), material);
+            const [bx, by, bz] = definition.box;
+            mesh.position.set(bx / 16, -by / 16, -bz / 16);
+            mesh.castShadow = mesh.receiveShadow = true;
+            joint.add(mesh);
+            (joints.get(definition.parent) || group).add(joint);
+            joints.set(definition.name, joint);
+        }
+        // The bent pose lifts the feet five pixels above their unrotated base.
+        group.position.y = 25 / 16;
+        this.scene.add(group);
+        return { group, joints, material, source: image.src, creeperRig: true };
+    }
+
+    createCreeperEgg(image) {
+        const texture = new THREE.Texture(image);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestMipmapLinearFilter;
+        texture.needsUpdate = true;
+        const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.9 });
+        const group = new THREE.Group();
+        for (const [width, height, depth, y] of [
+            [4, 1, 4, 0.04], [6, 4, 6, 0.2], [4, 2, 4, 0.38], [2, 1, 2, 0.47],
+        ]) {
+            const mesh = new THREE.Mesh(skinBox(width, height, depth, 0, 0, image), material);
+            mesh.position.y = y;
+            mesh.castShadow = mesh.receiveShadow = true;
+            group.add(mesh);
+        }
+        this.scene.add(group);
+        return { group, texture, material, source: image.src, eggModel: true };
     }
 
     createMutantResources(entity, image) {
@@ -439,6 +514,103 @@ export class VoxelEntities {
         };
     }
 
+    createSnowGolem(image) {
+        if (!this.snowGolemResources) {
+            const loadTexture = (path) => {
+                const texture = new THREE.TextureLoader().load(getSpriteUrl(path));
+                texture.colorSpace = THREE.SRGBColorSpace;
+                texture.magFilter = THREE.NearestFilter;
+                texture.minFilter = THREE.NearestMipmapLinearFilter;
+                return texture;
+            };
+            this.snowGolemResources = {
+                snow: loadTexture("blocks/snow"),
+                pumpkinSide: loadTexture("blocks/pumpkin_side"),
+                pumpkinTop: loadTexture("blocks/pumpkin_top"),
+                pumpkinFace: loadTexture("blocks/pumpkin_face_off"),
+                stick: loadTexture("items/stick"),
+            };
+        }
+
+        const resources = this.snowGolemResources;
+        const snowMaterial = new THREE.MeshStandardMaterial({
+            map: resources.snow,
+            roughness: 1,
+        });
+        const pumpkinSideMaterial = new THREE.MeshStandardMaterial({
+            map: resources.pumpkinSide,
+            roughness: 1,
+        });
+        const pumpkinTopMaterial = new THREE.MeshStandardMaterial({
+            map: resources.pumpkinTop,
+            roughness: 1,
+        });
+        const pumpkinFaceMaterial = new THREE.MeshStandardMaterial({
+            map: resources.pumpkinFace,
+            roughness: 1,
+        });
+        const stickMaterial = new THREE.MeshStandardMaterial({
+            map: resources.stick,
+            alphaTest: 0.15,
+            roughness: 1,
+            side: THREE.DoubleSide,
+        });
+        const group = new THREE.Group();
+        const addCube = (size, position, material) => {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+            mesh.position.set(...position);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            group.add(mesh);
+            return mesh;
+        };
+
+        // Vanilla construction: two snow blocks with a carved pumpkin on top.
+        addCube([0.76, 0.62, 0.64], [0, 0.34, 0], snowMaterial);
+        addCube([0.68, 0.62, 0.60], [0, 0.96, 0], snowMaterial);
+        addCube(
+            [0.62, 0.62, 0.62],
+            [0, 1.58, 0],
+            [
+                pumpkinSideMaterial,
+                pumpkinSideMaterial,
+                pumpkinTopMaterial,
+                pumpkinTopMaterial,
+                pumpkinFaceMaterial,
+                pumpkinSideMaterial,
+            ],
+        );
+
+        const armPivots = {};
+        for (const side of [-1, 1]) {
+            const arm = new THREE.Group();
+            arm.position.set(side * 0.31, 1.02, 0);
+            arm.rotation.z = -side * 0.2;
+            const stick = new THREE.Mesh(
+                new THREE.BoxGeometry(0.48, 0.07, 0.07),
+                stickMaterial,
+            );
+            stick.position.set(side * 0.23, -0.03, 0);
+            stick.castShadow = true;
+            stick.receiveShadow = true;
+            arm.add(stick);
+            group.add(arm);
+            armPivots[side < 0 ? "leftArm" : "rightArm"] = arm;
+        }
+
+        this.scene.add(group);
+        return {
+            group,
+            material: snowMaterial,
+            materials: [snowMaterial, pumpkinSideMaterial, pumpkinTopMaterial,
+                pumpkinFaceMaterial, stickMaterial],
+            pivots: armPivots,
+            source: image.src,
+            snowGolem: true,
+            sharedTextures: true,
+        };
+    }
+
     createBoat(entity) {
         const group = new THREE.Group();
         const hullMaterial = new THREE.MeshStandardMaterial({
@@ -568,7 +740,12 @@ export class VoxelEntities {
     updateHeld(record, entity) {
         const item = entity.holdItem;
         const def = item?.blockId != null ? getBlock(item.blockId) : item?.itemId != null ? getItem(item.itemId) : null;
-        const key = def?.sprite ? `${item.blockId != null ? "blocks" : "items"}/${def.sprite}` : null;
+        const sprite = item?.blockId != null
+            ? def?.sprite
+            : item?.itemId != null
+              ? getItemSpritePath(item.itemId)
+              : null;
+        const key = sprite ? `${item.blockId != null ? "blocks" : "items"}/${sprite}` : null;
         if (record.heldKey === key) return;
         if (record.held) {
             record.held.parent.remove(record.held);
@@ -625,6 +802,33 @@ export class VoxelEntities {
             const aquaticBob = entity.isAquatic ? Math.sin(aquaticPhase * 2) * 0.015 : 0;
             record.group.position.set((entity.position.x + entity.hitbox.x / 2) / BLOCK_SIZE,
                 -(entity.position.y + entity.hitbox.y) / BLOCK_SIZE + aquaticBob, 0.05);
+            if (record.eggModel) {
+                record.material.color.setRGB(light, light, light);
+                continue;
+            }
+            if (record.creeperRig) {
+                record.group.position.y += 25 / 16;
+                record.group.rotation.y = entity.direction < 0 ? -FACING_YAW : FACING_YAW;
+                const duration = entity.attackPoseDuration || 0.4;
+                const remaining = (entity.attackPoseUntil || 0) - seconds;
+                const progress = remaining > 0 ? 1 - remaining / duration : 0;
+                const attack = progress > 0 ? Math.sin(Math.min(1, progress) * Math.PI) : 0;
+                const walk = (entity.body.mutantWalkAmount || 0) * (1 - attack);
+                const phase = entity.body.mutantWalkPhase || 0;
+                record.group.position.y += mutantWalkBob("MutantCreeper", phase, walk);
+                for (const definition of MUTANT_CREEPER_RIG) {
+                    const joint = record.joints.get(definition.name);
+                    joint.rotation.x = mutantPartPitch("MutantCreeper", definition.name,
+                        phase, walk, attack, seconds);
+                    joint.rotation.y = -(definition.yaw || 0);
+                }
+                record.material.color.setRGB(light, light, light);
+                record.material.emissive.set(entity.body.flashingColor ||
+                    (entity.powered ? 0x368cca : 0));
+                record.material.emissiveIntensity = entity.body.flashingColor
+                    ? 0.65 : entity.powered ? 0.25 : 0;
+                continue;
+            }
             if (record.mutantModel) {
                 record.group.rotation.y = entity.direction < 0 ? -FACING_YAW : FACING_YAW;
                 const walkPhase = entity.body.mutantWalkPhase || 0;
@@ -708,6 +912,22 @@ export class VoxelEntities {
                 record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
                 continue;
             }
+            if (record.snowGolem) {
+                const stride = Math.abs(entity.velocity?.x ?? 0) > 5
+                    ? Math.sin(seconds * 7) * 0.08
+                    : 0;
+                record.group.rotation.y = entity.direction < 0
+                    ? -FACING_YAW
+                    : FACING_YAW;
+                record.pivots.leftArm.rotation.z = 0.2 + stride;
+                record.pivots.rightArm.rotation.z = -0.2 + stride;
+                for (const material of record.materials) {
+                    material.color.setRGB(light, light, light);
+                    material.emissive.set(entity.body.flashingColor || 0);
+                    material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+                }
+                continue;
+            }
             if (record.bodylessSprite) {
                 record.group.rotation.y = 0;
                 record.group.scale.x = entity.direction < 0 ? -1 : 1;
@@ -733,6 +953,16 @@ export class VoxelEntities {
             record.material.color.setRGB(light, light, light);
             record.material.emissive.set(entity.body.flashingColor || 0);
             record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+            if (record.enderman) {
+                const moving = Math.abs(entity.velocity?.x ?? 0) > 5;
+                const stride = moving ? Math.sin(seconds * 8) * 0.4 : 0;
+                record.pivots.head.rotation.x = getHeadPitch(entity.lookDirection);
+                record.pivots.rightArm.rotation.x = -stride * 0.5;
+                record.pivots.leftArm.rotation.x = stride * 0.5;
+                record.pivots.rightLeg.rotation.x = -stride;
+                record.pivots.leftLeg.rotation.x = stride;
+                continue;
+            }
             if (record.tailMaterial) {
                 record.tailMaterial.color.setRGB(light, light, light);
                 record.tailMaterial.emissive.set(entity.body.flashingColor || 0);
@@ -787,7 +1017,7 @@ export class VoxelEntities {
                 for (const material of materials) {
                     if (!material || material === record.material ||
                         disposedMaterials.has(material)) continue;
-                    material.map?.dispose();
+                    if (!record.sharedTextures) material.map?.dispose();
                     material.dispose();
                     disposedMaterials.add(material);
                 }
@@ -806,6 +1036,12 @@ export class VoxelEntities {
                 geometry.dispose();
             }
             this.ironGolemResources = null;
+        }
+        if (this.snowGolemResources) {
+            for (const texture of Object.values(this.snowGolemResources)) {
+                texture.dispose();
+            }
+            this.snowGolemResources = null;
         }
         for (const resources of this.mutantResources.values()) {
             resources.geometry.dispose();

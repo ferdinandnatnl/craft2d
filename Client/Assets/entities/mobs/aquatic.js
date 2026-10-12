@@ -53,6 +53,8 @@ const AQUATIC_SPECIES = Object.freeze({
 });
 
 export class AquaticMob extends Mob {
+    static spawnInWater = true;
+
     constructor(
         world,
         {
@@ -209,22 +211,32 @@ export class AquaticMob extends Mob {
 }
 
 export class Cod extends AquaticMob {
+    static spawnSize = Object.freeze({ width: 0.9, height: 0.5 });
+
     constructor(world, props = {}) { super(world, { ...props, species: "Cod" }); }
 }
 
 export class Salmon extends AquaticMob {
+    static spawnSize = Object.freeze({ width: 0.9, height: 0.5 });
+
     constructor(world, props = {}) { super(world, { ...props, species: "Salmon" }); }
 }
 
 export class Pufferfish extends AquaticMob {
+    static spawnSize = Object.freeze({ width: 0.7, height: 0.7 });
+
     constructor(world, props = {}) { super(world, { ...props, species: "Pufferfish" }); }
 }
 
 export class TropicalFish extends AquaticMob {
+    static spawnSize = Object.freeze({ width: 0.9, height: 0.5 });
+
     constructor(world, props = {}) { super(world, { ...props, species: "TropicalFish" }); }
 }
 
 export class Squid extends AquaticMob {
+    static spawnSize = Object.freeze({ width: 0.9, height: 0.9 });
+
     constructor(world, props = {}) { super(world, { ...props, species: "Squid" }); }
 }
 

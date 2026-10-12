@@ -9,6 +9,8 @@ import { BLOCK_SIZE } from "../../utils/globals.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 
 export class Sheep extends Mob {
+    static spawnSize = Object.freeze({ width: 0.9, height: 1 });
+
     constructor(
         world,
         {

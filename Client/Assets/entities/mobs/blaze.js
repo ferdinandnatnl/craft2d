@@ -7,6 +7,8 @@ import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
 
 export class Blaze extends Mob {
+    static spawnSize = Object.freeze({ width: 0.65, height: 1.8 });
+
     constructor(world, {
         health = 20,
         noAi = false,
@@ -45,8 +47,8 @@ export class Blaze extends Mob {
         this.attackCooldown = 1.5;
     }
 
-    hit(damage, hitFromX = 0, knockback = 0) {
-        if (!this.health || !this.damage(damage)) return;
+    hit(damage, hitFromX = 0, knockback = 0, _cause = null, attacker = null) {
+        if (!this.health || !this.damage(damage, attacker)) return;
         this.knockBack(hitFromX, knockback);
     }
 

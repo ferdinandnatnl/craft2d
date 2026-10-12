@@ -5,11 +5,22 @@ import { BLOCK_SIZE } from "../../utils/globals.js";
 import { getSpriteUrl } from "../../utils/texturePackLoader.js";
 import { runtime } from "../../utils/runtime.js";
 
-function overlaps(a, b) {
-    return a.position.x < b.position.x + b.hitbox.x &&
-        a.position.x + a.hitbox.x > b.position.x &&
-        a.position.y < b.position.y + b.hitbox.y &&
-        a.position.y + a.hitbox.y > b.position.y;
+function crossesTarget(projectile, target, previous) {
+    const dx = projectile.position.x - previous.x;
+    const dy = projectile.position.y - previous.y;
+    const distance = Math.max(Math.abs(dx), Math.abs(dy));
+    const steps = Number.isFinite(distance)
+        ? Math.max(1, Math.min(32, Math.ceil(distance / (BLOCK_SIZE / 4))))
+        : 1;
+    for (let step = 0; step <= steps; step++) {
+        const x = previous.x + dx * step / steps;
+        const y = previous.y + dy * step / steps;
+        if (x < target.position.x + target.hitbox.x &&
+            x + projectile.hitbox.x > target.position.x &&
+            y < target.position.y + target.hitbox.y &&
+            y + projectile.hitbox.y > target.position.y) return true;
+    }
+    return false;
 }
 
 export class MutantBoneArrow extends Projectile {
@@ -32,8 +43,10 @@ export class MutantBoneArrow extends Projectile {
     update() {
         const previous = { x: this.position.x, y: this.position.y };
         this.updateEntity();
-        const player = !this.wasColliding && this.entityCollision(EntityTypes.Player);
-        if (player?.abilities.hasHealth) {
+        const player = this.world.player;
+        const hitPlayer = !this.wasColliding && player?.dimension === this.dimension &&
+            player.abilities.hasHealth && crossesTarget(this, player, previous);
+        if (hitPlayer) {
             player.hit(this.damage, this.position.x, 2, "Shot by a Mutant Skeleton");
             this.dieEvent();
         } else if (this.wasColliding || runtime.passedTime >= this.expiresAt) {
@@ -91,13 +104,15 @@ export class MutantIceShard extends Projectile {
     }
 
     update() {
+        const previous = { x: this.position.x, y: this.position.y };
         this.updateEntity();
         const target = !this.wasColliding && this.world.entities.find(entity =>
             entity !== this && entity.UUID !== this.ownerUUID &&
             entity.dimension === this.dimension && entity.type === EntityTypes.Mob &&
-            entity.isHostile && entity.health > 0 && overlaps(this, entity));
+            entity.isHostile && entity.health > 0 && crossesTarget(this, entity, previous));
         if (target) {
-            target.hit(this.damage, this.position.x, 3);
+            const owner = this.world.entities.find(entity => entity.UUID === this.ownerUUID);
+            target.hit(this.damage, this.position.x, 3, undefined, owner);
             this.dieEvent();
         } else if (this.wasColliding || runtime.passedTime >= this.expiresAt) {
             this.dieEvent();

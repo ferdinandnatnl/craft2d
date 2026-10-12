@@ -9,6 +9,8 @@ import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
 
 export class WitherSkeleton extends Mob {
+    static spawnSize = Object.freeze({ width: 0.4, height: 1.8 });
+
     constructor(
         world,
         {
@@ -78,9 +80,9 @@ export class WitherSkeleton extends Mob {
         this.attackCooldown = 1;
     }
 
-    hit(damage, hitfromX = 0, kb = 0) {
+    hit(damage, hitfromX = 0, kb = 0, _cause = null, attacker = null) {
         if (!this.health) return;
-        if (!this.damage(damage)) return;
+        if (!this.damage(damage, attacker)) return;
 
         this.knockBack(hitfromX, kb);
         playRandomSoundFromArray({

@@ -13,6 +13,7 @@ import { IronGolem, SnowGolem } from "../entities/mobs/golem.js";
 import { Boat } from "../entities/boat.js";
 import { Warden } from "../entities/mobs/warden.js";
 import { Minecart } from "../entities/minecart.js";
+import { CreeperMinion, CreeperMinionEgg } from "../entities/mobs/creeperMinion.js";
 
 export const AUTOSAVE_INTERVAL = 60000;
 
@@ -159,6 +160,21 @@ export function saveWorld(message = true, toFile = false) {
             position: { x: entity.position.x, y: entity.position.y },
             variant: entity.variant,
             dimension: entity.dimension,
+        }));
+    currentSave.creeperCompanions = runtime.world.entities
+        .filter(entity => entity.isCreeperEgg ||
+            (entity.entityTypeName === "CreeperMinion" && entity.tamed && entity.health > 0))
+        .map(entity => ({
+            type: entity.entityTypeName,
+            UUID: entity.UUID,
+            position: { x: entity.position.x, y: entity.position.y },
+            dimension: entity.dimension,
+            ownerUUID: entity.ownerUUID,
+            carriedByUUID: entity.carriedByUUID,
+            sitting: entity.sitting,
+            powered: entity.powered,
+            hatchAge: entity.hatchAge,
+            health: entity.health,
         }));
 
     // Determine world name and id before serializing so the name is included in the save
@@ -457,6 +473,38 @@ export async function loadWorld(save) {
         );
         golem.dimension = dimensionIndex;
         chunk.entities.push(golem);
+    }
+
+    for (const saved of Array.isArray(currentSave.creeperCompanions)
+        ? currentSave.creeperCompanions : []) {
+        const Companion = saved?.type === "CreeperMinionEgg"
+            ? CreeperMinionEgg : saved?.type === "CreeperMinion" ? CreeperMinion : null;
+        if (!Companion || typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            (saved.hatchAge !== undefined && !Number.isFinite(saved.hatchAge)) ||
+            (Companion === CreeperMinion &&
+                (!Number.isFinite(saved.health) || saved.health <= 0))) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) continue;
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const companion = runtime.world.summonEntity(Companion,
+            new Vector2(saved.position.x, saved.position.y), {
+                ownerUUID: typeof saved.ownerUUID === "string" ? saved.ownerUUID : null,
+                carriedByUUID: typeof saved.carriedByUUID === "string"
+                    ? saved.carriedByUUID : null,
+                sitting: saved.sitting === true,
+                powered: saved.powered === true,
+                hatchAge: Math.max(0, saved.hatchAge || 0),
+                health: Companion === CreeperMinion ? Math.min(saved.health, 8) : undefined,
+                tamed: Companion === CreeperMinion,
+                myChunkX: chunkX,
+            }, false, saved.UUID);
+        companion.dimension = dimensionIndex;
+        chunk.entities.push(companion);
     }
 
     const savedWardens = Array.isArray(currentSave.wardens)

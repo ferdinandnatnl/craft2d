@@ -2,118 +2,32 @@
 // https://github.com/Elite-Modding-Team/MutantCreaturesLegacy/tree/e609923771f633b41c72e720f8159cae7db30883/src/main/java/chumbanotz/mutantbeasts/client/model
 // limbSwing advances with distance traveled, as it does in the original mod.
 export function mutantPartPitch(type, name, limbSwing, amount, attack, seconds) {
-    const breathe = Math.sin(seconds * 1.5) * 0.02;
-    const walk = Math.sin(limbSwing * 0.4) * amount;
+    // The creeper has its own connected mod rig. Other mutants stay in their
+    // atlas pose until they have their own joints; bending loose cubes detaches them.
+    if (type !== "MutantCreeper") return 0;
 
-    switch (type) {
-        case "MutantZombie": {
-            const leftStep = (Math.sin((limbSwing - 0.7) * 0.4) + 0.7) * amount;
-            const rightStep = -(Math.sin((limbSwing + 0.7) * 0.4) - 0.7) * amount;
-            if (name === "waist") return 0.2;
-            if (name === "chest") return 0.52 + breathe + attack * 0.3;
-            if (name === "head") return -0.72;
-            if (name === "leftArm") return -0.33 - walk * 0.6 - attack * 1.5;
-            if (name === "rightArm") return -0.33 + walk * 0.6 - attack * 1.5;
-            if (name.endsWith("Forearm")) return -1.05 - attack * 0.5;
-            if (name === "leftLeg") return -0.79 + leftStep * 0.9;
-            if (name === "rightLeg") return -0.79 + rightStep * 0.9;
-            if (name.endsWith("Foot")) return 0.79;
-            return 0;
-        }
-        case "MutantSkeleton": {
-            const step = Math.sin(limbSwing * 0.5) * amount;
-            const knee = Math.sin(limbSwing * 0.5 - 1.1) * amount;
-            if (name === "pelvis") return -0.31;
-            if (name === "waist") return 0.22;
-            if (name === "neck") return -0.13;
-            if (name === "head") return -0.13 + breathe;
-            if (name === "leftArm") return 0.52 - step * 0.9 - attack * 1.0;
-            if (name === "rightArm") return 0.52 + step * 0.9 - attack * 1.0;
-            if (name.endsWith("Forearm")) return -0.52 - attack * 0.5;
-            if (name === "leftLeg") return -0.26 + (0.2 + step) * amount;
-            if (name === "rightLeg") return -0.26 + (0.2 - step) * amount;
-            if (name === "leftFoot") return 0.31 + knee * 0.6;
-            if (name === "rightFoot") return 0.31 - knee * 0.6;
-            return 0;
-        }
-        case "MutantCreeper": {
-            const phase = limbSwing * Math.PI / 4;
-            const frontRight = Math.max(0, Math.sin(phase) + 0.4) * amount;
-            const frontLeft = Math.max(0, -Math.sin(phase) + 0.4) * amount;
-            const backRight = Math.max(0, -Math.cos(phase) + 0.4) * amount;
-            const backLeft = Math.max(0, Math.cos(phase) + 0.4) * amount;
-            if (name === "pelvis") return -0.79;
-            if (name === "body") return 0.94 + breathe + attack * 0.5;
-            if (name === "neck") return 1.05 - attack * 0.35;
-            if (name === "head") return 0.52;
-            if (name === "frontRightLeg") return 0.31 - frontRight * 0.3;
-            if (name === "frontLeftLeg") return 0.31 - frontLeft * 0.3;
-            if (name === "backRightLeg") return 0.9 + backRight * 0.3;
-            if (name === "backLeftLeg") return 0.9 + backLeft * 0.3;
-            if (name.startsWith("front") && name.endsWith("Foot")) return -0.21;
-            if (name.startsWith("back") && name.endsWith("Foot")) return 0.48;
-            return 0;
-        }
-        case "MutantEnderman": {
-            const step = Math.sin(limbSwing * 0.3) * amount;
-            const leftStep = (Math.sin((limbSwing - 0.8) * 0.3) + 0.8) * amount;
-            const rightStep = -(Math.sin((limbSwing + 0.8) * 0.3) - 0.8) * amount;
-            const leftKnee = (Math.sin((limbSwing + 0.8) * 0.3) - 0.8) * amount;
-            const rightKnee = -(Math.sin((limbSwing - 0.8) * 0.3) + 0.8) * amount;
-            if (name === "abdomen") return 0.31;
-            if (name === "chest") return 0.39 + breathe;
-            if (name === "neck") return 0.2;
-            if (name === "head") return -0.79;
-            if (name === "upperRightArm") return -0.52 - step * 0.6 - attack * 0.8;
-            if (name === "upperLeftArm") return -0.52 + step * 0.6 - attack * 0.8;
-            if (name === "lowerRightArm") return -0.42 - step * 0.3;
-            if (name === "lowerLeftArm") return -0.42 + step * 0.3;
-            if (name === "foreRightArm" || name === "lowerForeRightArm") return -0.63 - step * 0.2;
-            if (name === "foreLeftArm" || name === "lowerForeLeftArm") return -0.63 + step * 0.2;
-            if (name === "leftLeg") return -0.9 + leftStep * 0.6;
-            if (name === "rightLeg") return -0.9 + rightStep * 0.6;
-            if (name === "leftForeleg") return 0.79 + leftKnee * 0.3;
-            if (name === "rightForeleg") return 0.79 + rightKnee * 0.3;
-            return 0;
-        }
-        case "MutantSnowGolem": {
-            const step = Math.sin(limbSwing * 0.45) * amount;
-            const leftStep = (Math.cos((limbSwing - 0.5) * 0.45) + 0.5) * amount;
-            const rightStep = (Math.cos((limbSwing - 0.5 + Math.PI * 2) * 0.45) + 0.5) * amount;
-            if (name === "chest" || name === "abdomen") return 0.13 - breathe;
-            if (name === "head") return -0.26;
-            if (name === "leftArm") return -0.31 - step * 0.6 - attack * 1.2;
-            if (name === "rightArm") return -0.31 + step * 0.6 - attack * 1.2;
-            if (name === "leftForearm") return -0.52 - step * 0.2;
-            if (name === "rightForearm") return -0.52 + step * 0.2;
-            if (name === "leftLeg") return -0.63 + leftStep * 1.1;
-            if (name === "rightLeg") return -0.63 + rightStep * 1.1;
-            if (name === "leftFoot") return 0.7 + step * 0.2;
-            if (name === "rightFoot") return 0.7 - step * 0.2;
-            return 0;
-        }
-        case "SpiderPig": {
-            const phase = limbSwing * 0.9;
-            if (name === "head") return -0.39 + Math.sin(phase) * amount * 0.15;
-            if (name === "frontBody") return 0.39;
-            if (name === "rearBody") return -0.05;
-            const leg = /^(front|middle|back)(Left|Right)(Leg|Foot)$/.exec(name);
-            if (!leg) return 0;
-            const offset = { frontLeft: 0.3, frontRight: 0.9, middleLeft: -0.3,
-                middleRight: -0.9, backLeft: -0.9, backRight: 0.3 }[leg[1] + leg[2]];
-            const delay = leg[3] === "Foot" ? 0.5 : 0;
-            const amplitude = leg[1] === "back" ? 0.63 : 0.52;
-            return Math.sin(phase + offset + delay) * amount * amplitude;
-        }
-        default:
-            return 0;
-    }
+    const breathe = Math.sin(seconds * 1.5) * 0.02;
+    const phase = limbSwing * Math.PI / 4;
+    const frontRight = Math.max(0, Math.sin(phase) + 0.4) * amount;
+    const frontLeft = Math.max(0, -Math.sin(phase) + 0.4) * amount;
+    const backRight = Math.max(0, -Math.cos(phase) + 0.4) * amount;
+    const backLeft = Math.max(0, Math.cos(phase) + 0.4) * amount;
+    if (name === "pelvis") return -0.79;
+    if (name === "body") return 0.94 + breathe + attack * 0.5;
+    if (name === "neck") return 1.05 - attack * 0.35;
+    if (name === "head") return 0.52;
+    if (name === "frontRightLeg") return 0.31 - frontRight * 0.3;
+    if (name === "frontLeftLeg") return 0.31 - frontLeft * 0.3;
+    if (name === "backRightLeg") return 0.9 + backRight * 0.3;
+    if (name === "backLeftLeg") return 0.9 + backLeft * 0.3;
+    if (name.startsWith("front") && name.endsWith("Foot")) return -0.21;
+    if (name.startsWith("back") && name.endsWith("Foot")) return 0.48;
+    return 0;
 }
 
 export function mutantWalkBob(type, limbSwing, amount) {
-    if (type === "MutantEnderman") return Math.abs(Math.sin(limbSwing * 0.3)) * amount * 0.04;
-    const phase = type === "SpiderPig" ? limbSwing * 0.9 : limbSwing * 0.4;
-    return Math.abs(Math.sin(phase)) * amount * (type === "MutantSnowGolem" ? 0.055 : 0.03);
+    if (type !== "MutantCreeper") return 0;
+    return Math.abs(Math.sin(limbSwing * 0.4)) * amount * 0.03;
 }
 
 export function mutantPartParent(name) {

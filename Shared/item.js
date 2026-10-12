@@ -18,6 +18,7 @@ export class Item {
         projectile = null,
         throwPower = 0,
         spawnEntity = null,
+        spawnEggColors = null,
         excludeFromCreativeInventory = false,
         durability = null,
 
@@ -43,6 +44,7 @@ export class Item {
         this.projectile = projectile;
         this.throwPower = throwPower;
         this.spawnEntity = spawnEntity;
+        this.spawnEggColors = spawnEggColors;
 
         this.fuelTime = fuelTime;
         this.smeltOutput = smeltOutput;
@@ -63,4 +65,12 @@ export function bindItemMap(map) {
 
 export function getItem(itemId) {
     return itemMapRef?.has(itemId) ? itemMapRef.get(itemId) : null;
+}
+
+export function getItemSpritePath(itemId) {
+    const item = getItem(itemId);
+    if (!item) return null;
+    return item.spawnEggColors
+        ? `${item.sprite}/${item.itemId}`
+        : item.sprite;
 }

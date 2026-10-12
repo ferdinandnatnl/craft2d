@@ -1,6 +1,6 @@
 import { runtime } from "../utils/runtime.js";
 import { InventoryItem as SharedInventoryItem } from "@2dcraft.com/shared/inventoryItem.js";
-import { getItem } from "@2dcraft.com/shared/item.js";
+import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
 import { drawImage, drawRect, drawText } from "../utils/renderer.js";
 import { getSpriteSize, getSpriteUrl } from "../utils/texturePackLoader.js";
@@ -47,7 +47,7 @@ export class InventorySlot {
 
         const isItem = item.itemId !== null;
         const path = isItem
-            ? "items/" + getItem(item.itemId).sprite
+            ? "items/" + getItemSpritePath(item.itemId)
             : "blocks/" + getBlock(item.blockId).iconSprite;
 
         const spritePath = getSpriteUrl(path);

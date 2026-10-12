@@ -1,6 +1,6 @@
 import { runtime } from "../utils/runtime.js";
 import { InventoryItem, InventorySlot } from "./inventoryItem.js";
-import { getItem } from "@2dcraft.com/shared/item.js";
+import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { Items } from "@2dcraft.com/shared/items.js";
 import { RecipeType } from "@2dcraft.com/shared/recipe.js";
 import { recipes } from "@2dcraft.com/shared/recipes.js";
@@ -2534,7 +2534,7 @@ export class Inventory {
         const isItem = holdingItem.itemId !== null;
 
         const path = isItem
-            ? "items/" + getItem(holdingItem.itemId).sprite
+            ? "items/" + getItemSpritePath(holdingItem.itemId)
             : "blocks/" + getBlock(holdingItem.blockId).iconSprite;
 
         const spritePath = getSpriteUrl(path);

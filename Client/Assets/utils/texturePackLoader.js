@@ -1,7 +1,7 @@
 import { runtime } from "./runtime.js";
 import JSZip from "jszip";
 import { entityRegistry } from "../entities/entityRegistry.js";
-import { getItem } from "@2dcraft.com/shared/item.js";
+import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { Items } from "@2dcraft.com/shared/items.js";
 import { getFromLdb } from "./indexDB.js";
 import { blockRegistry } from "@2dcraft.com/shared/blockRegistry.js";
@@ -12,6 +12,7 @@ import { loadNaturalTexturePack } from "./naturalTexturePack.js";
 export let texturePackZip = null;
 export let texturePackFiles = null;
 export let vanillaTextureCache = null;
+let spawnEggTextureCache = {};
 
 // Load vanilla textures by iterating over Blocks and Items
 export async function loadVanillaTextures(onProgress) {
@@ -64,6 +65,8 @@ export async function loadVanillaTextures(onProgress) {
     // Misc Entity Sprites
     spritePaths.push(`entity/sheep/sheep_fur`);
     spritePaths.push(`entity/warden-art/warden.svg`);
+    spritePaths.push(`items/spawn_egg_overlay`);
+    spritePaths.push(`items/mutantbeasts/spawn_egg_overlay`);
     spritePaths.push(`items/minecart_normal`);
     spritePaths.push(`items/minecart_chest`);
 
@@ -110,6 +113,7 @@ export async function loadVanillaTextures(onProgress) {
                 const img = await loadImage(imgUrl);
                 vanillaTextureCache[path] = {
                     url: imgUrl,
+                    image: isSpawnEggTexture(path) ? img : null,
                     width: img?.width || 16,
                     height: img?.height || 16,
                     originalWidth: img?.width || 16,
@@ -157,6 +161,7 @@ function loadImage(url) {
 export async function loadTexturePack(onProgress) {
     const currentPackKey =
         localStorage.getItem("currentTexturePack") || "default";
+    spawnEggTextureCache = {};
     runtime.isTexturePackLoaded = false;
 
     // Load vanilla textures first
@@ -172,6 +177,7 @@ export async function loadTexturePack(onProgress) {
                 console.warn("Natural textures could not load; using Classic textures.", error);
             }
         }
+        await buildSpawnEggTextures();
         runtime.isTexturePackLoaded = true;
         onProgress?.(1);
         return;
@@ -187,6 +193,7 @@ export async function loadTexturePack(onProgress) {
             );
             texturePackZip = null;
             texturePackFiles = null;
+            await buildSpawnEggTextures();
             runtime.isTexturePackLoaded = true;
             localStorage.setItem("currentTexturePack", "default");
             onProgress?.(1);
@@ -219,6 +226,7 @@ export async function loadTexturePack(onProgress) {
                     const originalSize = vanillaTextureCache[relativePath] || { width: 16, height: 16 };
                     texturePackFiles[relativePath] = {
                         url: imgUrl,
+                        image: isSpawnEggTexture(relativePath) ? img : null,
                         width: img.width,
                         height: img.height,
                         originalWidth: originalSize.width,
@@ -232,12 +240,14 @@ export async function loadTexturePack(onProgress) {
             })
         );
 
+        await buildSpawnEggTextures();
         runtime.isTexturePackLoaded = true;
         onProgress?.(1);
     } catch (err) {
         console.error(`Failed to load texture pack ${currentPackKey}:`, err);
         texturePackZip = null;
         texturePackFiles = null;
+        await buildSpawnEggTextures();
         runtime.isTexturePackLoaded = true;
         localStorage.setItem("currentTexturePack", "default");
         onProgress?.(1);
@@ -260,6 +270,10 @@ export function getSpriteUrl(path, useTexturePack = true) {
         return path.substring(base64Index);
     }
 
+    if (spawnEggTextureCache[path]) {
+        return spawnEggTextureCache[path].url;
+    }
+
     if (useTexturePack && texturePackFiles && texturePackFiles[path]) {
         return texturePackFiles[path].url;
     }
@@ -267,6 +281,9 @@ export function getSpriteUrl(path, useTexturePack = true) {
     if (vanillaTextureCache && vanillaTextureCache[path]) {
         return vanillaTextureCache[path].url;
     }
+
+    const spawnEggBasePath = getSpawnEggBasePath(path);
+    if (spawnEggBasePath) return getSpriteUrl(spawnEggBasePath, useTexturePack);
 
     const spritePath = /\.(?:png|svg|webp)$/i.test(path)
         ? path
@@ -279,6 +296,10 @@ export function getSpriteAverageColor(path) {
         return { r: 0, g: 0, b: 0 }; // Base64 images not cached
     }
 
+    if (spawnEggTextureCache[path]) {
+        return spawnEggTextureCache[path].averageColor;
+    }
+
     if (texturePackFiles && texturePackFiles[path]) {
         return texturePackFiles[path].averageColor;
     }
@@ -286,6 +307,9 @@ export function getSpriteAverageColor(path) {
     if (vanillaTextureCache && vanillaTextureCache[path]) {
         return vanillaTextureCache[path].averageColor;
     }
+
+    const spawnEggBasePath = getSpawnEggBasePath(path);
+    if (spawnEggBasePath) return getSpriteAverageColor(spawnEggBasePath);
 
     return { r: 0, g: 0, b: 0 }; // Default if not found
 }
@@ -300,6 +324,12 @@ export function getSpriteSize(path) {
         };
     }
 
+    if (spawnEggTextureCache[path]) {
+        const { width, height, originalWidth, originalHeight } =
+            spawnEggTextureCache[path];
+        return { width, height, originalWidth, originalHeight };
+    }
+
     if (texturePackFiles && texturePackFiles[path]) {
         const { width, height, originalWidth, originalHeight } =
             texturePackFiles[path];
@@ -312,12 +342,110 @@ export function getSpriteSize(path) {
         return { width, height, originalWidth, originalHeight };
     }
 
+    const spawnEggBasePath = getSpawnEggBasePath(path);
+    if (spawnEggBasePath) return getSpriteSize(spawnEggBasePath);
+
     return {
         width: 16,
         height: 16,
         originalWidth: 16,
         originalHeight: 16,
     };
+}
+
+async function buildSpawnEggTextures() {
+    try {
+        const output = {};
+
+        for (const itemId of new Set(Object.values(Items))) {
+            const item = getItem(itemId);
+            if (!item?.spawnEggColors) continue;
+
+            const basePath = `items/${item.sprite}`;
+            const overlayPath = `items/${item.sprite.replace(/spawn_egg$/, "spawn_egg_overlay")}`;
+            const baseTexture =
+                texturePackFiles?.[basePath] ?? vanillaTextureCache?.[basePath];
+            const overlayTexture =
+                texturePackFiles?.[overlayPath] ?? vanillaTextureCache?.[overlayPath];
+            const baseImage = baseTexture?.image;
+            const overlayImage = overlayTexture?.image;
+            if (!baseImage || !overlayImage) continue;
+
+            const width = baseImage.naturalWidth || baseImage.width;
+            const height = baseImage.naturalHeight || baseImage.height;
+            const originalWidth = baseTexture.originalWidth ?? baseTexture.width ?? width;
+            const originalHeight = baseTexture.originalHeight ?? baseTexture.height ?? height;
+
+            const baseColor = parseHexColor(item.spawnEggColors.baseColor);
+            const overlayColor = parseHexColor(item.spawnEggColors.overlayColor);
+            if (!baseColor || !overlayColor) continue;
+
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            context.imageSmoothingEnabled = false;
+            context.drawImage(
+                createTintedLayer(baseImage, baseColor, width, height),
+                0,
+                0,
+            );
+            context.drawImage(
+                createTintedLayer(overlayImage, overlayColor, width, height),
+                0,
+                0,
+            );
+
+            const path = `items/${getItemSpritePath(itemId)}`;
+            output[path] = {
+                url: canvas.toDataURL("image/png"),
+                width,
+                height,
+                originalWidth,
+                originalHeight,
+                averageColor: "#000000",
+            };
+        }
+
+        spawnEggTextureCache = output;
+    } catch (error) {
+        spawnEggTextureCache = {};
+        console.warn("Spawn egg textures could not be colorized:", error);
+    }
+}
+
+function createTintedLayer(image, tint, width, height) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.imageSmoothingEnabled = false;
+    context.drawImage(image, 0, 0, width, height);
+
+    const pixels = context.getImageData(0, 0, width, height);
+    for (let index = 0; index < pixels.data.length; index += 4) {
+        pixels.data[index] = Math.round(pixels.data[index] * tint[0] / 255);
+        pixels.data[index + 1] = Math.round(pixels.data[index + 1] * tint[1] / 255);
+        pixels.data[index + 2] = Math.round(pixels.data[index + 2] * tint[2] / 255);
+    }
+    context.putImageData(pixels, 0, 0);
+    return canvas;
+}
+
+function parseHexColor(value) {
+    const match = /^#?([\da-f]{6})$/i.exec(value ?? "");
+    if (!match) return null;
+    return [0, 2, 4].map((offset) =>
+        Number.parseInt(match[1].slice(offset, offset + 2), 16),
+    );
+}
+
+function isSpawnEggTexture(path) {
+    return /^items\/(?:mutantbeasts\/)?spawn_egg(?:_overlay)?$/.test(path);
+}
+
+function getSpawnEggBasePath(path) {
+    return /^(items\/(?:mutantbeasts\/)?spawn_egg)\/\d+$/.exec(path)?.[1] ?? null;
 }
 
 export function isEqualToOriginal(path) {

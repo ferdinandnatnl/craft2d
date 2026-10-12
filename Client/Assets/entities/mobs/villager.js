@@ -5,6 +5,8 @@ import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
 
 export class Villager extends Mob {
+    static spawnSize = Object.freeze({ width: 0.6, height: 1.95 });
+
     constructor(world, {
         health = 20,
         noAi = false,

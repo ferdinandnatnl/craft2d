@@ -1,6 +1,7 @@
 import { runtime } from "../../utils/runtime.js";
 import { AI, Mob } from "../mob.js";
 import { Body, BodyPart } from "../../game/body.js";
+import { EntityTypes } from "../../game/entity.js";
 import { Items } from "@2dcraft.com/shared/items.js";
 import { LootItem, LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { Sounds, playPositionalSound, playRandomSoundFromArray } from "../../game/sounds.js";
@@ -8,6 +9,8 @@ import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
 
 export class Creeper extends Mob {
+    static spawnSize = Object.freeze({ width: 0.6, height: 1.5 });
+
     constructor(
         world,
         {
@@ -16,6 +19,7 @@ export class Creeper extends Mob {
             position = new Vector2(),
             invulnerable = false,
             myChunkX = 0,
+            UUID,
             body = createCreeperBody(),
         } = {},
     ) {
@@ -32,6 +36,7 @@ export class Creeper extends Mob {
             speed: 1,
             stepSize: 0.4,
             myChunkX: myChunkX,
+            UUID,
             ambientSounds: null,
             footstepSounds: null,
             isHostile: true,
@@ -58,12 +63,16 @@ export class Creeper extends Mob {
     }
 
     checkPrime() {
-        if (!this.world.player || !this.world.player.abilities.hasHealth)
-            return;
+        const target = this.getRetaliationTarget() ?? this.world.player;
+        if (
+            !target ||
+            target.dimension !== this.dimension ||
+            (target.type === EntityTypes.Player && !target.abilities.hasHealth)
+        ) return;
 
         const distance = Vector2.Distance(
             this.position,
-            this.world.player.position,
+            target.position,
         );
         if (distance <= 2.5 * BLOCK_SIZE) {
             this.primed = true;
@@ -100,13 +109,14 @@ export class Creeper extends Mob {
             damage: 12,
             power: 12,
             excludeEntity: this,
+            sourceEntity: this,
             destroyTerrain: runtime.GAMERULES.doMobGriefing,
         });
     }
 
-    hit(damage, hitfromX = 0, kb = 0) {
+    hit(damage, hitfromX = 0, kb = 0, _cause = null, attacker = null) {
         if (!this.health) return;
-        if (!this.damage(damage)) return;
+        if (!this.damage(damage, attacker)) return;
 
         this.knockBack(hitfromX, kb);
         playRandomSoundFromArray({

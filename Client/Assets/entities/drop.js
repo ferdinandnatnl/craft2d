@@ -1,6 +1,6 @@
 import { runtime } from "../utils/runtime.js";
 import { Entity, EntityTypes } from "../game/entity.js";
-import { getItem } from "@2dcraft.com/shared/item.js";
+import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { Vector2, arePropsEqual, uuidv4 } from "../utils/classes.js";
 import { BLOCK_SIZE } from "../utils/globals.js";
 import { getSpriteSize, getSpriteUrl } from "../utils/texturePackLoader.js";
@@ -20,7 +20,7 @@ export class Drop extends Entity {
     ) {
         const isItem = itemId !== null;
         const spritePath = isItem
-            ? "items/" + getItem(itemId).sprite
+            ? "items/" + getItemSpritePath(itemId)
             : "blocks/" + getBlock(blockId).iconSprite;
         const sprite = getSpriteUrl(spritePath);
 

@@ -391,12 +391,25 @@ export class Entity {
         if (this.hurtCooldown <= 0) this.hurtCooldown = 0;
     }
 
-    damage(damage) {
+    damage(damage, attacker = null) {
         if (this.hurtCooldown) return false;
         this.hurtCooldown = 0.3;
         this.flashColor();
         const previousHealth = this.health;
         this.decreaseHealth(damage);
+        if (
+            this.type === EntityTypes.Mob &&
+            this.isHostile &&
+            this.health > 0 &&
+            Number.isFinite(damage) &&
+            damage > 0 &&
+            attacker?.type === EntityTypes.Mob &&
+            attacker !== this &&
+            attacker.health > 0
+        ) {
+            this.retaliationTarget = attacker;
+            this.retaliationUntil = runtime.passedTime + 8;
+        }
         if (this.type === EntityTypes.Mob && Number.isFinite(damage) && damage > 0) {
             const actualDamage = Math.min(damage, Math.max(0, previousHealth ?? 0));
             if (actualDamage > 0) {
@@ -514,7 +527,7 @@ export class Entity {
                     (Math.max(0.5, this.speed || 1) * BLOCK_SIZE))
                 : 0;
         }
-        if (this.body) updateBendPose(this, runtime.passedTime);
+        if (this.body && !this.isMutant) updateBendPose(this, runtime.passedTime);
     }
 
     footstepEmitterLogic() {

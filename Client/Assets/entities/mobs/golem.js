@@ -64,6 +64,8 @@ class Golem extends Mob {
 }
 
 export class IronGolem extends Golem {
+    static spawnSize = Object.freeze({ width: 1.4, height: 2.7 });
+
     constructor(world, options = {}) {
         super(world, {
             name: "Iron Golem",
@@ -134,7 +136,7 @@ export class IronGolem extends Golem {
         if (Math.abs(targetOffsetX) <= attackReach && verticalOverlap) {
             this.targetVelocity.x = 0;
             if (!this.attackCooldown) {
-                target.hit(20, ownCenterX, 8, `Hit by ${this.name}`);
+                target.hit(20, ownCenterX, 8, `Hit by ${this.name}`, this);
                 this.attackCooldown = this.attackCooldownMax;
             }
             return;
@@ -158,6 +160,8 @@ export class IronGolem extends Golem {
 }
 
 export class SnowGolem extends Golem {
+    static spawnSize = Object.freeze({ width: 0.8, height: 1.9 });
+
     constructor(world, options = {}) {
         super(world, {
             name: "Snow Golem",
