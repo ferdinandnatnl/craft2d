@@ -150,10 +150,11 @@ function commandWorkers(player, task) {
         : [];
     workers.forEach((worker, index) => {
         const assigned = structuredClone(task);
-        if (assigned.type === "move" && moveTargets.length > 0) {
+        if (assigned.type === "move") {
             if (!moveTargets[index]) {
                 worker.setJob(null);
                 worker.targetVelocity.x = 0;
+                worker.velocity.x = 0;
                 return;
             }
             assigned.target = moveTargets[index];
@@ -184,6 +185,7 @@ function getMoveFormationTargets(workers, target) {
             Math.abs(a.x - target.x) - Math.abs(b.x - target.x) ||
             a.x - b.x || a.y - b.y);
     const slots = [];
+    const maxWorkersAtDestination = Math.min(workers.length, 2);
     for (const candidate of candidates) {
         const overlaps = slots.some((slot) =>
             Math.abs(slot.x - candidate.x) < 1 &&
@@ -191,7 +193,7 @@ function getMoveFormationTargets(workers, target) {
         );
         if (overlaps) continue;
         slots.push({ x: candidate.x, y: candidate.y });
-        if (slots.length >= workers.length) break;
+        if (slots.length >= maxWorkersAtDestination) break;
     }
     return slots;
 }
