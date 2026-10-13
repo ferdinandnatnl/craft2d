@@ -299,11 +299,11 @@ export class VoxelEntities {
             pivots[name] = joint;
         };
 
-        // Direct port of the licensed ModelMinion boxes, pivots, mirroring,
-        // backpack angle, and atlas offsets.
+        // Licensed ModelMinion boxes and atlas offsets, adapted for the side camera's depth axis.
         addPart({
             name: "head", size: [6, 5, 4], uv: [0, 0],
-            pivot: [0, 12, 0], box: [-3, -6, -3],
+            // Align the head's box center with the torso's depth in the side view.
+            pivot: [0, 12, 3], box: [-3, -6, -3],
         });
         addPart({
             name: "torso", size: [8, 8, 4], uv: [22, 0],
@@ -327,7 +327,8 @@ export class VoxelEntities {
         });
         addPart({
             name: "backpack", size: [6, 7, 5], uv: [11, 13],
-            pivot: [0, 13, 4], box: [-3, -2, -2],
+            // Positive Z faces the camera, so keep the backpack behind the torso.
+            pivot: [0, 13, -4], box: [-3, -2, -2],
             // Minecraft model Y points down; the voxel rig uses Y up.
             rotationX: -0.7853982,
         });

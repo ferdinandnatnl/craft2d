@@ -12,6 +12,7 @@ import {
 } from "./globals.js";
 import { input } from "./input.js";
 import { getSpriteSize, getSpriteUrl } from "./texturePackLoader.js";
+import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import {
     activeDimension,
     Dimensions,
@@ -443,23 +444,23 @@ export function drawInventory() {
 }
 
 export function drawDestroyStage() {
-    if (!runtime.world.player) return;
-    if (runtime.world.player.breakingStage == 0 || runtime.world.player.breakingStage > 10)
+    const player = runtime.world?.player;
+    const target = player?.breakingTarget;
+    if (!player || !target || target.blockType === Blocks.Air ||
+        target.blockType !== player.breakingTargetBlockType) return;
+    if (player.breakingStage == 0 || player.breakingStage > 10)
         return;
 
-    const mouseX = input.getMousePositionOnBlockGrid().x;
-    const mouseY = input.getMousePositionOnBlockGrid().y;
-
     const spriteSize = getSpriteSize(
-        "blocks/destroy_stage_" + (runtime.world.player.breakingStage - 1),
+        "blocks/destroy_stage_" + (player.breakingStage - 1),
     ).width;
 
     drawImage({
         url: getSpriteUrl(
-            "blocks/destroy_stage_" + (runtime.world.player.breakingStage - 1),
+            "blocks/destroy_stage_" + (player.breakingStage - 1),
         ),
-        x: mouseX - Math.floor(camera.x),
-        y: mouseY - Math.floor(camera.y),
+        x: target.transform.position.x - Math.floor(camera.x),
+        y: target.transform.position.y - Math.floor(camera.y),
         scale: BLOCK_SIZE / spriteSize,
         centerX: false,
     });
@@ -471,6 +472,13 @@ export function drawMinionDestroyStages() {
         const stage = minion.miningStage;
         if (!minion.isMinion || minion.dimension !== activeDimension ||
             !target || !Number.isInteger(stage) || stage < 1 || stage > 10) continue;
+        const block = runtime.world.getBlockAtWorldPosition(
+            target.x * BLOCK_SIZE,
+            target.y * BLOCK_SIZE,
+            false,
+            minion.dimension,
+        );
+        if (!block || block.blockType === Blocks.Air) continue;
 
         const texture = `blocks/destroy_stage_${stage - 1}`;
         const spriteSize = getSpriteSize(texture).width;

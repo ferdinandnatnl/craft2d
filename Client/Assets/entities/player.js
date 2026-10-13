@@ -128,6 +128,9 @@ export class Player extends Entity {
         this.breakingTime = 0;
         this.lastBreakSoundTime = 0;
 
+        this.breakingTarget = null;
+        this.breakingTargetBlockType = null;
+        this.breakingTargetIsWall = false;
         this.hoverBlock = null;
         this.oldHoverBlock = null;
 
@@ -1676,15 +1679,20 @@ export class Player extends Entity {
     }
 
     breakingAndPlacingLogic() {
-        if (this.windowOpen) return;
-        if (runtime.game.pauseMenu?.getActive()) return;
+        if (this.windowOpen || runtime.game.pauseMenu?.getActive()) {
+            this.resetBreaking();
+            return;
+        }
 
         if (input.isActionPressed("attack")) {
             this.playerSwing();
             this.tryHit();
         }
 
-        if (!this.hoverBlock) return;
+        if (!this.hoverBlock) {
+            this.resetBreaking();
+            return;
+        }
 
         if (input.isActionDown("attack")) {
             if (
@@ -2195,9 +2203,26 @@ export class Player extends Entity {
         this.breakingTime = 0;
         this.breakingStage = 0;
         this.lastBreakSoundTime = 0;
+        this.breakingTarget = null;
+        this.breakingTargetBlockType = null;
+        this.breakingTargetIsWall = false;
     }
 
     breakingLogic(hover, wall = false) {
+        if (!hover) {
+            this.resetBreaking();
+            return;
+        }
+
+        if (this.breakingTarget !== hover ||
+            this.breakingTargetBlockType !== hover.blockType ||
+            this.breakingTargetIsWall !== wall) {
+            this.resetBreaking();
+            this.breakingTarget = hover;
+            this.breakingTargetBlockType = hover.blockType;
+            this.breakingTargetIsWall = wall;
+        }
+
         if (!this.isBlockInInteractionRange(hover)) {
             this.resetBreaking();
             return;
@@ -2205,7 +2230,10 @@ export class Player extends Entity {
 
         let block = getBlock(hover.blockType);
 
-        if (block.air || block.fluid) return;
+        if (block.air || block.fluid) {
+            this.resetBreaking();
+            return;
+        }
 
         if (
             !this.abilities.mayBuild ||
@@ -2228,6 +2256,7 @@ export class Player extends Entity {
                 false,
                 activeDimension,
             );
+            this.resetBreaking();
             return;
         }
 

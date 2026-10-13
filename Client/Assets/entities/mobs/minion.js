@@ -109,6 +109,15 @@ function isMineable(block) {
         ![SpecialType.SingleChest, SpecialType.Furnace].includes(def.specialType));
 }
 
+function climbMaterialFromBlock(block) {
+    const def = getBlock(block?.blockType);
+    if (!def || def.dropItem != null) return null;
+    const dropBlock = def.dropBlock ?? block.blockType;
+    return [Blocks.Dirt, Blocks.Cobblestone].includes(dropBlock)
+        ? dropBlock
+        : null;
+}
+
 function createMinionBody() {
     return new Body({
         sprite: "minion/as_entityminion",
@@ -597,6 +606,111 @@ export class Minion extends Villager {
         }
     }
 
+    assistFollowClimb(candidates) {
+        if (!["follow", "move"].includes(this.job?.type) ||
+            runtime.GAMERULES?.doMobGriefing === false) return false;
+
+        const current = this.currentFootNode();
+        const currentCenterX = this.position.x + this.hitbox.x / 2;
+        let targetCenterX;
+        let destination;
+        if (this.job.type === "follow") {
+            const owner = this.getOwner();
+            if (!owner) return false;
+            targetCenterX = owner.position.x + owner.hitbox.x / 2;
+            const spacing = 1.25 + (this.followerIndex() % 3) * 0.55;
+            destination = {
+                x: Math.floor((owner.position.x - owner.direction * spacing * BLOCK_SIZE) / BLOCK_SIZE),
+                y: Math.round((owner.position.y + owner.hitbox.y) / BLOCK_SIZE),
+            };
+        } else {
+            targetCenterX = (this.job.target.x + 0.5) * BLOCK_SIZE;
+            destination = this.job.target;
+        }
+        const goal = candidates.reduce((closest, candidate) => {
+            if (!closest) return candidate;
+            const candidateDistance =
+                Math.abs(candidate.x - destination.x) + Math.abs(candidate.y - destination.y);
+            const closestDistance =
+                Math.abs(closest.x - destination.x) + Math.abs(closest.y - destination.y);
+            return candidateDistance < closestDistance ? candidate : closest;
+        }, null);
+        if (!goal || goal.y >= current.y) return false;
+
+        const direction = Math.abs(targetCenterX - currentCenterX) < 1
+            ? this.direction
+            : Math.sign(targetCenterX - currentCenterX);
+        const stepX = current.x + direction;
+        const stepY = current.y - 1;
+        if (stepY <= 2 || stepY >= CHUNK_HEIGHT) return false;
+        const support = this.blockAt(current.x, current.y);
+        const step = this.blockAt(stepX, stepY);
+        const stepDef = getBlock(step?.blockType);
+        if (!hasBlockCollision(support) || !stepDef?.air || stepDef.fluid) {
+            return false;
+        }
+
+        const materialSlot = this.inventory.find((item) =>
+            item.count > 0 && !item.props?.wall &&
+            [Blocks.Dirt, Blocks.Cobblestone].includes(item.blockId),
+        );
+        const clearance = [
+            this.blockAt(stepX, stepY - 1),
+            this.blockAt(stepX, stepY - 2),
+        ];
+        for (const obstacle of clearance) {
+            if (!hasBlockCollision(obstacle)) continue;
+            if (!isMineable(obstacle) ||
+                (!materialSlot && !climbMaterialFromBlock(obstacle))) {
+                return false;
+            }
+            this.targetVelocity.x = 0;
+            this._navigationResumeState = MinionState.FollowingOwner;
+            this.workOnNavigationBlock(obstacle, runtime.deltaTime || 0);
+            return true;
+        }
+
+        if (!materialSlot) return false;
+
+        const blockX = stepX * BLOCK_SIZE;
+        const blockY = stepY * BLOCK_SIZE;
+        const occupied = this.world.entities.some((entity) =>
+            entity !== this && entity.type !== EntityTypes.Drop &&
+            entity.dimension === this.dimension && entity.health > 0 &&
+            entity.position.x < blockX + BLOCK_SIZE &&
+            entity.position.x + entity.hitbox.x > blockX &&
+            entity.position.y < blockY + BLOCK_SIZE &&
+            entity.position.y + entity.hitbox.y > blockY,
+        );
+        if (occupied) return false;
+
+        const placed = this.world.setBlockType(step, materialSlot.blockId);
+        if (!placed) return false;
+        materialSlot.count--;
+        if (materialSlot.count <= 0) {
+            materialSlot.blockId = null;
+            materialSlot.itemId = null;
+            materialSlot.count = 0;
+            materialSlot.props = {};
+        }
+        if (multiplayer) {
+            this.world.serverPlaceBlock(
+                step.chunkX,
+                step.x,
+                step.y,
+                placed.blockType,
+                false,
+                this.dimension,
+            );
+        }
+        this.path = null;
+        this.pathGoalKey = null;
+        this.pathTimer = PATH_REFRESH_INTERVAL;
+        this.targetVelocity.x = 0;
+        this.broadcastState();
+        return true;
+    }
+
     followerIndex() {
         return this.world.entities.filter((entity) =>
             entity.isMinion && entity.ownerUUID === this.ownerUUID,
@@ -625,7 +739,13 @@ export class Minion extends Villager {
             return;
         }
         if (this.job.type === "move") {
-            const candidates = this.stanceCandidatesNear(this.job.target, 2, 3);
+            const target = this.job.target;
+            const distanceToTarget = (node) =>
+                Math.abs(node.x - target.x) + Math.abs(node.y - target.y);
+            const candidates = this.stanceCandidatesNear(target, 1, 1)
+                .sort((a, b) =>
+                    distanceToTarget(a) - distanceToTarget(b) ||
+                    this.distanceToTile(a) - this.distanceToTile(b));
             if (this.navigateTo(candidates, `move:${this.job.target.x}:${this.job.target.y}`)) {
                 this.job = null;
                 this.state = MinionState.Idle;
@@ -1138,13 +1258,19 @@ export class Minion extends Villager {
         this.pathTimer += runtime.deltaTime || 0;
         if (this.pathGoalKey !== goalKey || !this.path || this.pathTimer >= PATH_REFRESH_INTERVAL) {
             const start = this.currentFootNode();
+            const nonCurrentCandidates = candidates.filter((goal) =>
+                goal.x !== start.x || goal.y !== start.y,
+            );
+            const pathCandidates = nonCurrentCandidates.length
+                ? nonCurrentCandidates
+                : candidates;
             let bestPath = null;
             let bestCost = Infinity;
             const followRange = getMinionConfig().minionFollowRange;
             const maxVisited = this.job?.type === "follow"
                 ? Math.max(256, Math.min(10_000, Math.floor(followRange ** 2)))
                 : 2500;
-            for (const goal of candidates.slice(0, 5)) {
+            for (const goal of pathCandidates.slice(0, 5)) {
                 const path = findMinionPath(
                     this.world,
                     this.dimension,
@@ -1163,9 +1289,13 @@ export class Minion extends Villager {
             this.pathTimer = 0;
             if (!bestPath) {
                 this.targetVelocity.x = 0;
+                if (this.assistFollowClimb(candidates)) {
+                    this.pathFindingFails = 0;
+                    return false;
+                }
                 this.pathFindingFails++;
                 if (this.pathFindingFails >= 3 && this.job) {
-                    this.teleportToNode(candidates[0]);
+                    this.teleportToNode(pathCandidates[0]);
                     this.pathFindingFails = 0;
                     return true;
                 }
@@ -1586,6 +1716,11 @@ export class Minion extends Villager {
 
     currentSpeed() {
         return this.speed * (runtime.passedTime < this.workSpeedBonusUntil ? 2 : 1);
+    }
+
+    jump() {
+        if (!this.grounded) return;
+        this.velocity.y = -9 * BLOCK_SIZE;
     }
 
     releaseCarriedEntity() {

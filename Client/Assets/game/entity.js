@@ -854,6 +854,65 @@ export class Entity {
         for (let i = 0; i < stepCount; i++) {
             this.updatePositionWithVelocityStep(stepDeltaTime);
         }
+        this.separateFromMobOverlaps();
+    }
+
+    separateFromMobOverlaps() {
+        if (this.type !== EntityTypes.Mob || this.noCollision ||
+            !Array.isArray(this.world?.entities)) return;
+
+        const separatesFrom = (entity, shift) => {
+            const nextX = entity.position.x + shift;
+            const collision = shift < 0
+                ? entity.checkLeftCollision(nextX)
+                : entity.checkRightCollision(nextX);
+            if (collision) return false;
+            entity.position.x = nextX;
+            if (entity.velocity.x * shift < 0) entity.velocity.x = 0;
+            if (entity.targetVelocity.x * shift < 0) entity.targetVelocity.x = 0;
+            return true;
+        };
+
+        for (let pass = 0; pass < 2; pass++) {
+            let moved = false;
+            for (const other of this.world.entities) {
+                if (other === this || other.type !== EntityTypes.Mob ||
+                    other.dimension !== this.dimension || other.noCollision ||
+                    this.health <= 0 || other.health <= 0 ||
+                    this.carriedByMinionUUID === other.UUID ||
+                    other.carriedByMinionUUID === this.UUID ||
+                    this.crocodileGrabbedByUUID === other.UUID ||
+                    other.crocodileGrabbedByUUID === this.UUID ||
+                    this.carriedEntityUUID === other.UUID ||
+                    other.carriedEntityUUID === this.UUID) continue;
+
+                const verticalOverlap = Math.min(
+                    this.position.y + this.hitbox.y,
+                    other.position.y + other.hitbox.y,
+                ) - Math.max(this.position.y, other.position.y);
+                if (verticalOverlap <= 0) continue;
+
+                const horizontalOverlap = Math.min(
+                    this.position.x + this.hitbox.x,
+                    other.position.x + other.hitbox.x,
+                ) - Math.max(this.position.x, other.position.x);
+                if (horizontalOverlap <= 0) continue;
+
+                const centerDifference =
+                    this.position.x + this.hitbox.x / 2 -
+                    other.position.x - other.hitbox.x / 2;
+                const direction = centerDifference === 0
+                    ? String(this.UUID) < String(other.UUID) ? -1 : 1
+                    : Math.sign(centerDifference);
+                const correction = horizontalOverlap + 2;
+                if (separatesFrom(this, direction * correction)) {
+                    moved = true;
+                } else if (separatesFrom(other, -direction * correction)) {
+                    moved = true;
+                }
+            }
+            if (!moved) break;
+        }
     }
 
     updatePositionWithVelocityStep(stepDeltaTime) {
