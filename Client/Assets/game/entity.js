@@ -858,7 +858,7 @@ export class Entity {
     }
 
     separateFromMobOverlaps() {
-        if (this.type !== EntityTypes.Mob || this.noCollision ||
+        if (![EntityTypes.Player, EntityTypes.Mob].includes(this.type) || this.noCollision ||
             !Array.isArray(this.world?.entities)) return;
 
         const separatesFrom = (entity, shift) => {
@@ -905,7 +905,10 @@ export class Entity {
                     ? String(this.UUID) < String(other.UUID) ? -1 : 1
                     : Math.sign(centerDifference);
                 const correction = horizontalOverlap + 2;
-                if (separatesFrom(this, direction * correction)) {
+                const movingIntoOther = Math.sign(this.velocity.x) === -direction;
+                if (movingIntoOther && separatesFrom(other, -direction * correction)) {
+                    moved = true;
+                } else if (separatesFrom(this, direction * correction)) {
                     moved = true;
                 } else if (separatesFrom(other, -direction * correction)) {
                     moved = true;
