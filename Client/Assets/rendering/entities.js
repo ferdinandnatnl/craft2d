@@ -3,6 +3,7 @@ import { BLOCK_SIZE } from "../utils/globals.js";
 import { ToolType } from "@2dcraft.com/shared/constants.js";
 import { getSpriteUrl } from "../utils/texturePackLoader.js";
 import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
+import { Items } from "@2dcraft.com/shared/items.js";
 import { getBlock } from "../world/block.js";
 import { getBoatPartPitch, getHeadPitch, getLimbPitch, getSwimPartPitch } from "./entityPose.js";
 import { skinBox, skinLimbHalf } from "./entityGeometry.js";
@@ -1207,6 +1208,23 @@ export class VoxelEntities {
                 }
             }
             this.updateHeld(record, entity);
+            if (record.held && entity.holdItem?.itemId === Items.Shield) {
+                const blocking = entity.shieldBlocking === true;
+                const shieldDirection = entity.lookDirection > -90 &&
+                    entity.lookDirection < 90 ? 1 : -1;
+                record.held.position.set(
+                    shieldDirection * (blocking ? 0.12 : 0),
+                    blocking ? -0.24 : -0.5,
+                    blocking ? 0.46 : 0.28,
+                );
+                record.held.rotation.y = shieldDirection < 0
+                    ? Math.PI / 2
+                    : -Math.PI / 2;
+                record.held.rotation.z = blocking
+                    ? 0
+                    : Math.PI / 2;
+                record.held.scale.setScalar(blocking ? 1.15 : 1);
+            }
         }
         for (const entity of this.models.keys()) if (!visible.has(entity)) this.remove(entity);
     }

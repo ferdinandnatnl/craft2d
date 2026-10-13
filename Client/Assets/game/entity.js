@@ -1339,6 +1339,7 @@ export class Entity {
                 this.direction,
                 this.lookDirection,
                 this.holdItem,
+                this.shieldBlocking,
             );
 
             // this.drawFire(ctx);

@@ -131,6 +131,7 @@ export class Player extends Entity {
         this.breakingTarget = null;
         this.breakingTargetBlockType = null;
         this.breakingTargetIsWall = false;
+        this.shieldBlocking = false;
         this.hoverBlock = null;
         this.oldHoverBlock = null;
 
@@ -301,7 +302,12 @@ export class Player extends Entity {
     update() {
         if (!this.isLocal()) return;
 
-        if (this.isDead) return;
+        if (this.isDead) {
+            this.shieldBlocking = false;
+            return;
+        }
+
+        this.shieldBlocking = this.isShieldRaised();
 
         if (!this.windowOpen && input.isActionPressed("minionMenu")) {
             toggleMinionMenu(this);
@@ -429,6 +435,7 @@ export class Player extends Entity {
         this.position = data.position;
 
         this.holdItem = new InventoryItem(data.holdItem);
+        this.shieldBlocking = data.shieldBlocking === true;
 
         if (this.body && data.bodyParts) {
             Object.values(this.body.parts).forEach((part) => {
@@ -498,6 +505,7 @@ export class Player extends Entity {
         let data = {
             position: this.position,
             holdItem: this.holdItem,
+            shieldBlocking: this.shieldBlocking,
 
             bodyParts: [],
 
@@ -593,13 +601,22 @@ export class Player extends Entity {
         }
     }
 
-    hit(damage, hitfromX = 0, kb = 0, cause = null) {
+    hit(damage, hitfromX = 0, kb = 0, cause = null, attacker = null) {
         console.log(cause);
         if (!damage) return;
         if (!this.health) return;
         if (!this.abilities.hasHealth) return;
+        if (this.hurtCooldown) return;
+        if (this.canBlockDamage(hitfromX, attacker, cause)) {
+            this.hurtCooldown = 0.3;
+            this.shieldBlocking = true;
+            this.holdItem = this.getSelectedSlotItem();
+            this.reduceDurability();
+            this.inventory.syncInventoryMultiplayer();
+            return;
+        }
         if (cause) this.deathCause = cause;
-        if (!this.damage(damage)) return;
+        if (!this.damage(damage, attacker)) return;
         if (this.invulnerable) return;
         this.knockBack(hitfromX, kb);
 
@@ -612,6 +629,44 @@ export class Player extends Entity {
             positional: true,
             origin: this.position,
         });
+    }
+
+    isShieldRaised() {
+        if (
+            this.windowOpen ||
+            this.isDead ||
+            runtime.game?.pauseMenu?.getActive?.() ||
+            !input.isActionDown("place")
+        ) return false;
+
+        const selectedItem = this.inventory?.items?.[3]?.[
+            this.inventory.currentSlot
+        ]?.item;
+        return selectedItem?.itemId === Items.Shield && selectedItem.count > 0;
+    }
+
+    canBlockDamage(hitfromX, attacker, cause) {
+        if (!this.isShieldRaised() || attacker === this) return false;
+        if (
+            cause === "Drowned" ||
+            cause === "Burned to death" ||
+            cause === "Fell out of the world" ||
+            cause === "Fell from a high place"
+        ) return false;
+
+        const sourceX = Number.isFinite(attacker?.position?.x)
+            ? attacker.position.x + (attacker.hitbox?.x ?? 0) / 2
+            : Number.isFinite(hitfromX) && hitfromX !== 0
+              ? hitfromX
+              : null;
+        if (!Number.isFinite(sourceX)) return false;
+
+        const playerCenterX = this.position.x + this.hitbox.x / 2;
+        const incomingDirection = Math.sign(sourceX - playerCenterX);
+        const shieldDirection = this.lookDirection > -90 && this.lookDirection < 90
+            ? 1
+            : -1;
+        return incomingDirection !== 0 && incomingDirection === shieldDirection;
     }
 
     respawn() {
@@ -1368,6 +1423,8 @@ export class Player extends Entity {
 
         if (handleMasterStaffInput(this)) return;
 
+        this.shieldBlocking = this.isShieldRaised();
+
         const usePressed = input.isActionPressed("place");
 
         if (usePressed && this.checkForEntityOnMouse()?.isBoat) {
@@ -1375,7 +1432,7 @@ export class Player extends Entity {
             return;
         }
 
-        if (usePressed) this.useItemInHand();
+        if (usePressed && !this.shieldBlocking) this.useItemInHand();
 
         // Placing a boat boards the player immediately. Do not treat the same
         // click as a second interaction with the newly created boat.
@@ -1680,6 +1737,12 @@ export class Player extends Entity {
 
     breakingAndPlacingLogic() {
         if (this.windowOpen || runtime.game.pauseMenu?.getActive()) {
+            this.resetBreaking();
+            return;
+        }
+
+        if (this.isShieldRaised()) {
+            this.shieldBlocking = true;
             this.resetBreaking();
             return;
         }

@@ -1,5 +1,6 @@
 import { runtime } from "../utils/runtime.js";
 import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
+import { Items } from "@2dcraft.com/shared/items.js";
 import { BLOCK_SIZE, ToolType } from "../utils/globals.js";
 import { drawImage } from "../utils/renderer.js";
 import { getSpriteSize, getSpriteUrl, isEqualToOriginal } from "../utils/texturePackLoader.js";
@@ -166,7 +167,7 @@ export class Body {
         }
     }
 
-    draw(ctx, direction, lookDirection, holdItem) {
+    draw(ctx, direction, lookDirection, holdItem, shieldBlocking = false) {
         const sortedParts = Object.values(this.parts).sort(
             (a, b) => a.zIndex - b.zIndex,
         );
@@ -234,6 +235,7 @@ export class Body {
             if (bendPose?.pitch[part.id] != null) {
                 rotation = bendPose.pitch[part.id] * 180 / Math.PI * direction * side;
             }
+            part.shieldBlocking = shieldBlocking;
             part.draw(
                 ctx,
                 lookDirection,
@@ -590,6 +592,8 @@ export class BodyPart {
         const sprite = getSpriteUrl(spritePath);
 
         const isTool = this.isTool(holdItem);
+        const isShield = holdItem.itemId === Items.Shield;
+        const blockingShield = isShield && this.shieldBlocking;
 
         if (!sprite) return;
 
@@ -599,12 +603,22 @@ export class BodyPart {
 
         ctx.scale(!isTool ? direction : -direction, 1);
 
-        ctx.translate(!isTool ? 10 : -20, 0);
+        if (blockingShield) {
+            ctx.translate(18, -10);
+        } else {
+            ctx.translate(!isTool ? 10 : -20, 0);
+        }
 
         const rotationAngle = Math.PI / (isTool ? -1.35 : 2);
-        ctx.rotate(rotationAngle);
+        ctx.rotate(blockingShield ? 0 : rotationAngle);
 
-        const scale = isTool ? 0.8 : 0.5;
+        const scale = blockingShield
+            ? 1
+            : isTool
+              ? 0.8
+              : isShield
+                ? 0.65
+                : 0.5;
 
         let cutoff = 0;
         // If it is a block, get the default draw cutoff

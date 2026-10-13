@@ -69,6 +69,7 @@ export const Items = Object.freeze({
     GoldenShovel: 47,
     GoldenHoe: 48,
     GoldenSword: 49,
+    Shield: 442,
 
     WoodHammer: 1000,
     StoneHammer: 1001,
@@ -582,6 +583,14 @@ export const items = [
         baseDamage: 3,
 
         durability: 32,
+    }),
+    new Item({
+        itemId: Items.Shield,
+        name: "Shield",
+        sprite: "shield.svg",
+        heldInHand: true,
+        stackSize: 1,
+        durability: 336,
     }),
     //#endregion
 

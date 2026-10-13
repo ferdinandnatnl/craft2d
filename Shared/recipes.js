@@ -122,6 +122,29 @@ export const recipes = [
     }),
 
     //#region Tools
+    // Shield
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ itemId: Items.IronIngot }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+            ],
+            [
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+            ],
+            [
+                new RecipeItem({ count: 0 }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ count: 0 }),
+            ],
+        ],
+        output: new InventoryItem({ itemId: Items.Shield, count: 1 }),
+    }),
+
     // Fishing Rod
     new Recipe({
         type: RecipeType.Shaped,
