@@ -1341,14 +1341,9 @@ export class Minion extends Villager {
             return false;
         }
 
-        if (next.y < current.y && this.grounded && current.x !== next.x) this.jump();
-        const obstacleX = direction > 0
-            ? this.position.x + this.hitbox.x + 2
-            : this.position.x - 2;
-        const obstacleTileX = Math.floor(obstacleX / BLOCK_SIZE);
         const obstacleRows = [next.y - 1, next.y - 2];
         for (const obstacleY of obstacleRows) {
-            const block = this.blockAt(obstacleTileX, obstacleY);
+            const block = this.blockAt(next.x, obstacleY);
             if (block && hasBlockCollision(block)) {
                 if (!isMineable(block)) {
                     this.targetVelocity.x = 0;
@@ -1361,6 +1356,7 @@ export class Minion extends Villager {
                 return false;
             }
         }
+        if (next.y < current.y && this.grounded && current.x !== next.x) this.jump();
         this.targetVelocity.x = direction * this.currentSpeed() * BLOCK_SIZE;
         return false;
     }
