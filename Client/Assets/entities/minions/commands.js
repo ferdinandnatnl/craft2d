@@ -145,8 +145,19 @@ function commandWorkers(player, task) {
     }
     if (["woodcut", "excavate", "mineshaft", "stripmine"].includes(task.type) &&
         !payBigOrderCost(player)) return false;
+    const moveTargets = task.type === "move"
+        ? getMoveFormationTargets(workers, task.target)
+        : [];
     workers.forEach((worker, index) => {
         const assigned = structuredClone(task);
+        if (assigned.type === "move" && moveTargets.length > 0) {
+            if (!moveTargets[index]) {
+                worker.setJob(null);
+                worker.targetVelocity.x = 0;
+                return;
+            }
+            assigned.target = moveTargets[index];
+        }
         if (["mineshaft", "stripmine"].includes(assigned.type)) {
             const lane = index - (workers.length - 1) / 2;
             assigned.target.x += Math.round(lane);
@@ -160,6 +171,29 @@ function commandWorkers(player, task) {
     else if (task.type === "mineshaft") playRandomMinionSound("ordermineshaft", 3, firstWorker.position);
     else playRandomMinionSound("randomorder", 5, firstWorker.position);
     return true;
+}
+
+function getMoveFormationTargets(workers, target) {
+    const lead = workers[0];
+    if (!lead || !target) return [];
+    const distanceToTarget = (node) =>
+        Math.abs(node.x - target.x) + Math.abs(node.y - target.y);
+    const candidates = lead.stanceCandidatesNear(target, 4, 3)
+        .sort((a, b) =>
+            distanceToTarget(a) - distanceToTarget(b) ||
+            Math.abs(a.x - target.x) - Math.abs(b.x - target.x) ||
+            a.x - b.x || a.y - b.y);
+    const slots = [];
+    for (const candidate of candidates) {
+        const overlaps = slots.some((slot) =>
+            Math.abs(slot.x - candidate.x) < 1 &&
+            Math.abs(slot.y - candidate.y) < 2,
+        );
+        if (overlaps) continue;
+        slots.push({ x: candidate.x, y: candidate.y });
+        if (slots.length >= workers.length) break;
+    }
+    return slots;
 }
 
 function setPending(player, order) {

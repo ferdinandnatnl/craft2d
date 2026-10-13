@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_SIZE } from "../utils/globals.js";
+import { ToolType } from "@2dcraft.com/shared/constants.js";
 import { getSpriteUrl } from "../utils/texturePackLoader.js";
 import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { getBlock } from "../world/block.js";
@@ -1125,9 +1126,18 @@ export class VoxelEntities {
                 record.pivots.head.rotation.x = headPitch;
                 this.updateHeld(record, entity, "rightArm");
                 if (record.held) {
+                    const heldItem = entity.holdItem?.itemId != null
+                        ? getItem(entity.holdItem.itemId)
+                        : null;
+                    const heldTool = heldItem?.toolType !== undefined &&
+                        heldItem.toolType !== ToolType.Nothing;
                     record.held.rotation.y = entity.direction < 0
                         ? Math.PI / 2
                         : -Math.PI / 2;
+                    record.held.rotation.z = Math.PI / (heldTool ? -1.35 : 2);
+                    record.held.scale.x = heldTool
+                        ? -entity.direction
+                        : entity.direction;
                 }
                 continue;
             }

@@ -740,12 +740,10 @@ export class Minion extends Villager {
         }
         if (this.job.type === "move") {
             const target = this.job.target;
-            const distanceToTarget = (node) =>
-                Math.abs(node.x - target.x) + Math.abs(node.y - target.y);
-            const candidates = this.stanceCandidatesNear(target, 1, 1)
-                .sort((a, b) =>
-                    distanceToTarget(a) - distanceToTarget(b) ||
-                    this.distanceToTile(a) - this.distanceToTile(b));
+            let candidates = this.stanceCandidatesNear(target, 0, 0);
+            if (!candidates.length) {
+                candidates = this.stanceCandidatesNear(target, 1, 1);
+            }
             if (this.navigateTo(candidates, `move:${this.job.target.x}:${this.job.target.y}`)) {
                 this.job = null;
                 this.state = MinionState.Idle;
@@ -867,9 +865,7 @@ export class Minion extends Villager {
         this.targetVelocity.x = 0;
         this.direction = this.currentTarget.x * BLOCK_SIZE < this.position.x ? -1 : 1;
         const miningKey = tileKey(this.currentTarget);
-        const hardness = getBlock(block.blockType).hardness;
-        const workTime = Math.max(0.16, Math.min(4, (hardness || 0.5) * 0.35)) /
-            (runtime.passedTime < this.workSpeedBonusUntil ? 2 : 1);
+        const workTime = this.miningWorkTime(block, 0.35, 4);
         this.beginMiningBlock(block, miningKey);
         this.advanceMiningProgress(block, workTime, dt);
         if (this.miningTimer < workTime) return;
@@ -1372,8 +1368,7 @@ export class Minion extends Villager {
     workOnNavigationBlock(block, dt) {
         this.setHeldToolForBlock(block);
         const key = `${block.chunkX}:${block.x},${block.y}`;
-        const workTime = Math.max(0.16, Math.min(2, getBlock(block.blockType).hardness * 0.25)) /
-            (runtime.passedTime < this.workSpeedBonusUntil ? 2 : 1);
+        const workTime = this.miningWorkTime(block, 0.25, 2);
         this.beginMiningBlock(block, key);
         this.advanceMiningProgress(block, workTime, Math.min(dt, 0.1));
         if (this.miningTimer >= workTime) {
@@ -1398,6 +1393,17 @@ export class Minion extends Villager {
                 : Items.IronPickaxe;
         if (this.holdItem?.itemId === itemId) return;
         this.holdItem = new InventoryItem({ itemId, count: 1 });
+    }
+
+    miningWorkTime(block, hardnessScale, maximum) {
+        const def = getBlock(block?.blockType);
+        const tool = getItem(this.holdItem?.itemId);
+        let hardness = Number.isFinite(def?.hardness) ? def.hardness : 0.5;
+        if (tool?.toolType === def?.toolType) {
+            hardness = Math.max(0, hardness - (tool.toolLevel || 0) / 2);
+        }
+        const haste = runtime.passedTime < this.workSpeedBonusUntil ? 2 : 1;
+        return Math.max(0.16, Math.min(maximum, hardness * hardnessScale)) / haste;
     }
 
     findBestPathToPoint(point, radiusX = 3, radiusY = 4) {
