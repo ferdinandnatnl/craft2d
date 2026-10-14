@@ -52,6 +52,10 @@ export class VoxelRenderer {
         this.failed = false;
         this.initialized = false;
         this.sceneryChunks = new Map();
+        this.foregroundWater = [];
+        this.backgroundWater = [];
+        this.waterSources = null;
+        this.waterHasContent = false;
         canvas?.addEventListener("webglcontextlost", (event) => {
             event.preventDefault(); this.supported = false;
         });
@@ -262,7 +266,9 @@ export class VoxelRenderer {
     updateScenery(world, dimension) {
         if (dimension !== Dimensions.Overworld || world.generator.specialWorldProps.void) {
             this.clearScenery();
-            this.scenery.visible = false; this.backgroundWater = []; return;
+            this.scenery.visible = false;
+            if (this.backgroundWater.length) this.backgroundWater = [];
+            return;
         }
         this.scenery.visible = true;
         const key = `${world.seed}:${dimension}:${!!world.generator.specialWorldProps.flat}:${world.generator.forceToBiome?.name}`;
@@ -402,11 +408,21 @@ export class VoxelRenderer {
         return { group, water };
     }
 
-    updateWater(cells) {
-        if (!cells.length) { if (this.water) this.water.visible = false; return; }
-        const key = cells.map(({x,y,z}) => `${x},${y},${z}`).join(";");
-        if (key === this.waterKey) { this.water.visible = true; return; }
-        this.waterKey = key;
+    updateWater(foregroundCells, backgroundCells) {
+        // Terrain rebuilds replace these arrays, so identity is a cheap cache key.
+        const sameSources = this.waterSources?.foregroundCells === foregroundCells &&
+            this.waterSources?.backgroundCells === backgroundCells;
+        if (sameSources) {
+            if (this.water) this.water.visible = this.waterHasContent;
+            return;
+        }
+        this.waterSources = { foregroundCells, backgroundCells };
+        const cells = [...foregroundCells, ...backgroundCells];
+        if (!cells.length) {
+            this.waterHasContent = false;
+            if (this.water) this.water.visible = false;
+            return;
+        }
         const levels = new Map();
         for (const cell of cells) {
             const key = cell.y.toFixed(2);
@@ -459,6 +475,7 @@ export class VoxelRenderer {
         }
         this.water.position.y = dominant[0].y + 0.015;
         this.water.visible=true;
+        this.waterHasContent = true;
     }
 
     updateLighting(time, seconds, dimension, lighting, effects) {
@@ -512,7 +529,7 @@ export class VoxelRenderer {
             this.updateCamera(camera,width,height);
             this.updateTerrain(world,camera,width,height,dimension,lighting);
             this.updateScenery(world,dimension);
-            this.updateWater([...(this.foregroundWater || []), ...(this.backgroundWater || [])]);
+            this.updateWater(this.foregroundWater, this.backgroundWater);
             this.materials.update(seconds,effects);
             this.updateLighting(time,seconds,dimension,lighting,effects);
             this.entities.update(world.entities,dimension,this.camera,seconds,lighting);
