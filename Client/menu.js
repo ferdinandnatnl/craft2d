@@ -1696,7 +1696,22 @@ export async function pingAllServers() {
 }
 
 // Server Management Functions
+const defaultLanServer = {
+    id: "taylors-university",
+    name: "Taylor's University",
+    ip: "10.103.162.238:25565",
+};
+
+function ensureDefaultLanServer() {
+    const servers = JSON.parse(localStorage.getItem("servers") || "[]");
+    if (servers.some((server) => server.id === defaultLanServer.id)) return;
+
+    servers.unshift(defaultLanServer);
+    localStorage.setItem("servers", JSON.stringify(servers));
+}
+
 export function showServers() {
+    ensureDefaultLanServer();
     worldSelectContainer.style.display = "none";
     texturePackSelectContainer.style.display = "none";
     serverSelectContainer.style.display = "flex";
