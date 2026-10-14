@@ -13,6 +13,7 @@ import {
     getSwordSwingPose,
 } from "./entityPose.js";
 import { skinBox, skinLimbHalf } from "./entityGeometry.js";
+import oakBoatModel from "../models/boat/oak.json" with { type: "json" };
 import { createAlexCrocodileRig, updateAlexCrocodileRig } from "./alexsMobsCrocodileRig.js";
 import { createAlexCaimanRig, updateAlexCaimanRig } from "./alexsMobsCaimanRig.js";
 import { createAlexCatfishRig, updateAlexCatfishRig } from "./alexsMobsCatfishRig.js";
@@ -862,127 +863,94 @@ export class VoxelEntities {
 
     createBoat(entity) {
         const group = new THREE.Group();
-        const hullMaterial = new THREE.MeshStandardMaterial({
-            color: 0x80502a,
-            roughness: 1,
-            side: THREE.DoubleSide,
+        // Point the vanilla boat's length along the 2D world's horizontal axis.
+        group.rotation.y = Math.PI / 2;
+        const model = oakBoatModel.layers.main;
+        const textureSize = {
+            width: model.texture[0],
+            height: model.texture[1],
+        };
+        const texture = new THREE.TextureLoader().load(
+            getSpriteUrl("entity/boat/oak.png"),
+        );
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestMipmapLinearFilter;
+        const material = new THREE.MeshStandardMaterial({
+            map: texture,
+            roughness: 0.95,
+            alphaTest: 0.1,
         });
-        const innerMaterial = new THREE.MeshStandardMaterial({
-            color: 0x55351d,
-            roughness: 1,
-            side: THREE.DoubleSide,
-        });
-        const railMaterial = new THREE.MeshStandardMaterial({
-            color: 0xb17b43,
-            roughness: 1,
-        });
-        const seamMaterial = new THREE.MeshStandardMaterial({
-            color: 0x4c2e19,
-            roughness: 1,
-        });
-        const paddleMaterial = new THREE.MeshStandardMaterial({
-            color: 0x986333,
-            roughness: 1,
-        });
-        const bladeMaterial = new THREE.MeshStandardMaterial({
-            color: 0xb17b43,
-            roughness: 1,
-        });
+        const paddlePivots = {};
+        let modelParent = group;
 
-        const addMesh = (geometry, material, parent = group) => {
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            parent.add(mesh);
-            return mesh;
-        };
-        const addBox = (size, position, material, parent = group) => {
-            const mesh = addMesh(new THREE.BoxGeometry(...size), material, parent);
-            mesh.position.set(...position);
-            return mesh;
-        };
-        const addPolygon = (vertices, material) => {
-            const positions = [];
-            for (let i = 1; i < vertices.length - 1; i++) {
-                positions.push(...vertices[0], ...vertices[i], ...vertices[i + 1]);
+        for (const operation of oakBoatModel.transform ?? []) {
+            const transform = new THREE.Group();
+            if (operation.translate) {
+                transform.position.set(...operation.translate.map((value) => value / 16));
             }
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute(
-                "position",
-                new THREE.Float32BufferAttribute(positions, 3),
-            );
-            geometry.computeVertexNormals();
-            return addMesh(geometry, material);
-        };
-        const addQuad = (vertices, material) => {
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute(
-                "position",
-                new THREE.Float32BufferAttribute([
-                    ...vertices[0], ...vertices[1], ...vertices[2],
-                    ...vertices[0], ...vertices[2], ...vertices[3],
-                ], 3),
-            );
-            geometry.computeVertexNormals();
-            return addMesh(geometry, material);
-        };
-        const addRail = (from, to) => {
-            const dx = to[0] - from[0];
-            const dz = to[2] - from[2];
-            const length = Math.hypot(dx, dz);
-            const rail = addBox(
-                [length, 0.075, 0.075],
-                [(from[0] + to[0]) / 2, from[1], (from[2] + to[2]) / 2],
-                railMaterial,
-            );
-            rail.rotation.y = -Math.atan2(dz, dx);
-        };
-
-        // The six-sided, tapered hull follows Minecraft's low open boat shape.
-        const top = [
-            [-0.82, 0.47, 0], [-0.61, 0.47, -0.38],
-            [0.61, 0.47, -0.38], [0.82, 0.47, 0],
-            [0.61, 0.47, 0.38], [-0.61, 0.47, 0.38],
-        ];
-        const bottom = [
-            [-0.53, 0.08, 0], [-0.40, 0.08, -0.24],
-            [0.40, 0.08, -0.24], [0.53, 0.08, 0],
-            [0.40, 0.08, 0.24], [-0.40, 0.08, 0.24],
-        ];
-        for (let i = 0; i < top.length; i++) {
-            const next = (i + 1) % top.length;
-            addQuad([top[i], top[next], bottom[next], bottom[i]], hullMaterial);
-            addRail(top[i], top[next]);
-        }
-        addPolygon(bottom, innerMaterial);
-
-        // A dark floor, cross-seat, and plank lines make the interior visible.
-        addBox([0.66, 0.035, 0.39], [0, 0.16, 0], innerMaterial);
-        addBox([0.18, 0.075, 0.57], [0, 0.34, 0], railMaterial);
-        for (const side of [-1, 1]) {
-            for (const y of [0.20, 0.30]) {
-                addBox([0.88, 0.018, 0.016], [0, y, side * 0.34], seamMaterial);
+            if (operation.rotate) {
+                transform.rotation.order = "ZYX";
+                transform.rotation.set(...operation.rotate);
             }
+            if (operation.scale) transform.scale.set(...operation.scale);
+            modelParent.add(transform);
+            modelParent = transform;
         }
 
-        const paddles = [];
-        const createPaddle = (side, x) => {
-            const pivot = new THREE.Group();
-            pivot.position.set(x, 0.39, side * 0.33);
-            group.add(pivot);
-            addBox([0.035, 0.035, 0.68], [0, 0, side * 0.34], paddleMaterial, pivot);
-            addBox([0.16, 0.045, 0.22], [0, 0, side * 0.69], bladeMaterial, pivot);
-            paddles.push({ pivot, side });
-        };
-        createPaddle(1, -0.25);
-        createPaddle(-1, 0.25);
+        const addPart = (name, part, parent) => {
+            const joint = new THREE.Group();
+            const offset = part.pose?.offset ?? [0, 0, 0];
+            const rotation = part.pose?.rotation ?? [0, 0, 0];
+            joint.position.set(...offset.map((value) => value / 16));
+            joint.rotation.order = "ZYX";
+            joint.rotation.set(...rotation);
+            joint.name = name;
+            parent.add(joint);
+            if (name.endsWith("_paddle")) paddlePivots[name] = joint;
 
+            for (const cube of part.cubes ?? []) {
+                const [width, height, depth] = cube.size;
+                const [u, v] = Array.isArray(cube.uv)
+                    ? cube.uv
+                    : cube.uv?.north ?? [0, 0];
+                const geometry = skinBox(
+                    width,
+                    height,
+                    depth,
+                    u,
+                    v,
+                    textureSize,
+                    cube.mirror ?? false,
+                    cube.size,
+                );
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(
+                    (cube.origin[0] + width / 2) / 16,
+                    (cube.origin[1] + height / 2) / 16,
+                    (cube.origin[2] + depth / 2) / 16,
+                );
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                joint.add(mesh);
+            }
+
+            for (const [childName, child] of Object.entries(part.children ?? {})) {
+                addPart(childName, child, joint);
+            }
+        };
+
+        addPart("root", model.root, modelParent);
         this.scene.add(group);
         return {
             group,
             isBoat: true,
-            material: hullMaterial,
-            paddles,
+            material,
+            texture,
+            paddles: [
+                { pivot: paddlePivots.left_paddle, side: 1 },
+                { pivot: paddlePivots.right_paddle, side: -1 },
+            ],
         };
     }
 
@@ -995,14 +963,23 @@ export class VoxelEntities {
               ? getItemSpritePath(item.itemId)
               : null;
         const key = sprite ? `${item.blockId != null ? "blocks" : "items"}/${sprite}` : null;
-        if (record.heldKey === key) return;
+        const arm = record.pivots[armName];
+        if (record.heldKey === key && record.held) {
+            if (record.heldArmName !== armName && arm) {
+                (record.bends?.[armName] || arm).add(record.held);
+                record.held.position.set(0, heldItemHandOffsetY(record, armName), 0.28);
+                record.heldArmName = armName;
+            }
+            return;
+        }
+        if (record.heldKey === key && !record.held) return;
         if (record.held) {
             record.held.parent.remove(record.held);
             record.held.geometry.dispose(); record.held.material.map.dispose(); record.held.material.dispose();
             record.held = null;
+            record.heldArmName = null;
         }
         record.heldKey = key;
-        const arm = record.pivots[armName];
         if (!key || !arm) return;
         const map = new THREE.TextureLoader().load(getSpriteUrl(key));
         map.magFilter = THREE.NearestFilter; map.colorSpace = THREE.SRGBColorSpace;
@@ -1011,7 +988,9 @@ export class VoxelEntities {
         mesh.position.set(0, heldItemHandOffsetY(record, armName), 0.28);
         mesh.rotation.y = -Math.PI / 2;
         mesh.castShadow = true;
-        (record.bends?.[armName] || arm).add(mesh); record.held = mesh;
+        (record.bends?.[armName] || arm).add(mesh);
+        record.held = mesh;
+        record.heldArmName = armName;
     }
 
     update(entities, dimension, camera, seconds, lighting) {
@@ -1040,8 +1019,13 @@ export class VoxelEntities {
                 );
                 record.group.rotation.z = Math.sin(entity.bobPhase || 0) * 0.025;
                 for (const { pivot, side } of record.paddles) {
-                    const phase = (entity.paddlePhase || 0) + (side < 0 ? Math.PI : 0);
-                    pivot.rotation.x = side * (0.12 + Math.sin(phase) * 0.32);
+                    const phase = entity.paddlePhase || 0;
+                    pivot.rotation.set(
+                        -0.6545 - Math.sin(phase) * 0.391,
+                        side * Math.cos(phase) * 0.6609,
+                        0,
+                        "ZYX",
+                    );
                 }
                 continue;
             }
@@ -1326,6 +1310,9 @@ export class VoxelEntities {
             const swordSwing = entity.meleeAttackClock
                 ? getSwordSwingPose(entity.body.swordSwing, entity.holdItem, seconds)
                 : null;
+            const heldArmName = entity.skinModel === "steve" || entity.skinModel === "alex"
+                ? entity.direction < 0 ? "leftArm" : "rightArm"
+                : "leftArm";
             const bendPose = entity.body.bendPose;
             record.pose.rotation.x = swimAmount * Math.PI / 2 + (bendPose?.lean || 0);
             if (bendPose) record.group.position.y += bendPose.bob;
@@ -1379,7 +1366,7 @@ export class VoxelEntities {
                 }
             }
             if (entity.meleeAttackClock && entity.body.swordSwing) {
-                const arm = record.pivots.leftArm;
+                const arm = record.pivots[heldArmName];
                 if (arm) {
                     arm.rotation.z = swordSwing
                         ? swordSwing.armAngle * swordSwing.direction
@@ -1387,7 +1374,7 @@ export class VoxelEntities {
                     if (swordSwing) arm.rotation.x = 0;
                 }
             }
-            this.updateHeld(record, entity);
+            this.updateHeld(record, entity, heldArmName);
             if (entity.meleeAttackClock && record.held) {
                 const heldItem = entity.holdItem?.itemId != null
                     ? getItem(entity.holdItem.itemId)

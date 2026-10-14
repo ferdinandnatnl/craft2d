@@ -204,6 +204,7 @@ export const SpecialType = Object.freeze({
     EndPortalFrame: 15,
     EndPortal: 16,
     Door: 17,
+    Bed: 18,
 });
 
 export const BlockCategory = Object.freeze({

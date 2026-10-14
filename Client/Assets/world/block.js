@@ -10,6 +10,7 @@ import { BLOCK_SIZE, CHUNK_HEIGHT, TICK_SPEED, ToolType, multiplayer, updatingBl
 import { getSpriteAverageColor, getSpriteSize, getSpriteUrl } from "../utils/texturePackLoader.js";
 import { blockRegistry } from "@2dcraft.com/shared/blockRegistry.js";
 import { doorBlockPairs } from "@2dcraft.com/shared/blocks.js";
+import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
 import {
     activeDimension,
     getDimension,
@@ -18,6 +19,7 @@ import {
 import { createParticleEmitter } from "./particleEmitter.js";
 import { treesRegistry } from "@2dcraft.com/shared/treesRegistry.js";
 import { classicLightTint } from "../rendering/renderLight.js";
+import { getDoorPanelBounds } from "../rendering/doorGeometry.js";
 
 function Blocks() {
     return blockRegistry.Blocks;
@@ -1539,7 +1541,152 @@ export class Block extends Square {
                 if (door?.wooden) this.setDoorOpen(!this.metaData?.open);
                 break;
             }
+            case SpecialType.Bed:
+                this.bedInteraction(player);
+                break;
         }
+    }
+
+    bedInteraction(player) {
+        const bedFootIds = [Blocks().BedFoot, Blocks().BedFootWest];
+        const adjacentBlocks = [
+            this,
+            this.world.getBlockAtWorldPosition(
+                this.transform.position.x - BLOCK_SIZE,
+                this.transform.position.y,
+                false,
+                this.dimensionIndex,
+            ),
+            this.world.getBlockAtWorldPosition(
+                this.transform.position.x + BLOCK_SIZE,
+                this.transform.position.y,
+                false,
+                this.dimensionIndex,
+            ),
+        ];
+        const linkedFoot = this.linkedBlocks?.find(({ blockType }) =>
+            bedFootIds.includes(blockType),
+        );
+        const bed = linkedFoot
+            ? this.world.getBlockAtWorldPosition(
+                  linkedFoot.x,
+                  linkedFoot.y,
+                  false,
+                  this.dimensionIndex,
+              )
+            : adjacentBlocks.find((block) =>
+                  block && bedFootIds.includes(block.blockType),
+              ) || this;
+        if (!bed) return;
+
+        if (this.dimensionIndex !== Dimensions.Overworld) {
+            const bedPosition = new Vector2(
+                bed.transform.position.x + BLOCK_SIZE,
+                bed.transform.position.y + BLOCK_SIZE / 2,
+            );
+            bed.breakBlock(false, false, true);
+            if (multiplayer) {
+                this.world.serverBreakBlock(
+                    bed.chunkX,
+                    bed.x,
+                    bed.y,
+                    Blocks().Air,
+                    false,
+                    false,
+                    this.dimensionIndex,
+                    null,
+                    false,
+                );
+                const bedChunks = new Set([
+                    bed.chunkX,
+                    ...(bed.linkedBlocks || []).map(({ x }) =>
+                        this.world.getChunkXForWorldX(x),
+                    ),
+                ]);
+                for (const chunkX of bedChunks) {
+                    this.world.uploadChunkToServer(
+                        chunkX,
+                        this.dimensionIndex,
+                    );
+                }
+            }
+            this.world.createExplosion(bedPosition, {
+                radius: 5 * BLOCK_SIZE,
+                damage: 20,
+                power: 24,
+                dimension: this.dimensionIndex,
+            });
+            return;
+        }
+
+        const bedHead = this.world.getBlockAtWorldPosition(
+            bed.transform.position.x +
+                (bed.blockType === Blocks().BedFootWest ? -BLOCK_SIZE : BLOCK_SIZE),
+            bed.transform.position.y,
+            false,
+            this.dimensionIndex,
+        );
+        const bedLeftX = Math.min(
+            bed.transform.position.x,
+            bedHead?.transform.position.x ?? bed.transform.position.x,
+        );
+        for (const x of [bedLeftX, bedLeftX + BLOCK_SIZE]) {
+            for (const y of [
+                bed.transform.position.y - BLOCK_SIZE,
+                bed.transform.position.y - 2 * BLOCK_SIZE,
+            ]) {
+                const space = this.world.getBlockAtWorldPosition(
+                    x,
+                    y,
+                    false,
+                    this.dimensionIndex,
+                );
+                if (!space || hasBlockCollision(space)) {
+                    runtime.game?.chat?.message(
+                        "There isn't enough room above this bed.",
+                    );
+                    return;
+                }
+            }
+        }
+
+        const isNight = runtime.time > 3.5 && runtime.time < 6.5;
+        if (isNight) {
+            const nearbyHostile = this.world.entities.some(
+                (entity) => entity?.isHostile === true &&
+                    entity.health > 0 &&
+                    entity.dimension === player.dimension &&
+                    Vector2.Distance(entity.position, player.position) <=
+                        8 * BLOCK_SIZE,
+            );
+            if (nearbyHostile) {
+                runtime.game?.chat?.message(
+                    "You can't sleep now; monsters are nearby.",
+                );
+                return;
+            }
+        }
+
+        player.spawnPoint = new Vector2(
+            bedLeftX + BLOCK_SIZE - player.hitbox.x / 2,
+            bed.transform.position.y - player.hitbox.y,
+        );
+
+        if (!isNight) {
+            runtime.game?.chat?.message("Respawn point set.");
+            return;
+        }
+
+        if (multiplayer && !this.world.isWorldAuthority) {
+            runtime.game?.chat?.message(
+                "Respawn point set. Only the host can skip the night.",
+            );
+            return;
+        }
+
+        runtime.time = 1;
+        runtime.day = true;
+        runtime.game?.chat?.message("You slept through the night.");
     }
 
     setDoorOpen(open) {
@@ -2191,35 +2338,32 @@ export class Block extends Square {
     }
 
     draw(ctx, camera) {
-        if (
-            !this.wall &&
-            getBlock(this.blockType).specialType === SpecialType.Door &&
-            this.metaData?.open &&
-            this.img?.complete
-        ) {
-            const width = Math.max(2, Math.round(BLOCK_SIZE * 0.12));
-            const blockX = this.transform.position.x;
-            const x = Math.round(
-                (this.metaData.hinge === "left" ? blockX : blockX + BLOCK_SIZE - width) -
-                    camera.x,
+        const isDoor = !this.wall &&
+            getBlock(this.blockType).specialType === SpecialType.Door;
+        if (isDoor && this.img?.complete) {
+            const { left, width } = getDoorPanelBounds(
+                this.transform.position.x / BLOCK_SIZE,
+                this.metaData,
             );
+            const x = Math.round(left * BLOCK_SIZE - camera.x);
+            const widthPx = Math.max(2, Math.round(width * BLOCK_SIZE));
             const y = Math.round(this.transform.position.y - camera.y);
             ctx.save();
             ctx.globalAlpha = this.alpha;
             if (this.filterBrightness < 100) {
                 ctx.filter = `brightness(${this.filterBrightness}%)`;
             }
-            ctx.drawImage(this.img, x, y, width, BLOCK_SIZE);
+            ctx.drawImage(this.img, x, y, widthPx, BLOCK_SIZE);
             ctx.filter = "none";
             if (this.dark) {
                 ctx.globalAlpha = 0.5;
                 ctx.fillStyle = "black";
-                ctx.fillRect(x, y, width, BLOCK_SIZE);
+                ctx.fillRect(x, y, widthPx, BLOCK_SIZE);
             }
             if (this.lightLevel < 15) {
                 ctx.globalAlpha = 1 - this.getBrightness();
                 ctx.fillStyle = "black";
-                ctx.fillRect(x, y, width, BLOCK_SIZE);
+                ctx.fillRect(x, y, widthPx, BLOCK_SIZE);
             }
             ctx.restore();
         } else {

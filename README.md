@@ -62,6 +62,12 @@ Explore outer End islands for loot outposts, then use the center portal to
 return home. Newly generated Overworld chunks can also contain ruined portals
 with supplies to repair and light them.
 
+Craft a red bed at a crafting table with three red wool across the top row and
+three planks below. Place it on solid ground. Use it during the day to set your
+respawn point, or at night to sleep and set your respawn point. Nearby hostile
+mobs prevent sleep. In multiplayer, only the host can skip the night. Beds
+explode when used in the Nether or End.
+
 Use `/locate village` in chat to find the nearest village. Pumpkin patches can
 appear in plains, forests, taiga, and savanna. Use shears on a pumpkin, then
 place the carved pumpkin last: put it above two snow blocks for a snow golem,

@@ -10,6 +10,7 @@ import { getBlock, SpecialType } from "../world/block.js";
 import { getDimension, getDimensionChunks, Dimensions } from "../world/dimension.js";
 import { VolumetricSky } from "./volumetricSky.js";
 import { VoxelMaterials, FaceBatch } from "./materials.js";
+import { getDoorPanelBounds } from "./doorGeometry.js";
 import { VoxelEntities } from "./entities.js";
 import { syncSliceCamera } from "./projection.js";
 import { terrainColumnFaces, terrainSkyExposure, scenerySeed } from "./heightfield.js";
@@ -56,6 +57,7 @@ function addEndFrameEye(batch, x, y, z, light) {
 export class VoxelRenderer {
     constructor(canvas) {
         this.canvas = canvas;
+        this.mobilePerformanceMode = window.matchMedia?.("(pointer: coarse)").matches ?? false;
         this.supported = false;
         this.failed = false;
         this.initialized = false;
@@ -77,13 +79,18 @@ export class VoxelRenderer {
     }
 
     getDevicePixelRatio() {
-        return Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+        const maxPixelRatio = this.mobilePerformanceMode ? 1 : 2;
+        return Math.max(1, Math.min(window.devicePixelRatio || 1, maxPixelRatio));
     }
 
     initialize() {
         if (this.initialized || this.failed || !this.canvas) return this.supported;
         try {
-            this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
+            this.renderer = new THREE.WebGLRenderer({
+                canvas: this.canvas,
+                antialias: !this.mobilePerformanceMode,
+                alpha: false,
+            });
             this.renderPixelRatio = this.getDevicePixelRatio();
             this.renderer.setPixelRatio(this.renderPixelRatio);
             this.renderer.setSize(1920, 1080, false);
@@ -104,7 +111,8 @@ export class VoxelRenderer {
             this.scene.add(this.terrain, this.scenery);
             this.sun = new THREE.DirectionalLight(0xffefd5, 3);
             this.sun.castShadow = true;
-            this.sun.shadow.mapSize.set(2048, 2048);
+            const sunShadowMapSize = this.mobilePerformanceMode ? 1024 : 2048;
+            this.sun.shadow.mapSize.set(sunShadowMapSize, sunShadowMapSize);
             Object.assign(this.sun.shadow.camera, {
                 left: -27,
                 right: 27,
@@ -120,7 +128,7 @@ export class VoxelRenderer {
             this.scene.add(this.sun, this.sun.target, this.ambient);
             this.lights = Array.from({ length: 3 }, () => {
                 const light = new THREE.PointLight(0xffaa55, 0, 12, 1.4);
-                light.castShadow = true;
+                light.castShadow = !this.mobilePerformanceMode;
                 light.shadow.mapSize.set(256, 256);
                 light.shadow.camera.near = 0.05;
                 light.shadow.normalBias = 0.018;
@@ -129,27 +137,29 @@ export class VoxelRenderer {
             });
             this.sky = new VolumetricSky();
             this.scene.background = this.sky.target.texture;
-            try {
-                this.composer = new EffectComposer(this.renderer);
-                this.composer.addPass(new RenderPass(this.scene, this.camera));
-                this.bloomPass = new UnrealBloomPass(
-                    new THREE.Vector2(
+            if (!this.mobilePerformanceMode) {
+                try {
+                    this.composer = new EffectComposer(this.renderer);
+                    this.composer.addPass(new RenderPass(this.scene, this.camera));
+                    this.bloomPass = new UnrealBloomPass(
+                        new THREE.Vector2(
+                            Math.ceil(this.canvas.width / 2),
+                            Math.ceil(this.canvas.height / 2),
+                        ),
+                        0.3,
+                        0.35,
+                        1.1,
+                    );
+                    this.composer.addPass(this.bloomPass);
+                    this.composer.addPass(new OutputPass());
+                    this.bloomPass.setSize(
                         Math.ceil(this.canvas.width / 2),
                         Math.ceil(this.canvas.height / 2),
-                    ),
-                    0.3,
-                    0.35,
-                    1.1,
-                );
-                this.composer.addPass(this.bloomPass);
-                this.composer.addPass(new OutputPass());
-                this.bloomPass.setSize(
-                    Math.ceil(this.canvas.width / 2),
-                    Math.ceil(this.canvas.height / 2),
-                );
-            } catch (error) {
-                console.warn("Cinematic effects are unavailable; keeping 3D rendering.", error);
-                this.disposePostprocessing();
+                    );
+                } catch (error) {
+                    console.warn("Cinematic effects are unavailable; keeping 3D rendering.", error);
+                    this.disposePostprocessing();
+                }
             }
             this.initialized = this.supported = true;
         } catch (error) {
@@ -242,17 +252,12 @@ export class VoxelRenderer {
             const ox = def.blockOffset?.x || 0, oy = def.blockOffset?.y || 0;
             if (def.specialType === SpecialType.Door) {
                 const frontZ = z + 1.01;
-                const isOpen = Boolean(block.metaData?.open);
-                // Match the Classic renderer so open doors remain visible edge-on.
-                const doorWidth = isOpen ? 0.12 : 1;
-                const hingeX = block.metaData?.hinge === "left"
-                    ? x
-                    : x + 1 - doorWidth;
+                const { left, width } = getDoorPanelBounds(x, block.metaData);
                 batch.quad(sprite, { plant: true }, [
-                    [hingeX, -y - 1, frontZ],
-                    [hingeX + doorWidth, -y - 1, frontZ],
-                    [hingeX + doorWidth, -y - 1 + h, frontZ],
-                    [hingeX, -y - 1 + h, frontZ],
+                    [left, -y - 1, frontZ],
+                    [left + width, -y - 1, frontZ],
+                    [left + width, -y - 1 + h, frontZ],
+                    [left, -y - 1 + h, frontZ],
                 ], [0, 0, 1], shade);
                 continue;
             }
@@ -753,7 +758,7 @@ export class VoxelRenderer {
             light.color.set(source.def.sprite?.includes("redstone")?0xff4422:0xffa246);
             light.intensity=(source.block.lightSourceLevel/16)*14*(0.97+Math.sin(seconds*7+source.x)*0.03);
             light.distance=Math.min(12,source.block.lightSourceLevel*0.65);
-            light.castShadow = effects;
+            light.castShadow = effects && !this.mobilePerformanceMode;
         });
         if (this.water) {
             this.water.material.uniforms.time.value = seconds * 0.4;
@@ -792,6 +797,7 @@ export class VoxelRenderer {
                     cameraY: camera.y,
                     surfaceY: (CHUNK_HEIGHT - TERRAIN_HEIGHT) * BLOCK_SIZE,
                     fov: this.camera.fov,
+                    mobilePerformanceMode: this.mobilePerformanceMode,
                 });
             } else this.scene.background=new THREE.Color(
                 dimension === Dimensions.End ? 0x15101f : 0x24151a);

@@ -584,13 +584,14 @@ export function toggleMinionMenu(player) {
         evilDeeds: Math.max(0, Math.min(4, Math.floor(progress.evilDeeds || 0))),
         unlocked: progress.unlocked === true,
     };
+    const canManageMinions = player.gamemode === 1 || player.minionProgress.unlocked;
     const title = document.createElement("h2");
     title.id = "minion-menu-title";
-    title.textContent = player.minionProgress.unlocked
+    title.textContent = canManageMinions
         ? "Master's Staff"
         : player.minionMenuPage === "evil-deeds" ? "Choose your part" : "Evil Deeds";
     panel.append(title);
-    if (!player.minionProgress.unlocked) {
+    if (!canManageMinions) {
         if (player.minionMenuPage === "evil-deeds") {
             const status = document.createElement("p");
             status.textContent = `Choose an evil deed · costs ${config.evilDeedXPCost} experience levels`;

@@ -658,7 +658,7 @@ export class Player extends Entity {
         if (this.canBlockDamage(hitfromX, attacker)) {
             this.hurtCooldown = 0.3;
             this.shieldBlocking = true;
-            this.holdItem = this.getSelectedSlotItem();
+            this.setHoldItem();
             this.reduceDurability();
             this.inventory.syncInventoryMultiplayer();
             return;
@@ -691,7 +691,10 @@ export class Player extends Entity {
         const selectedItem = this.inventory?.items?.[3]?.[
             this.inventory.currentSlot
         ]?.item;
-        return selectedItem?.itemId === Items.Shield && selectedItem.count > 0;
+        const offhandItem = this.inventory?.getOffhandItem?.();
+        return [selectedItem, offhandItem].some(
+            (item) => item?.itemId === Items.Shield && item.count > 0,
+        );
     }
 
     canBlockDamage(hitfromX, attacker) {
@@ -719,12 +722,23 @@ export class Player extends Entity {
         this.canMove = true;
         this.isDead = false;
         this.deathCause = "";
-        const respawnPosition = this.spawnPoint
-            ? this.spawnPoint
-            : new Vector2(0, (CHUNK_HEIGHT / 2) * BLOCK_SIZE);
+        const respawnPosition = this.spawnPoint ||
+            this.world.getDefaultSpawnPosition();
         if (this.isLocal()) gotoDimension(0);
         this.teleport(respawnPosition);
-        this.setOnGround();
+        const respawnX = this.position.x;
+        const respawnDimension = this.dimension;
+        const trySetOnGround = () => {
+            if (this.isDead || this.position.x !== respawnX ||
+                this.dimension !== respawnDimension) return true;
+            return this.setOnGround() === true;
+        };
+        if (!trySetOnGround()) {
+            const intervalId = setInterval(() => {
+                if (trySetOnGround()) clearInterval(intervalId);
+            }, 100);
+            setTimeout(() => clearInterval(intervalId), 10000);
+        }
         this.setGamemode();
     }
 
@@ -1474,8 +1488,13 @@ export class Player extends Entity {
     }
 
     setHoldItem() {
-        this.holdItem =
-            this.inventory.items[3][this.inventory.currentSlot].item;
+        const selectedItem = this.getSelectedSlotItem();
+        const offhandItem = this.inventory.getOffhandItem();
+        this.holdItem = this.shieldBlocking &&
+            offhandItem?.itemId === Items.Shield &&
+            selectedItem?.itemId !== Items.Shield
+            ? offhandItem
+            : selectedItem;
     }
 
     teleport(position) {
@@ -2017,9 +2036,15 @@ export class Player extends Entity {
             this.inventory.selectedItem || this.inventory.selectedBlock;
 
         // Determine what block to place based on what's held
-        const blockToPlace = selectedItem.placeBlock
+        let blockToPlace = selectedItem.placeBlock
             ? getBlock(selectedItem.placeBlock)
             : selectedItem;
+        if (selectedItem.itemId === Items.Bed) {
+            const facingRight = this.lookDirection > -90 && this.lookDirection < 90;
+            blockToPlace = getBlock(
+                facingRight ? Blocks.BedFoot : Blocks.BedFootWest,
+            );
+        }
 
         const placingSeaPickle = blockToPlace.blockId === Blocks.SeaPickle;
         const placingSeaLanternInWater =
@@ -2263,6 +2288,33 @@ export class Player extends Entity {
             this.hoverBlock.transform.position.x,
             this.hoverBlock.transform.position.y + BLOCK_SIZE,
         );
+
+        if (block.specialType === SpecialType.Bed) {
+            const bedCells = [
+                new Vector2(mousePos.x, mousePos.y),
+                ...(block.extendedBlock || []).map(({ offset }) =>
+                    new Vector2(
+                        mousePos.x + offset.x * BLOCK_SIZE,
+                        mousePos.y - offset.y * BLOCK_SIZE,
+                    ),
+                ),
+            ];
+            for (const cell of bedCells) {
+                const support = runtime.world.getBlockAtWorldPosition(
+                    cell.x,
+                    cell.y + BLOCK_SIZE,
+                    false,
+                    activeDimension,
+                );
+                if (
+                    !support ||
+                    !hasBlockCollision(support) ||
+                    getBlock(support.blockType).fluid
+                ) {
+                    return false;
+                }
+            }
+        }
 
         if (
             block.specialType === SpecialType.Door &&
@@ -2553,7 +2605,12 @@ export class Player extends Entity {
             );
 
             if (this.holdItem.getProp("durability") <= 0) {
-                this.inventory.removeItem(3, this.inventory.currentSlot, 1);
+                const offhandItem = this.inventory.getOffhandItem();
+                if (this.holdItem === offhandItem) {
+                    this.inventory.removeOffhandItem(1);
+                } else {
+                    this.inventory.removeItem(3, this.inventory.currentSlot, 1);
+                }
 
                 playPositionalSound(
                     this.position,

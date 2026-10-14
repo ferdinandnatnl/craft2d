@@ -202,13 +202,7 @@ export class World {
         name = null,
         local = true,
     ) {
-        if (!position) {
-            const spawnBlockX = this.generator.findSpawnBlockX();
-            position = new Vector2(
-                spawnBlockX * BLOCK_SIZE,
-                (CHUNK_HEIGHT / 2) * BLOCK_SIZE,
-            );
-        }
+        if (!position) position = this.getDefaultSpawnPosition();
         const newPlayer = new Player(runtime.world, {
             position: position,
             entities: runtime.world.entities,
@@ -238,6 +232,22 @@ export class World {
         runtime.world.entities.push(newPlayer);
         if (local) runtime.hotbar = new Hotbar(newPlayer.inventory);
         return newPlayer;
+    }
+
+    getDefaultSpawnPosition() {
+        const spawnBlockX = this.generator.findSpawnBlockX();
+        const spawnSurfaceY = this.generator.specialWorldProps.void
+            ? CHUNK_HEIGHT / 2
+            : this.generator.getTerrainHeight(
+                spawnBlockX,
+                Dimensions.Overworld,
+            );
+        const spawnFeetY = (CHUNK_HEIGHT - spawnSurfaceY - 1) * BLOCK_SIZE;
+
+        return new Vector2(
+            spawnBlockX * BLOCK_SIZE,
+            Math.max(0, spawnFeetY - 2 * BLOCK_SIZE),
+        );
     }
 
     async startGenerator(dimensionIndex = activeDimension) {
@@ -664,6 +674,7 @@ export class World {
             protectedEntity = null,
             sourceEntity = null,
             destroyTerrain = true,
+            dimension = activeDimension,
         } = {},
     ) {
         playRandomSoundFromArray({
@@ -674,7 +685,12 @@ export class World {
 
         // Damage and knockback entities in range
         for (const entity of runtime.world.entities) {
-            if (entity === excludeEntity || entity === protectedEntity || entity.invulnerable) continue;
+            if (
+                entity.dimension !== dimension ||
+                entity === excludeEntity ||
+                entity === protectedEntity ||
+                entity.invulnerable
+            ) continue;
 
             const distance = Vector2.Distance(position, entity.position);
             if (distance > radius) continue;
@@ -707,6 +723,7 @@ export class World {
         const startX = Math.floor(position.x / BLOCK_SIZE);
         const startY = Math.floor(position.y / BLOCK_SIZE);
         const visited = new Set();
+        const changedChunks = new Set();
         const queue = [[startX, startY, power]];
 
         while (queue.length > 0) {
@@ -725,7 +742,12 @@ export class World {
             if (visited.has(key)) continue;
             visited.add(key);
 
-            const block = this.getBlockAtWorldPosition(worldX, worldY);
+            const block = this.getBlockAtWorldPosition(
+                worldX,
+                worldY,
+                false,
+                dimension,
+            );
             if (!block) continue;
 
             const blockDef = getBlock(block.blockType);
@@ -736,11 +758,31 @@ export class World {
 
             if (remainingPower >= powerThreshold) {
                 if (blockDef.hardness >= 0) {
+                    const originalBlockType = block.blockType;
                     if (blockDef.specialType === SpecialType.TNT) {
                         block.explode(true);
                     } else {
                         block.breakBlock(blockDef.dropWithoutTool);
                         this.setBlockType(block, Blocks.Air);
+                    }
+                    if (multiplayer && block.blockType !== originalBlockType) {
+                        this.serverBreakBlock(
+                            block.chunkX,
+                            block.x,
+                            block.y,
+                            Blocks.Air,
+                            false,
+                            false,
+                            dimension,
+                            null,
+                            false,
+                        );
+                        changedChunks.add(block.chunkX);
+                        for (const linkedBlock of block.linkedBlocks || []) {
+                            changedChunks.add(
+                                this.getChunkXForWorldX(linkedBlock.x),
+                            );
+                        }
                     }
                 }
 
@@ -752,6 +794,10 @@ export class World {
                     queue.push([x + 1, y, reducedPower]);
                 }
             }
+        }
+
+        for (const chunkX of changedChunks) {
+            this.uploadChunkToServer(chunkX, dimension);
         }
     }
 

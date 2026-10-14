@@ -23,6 +23,8 @@ import { CANVAS, ctx, r } from "./canvas.js";
 import { SkyRenderer } from "./skyRenderer.js";
 import { BackgroundTerrain } from "./backgroundTerrain.js";
 import { VoxelRenderer } from "../rendering/voxelRenderer.js";
+import { getDoorPanelBounds } from "../rendering/doorGeometry.js";
+import { getBlock, SpecialType } from "../world/block.js";
 
 export { CANVAS, ctx, r };
 const skyRenderer = new SkyRenderer();
@@ -475,13 +477,32 @@ export function drawDestroyStage() {
     const spriteSize = getSpriteSize(
         "blocks/destroy_stage_" + (player.breakingStage - 1),
     ).width;
+    const url = getSpriteUrl(
+        "blocks/destroy_stage_" + (player.breakingStage - 1),
+    );
+    const y = target.transform.position.y - Math.floor(camera.y);
+    const blockX = target.transform.position.x / BLOCK_SIZE;
+    const isDoor = getBlock(target.blockType).specialType === SpecialType.Door;
+    if (isDoor) {
+        const { left, width } = getDoorPanelBounds(blockX, target.metaData);
+        ctx.save();
+        ctx.translate(left * BLOCK_SIZE - Math.floor(camera.x), y);
+        ctx.scale(width, 1);
+        drawImage({
+            url,
+            x: 0,
+            y: 0,
+            scale: BLOCK_SIZE / spriteSize,
+            centerX: false,
+        });
+        ctx.restore();
+        return;
+    }
 
     drawImage({
-        url: getSpriteUrl(
-            "blocks/destroy_stage_" + (player.breakingStage - 1),
-        ),
+        url,
         x: target.transform.position.x - Math.floor(camera.x),
-        y: target.transform.position.y - Math.floor(camera.y),
+        y,
         scale: BLOCK_SIZE / spriteSize,
         centerX: false,
     });

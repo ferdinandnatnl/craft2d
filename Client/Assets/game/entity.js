@@ -463,13 +463,60 @@ export class Entity {
     }
 
     setOnGround() {
-        const currentChunk = this.getCurrentChunk();
-        if (!currentChunk) return false;
-        const groundLevel = currentChunk.findGroundLevel(this.getXInChunk());
-        if (groundLevel === 0) return false;
-        const y = (CHUNK_HEIGHT - groundLevel) * BLOCK_SIZE - this.hitbox.y;
-        this.position.y = y;
-        return true;
+        const maxSearchDistance = CHUNK_WIDTH;
+        const candidateOffsets = [0];
+        for (let distance = 1; distance <= maxSearchDistance; distance++) {
+            candidateOffsets.push(distance, -distance);
+        }
+
+        for (const offset of candidateOffsets) {
+            const x = this.position.x + offset * BLOCK_SIZE;
+            const chunk = this.world.getChunkForX(x, this.dimension);
+            if (!chunk) continue;
+
+            const localX = Math.floor((x - chunk.x) / BLOCK_SIZE);
+            const groundLevel = chunk.findGroundLevel(localX);
+            if (groundLevel === 0) continue;
+
+            const feetY = (CHUNK_HEIGHT - groundLevel) * BLOCK_SIZE;
+            const y = feetY - this.hitbox.y;
+            const firstBlockX = Math.floor(x / BLOCK_SIZE);
+            const lastBlockX = Math.floor(
+                (x + this.hitbox.x - 0.001) / BLOCK_SIZE,
+            );
+            const firstBlockY = Math.floor(y / BLOCK_SIZE);
+            const lastBlockY = Math.floor(
+                (feetY - 0.001) / BLOCK_SIZE,
+            );
+
+            let clear = true;
+            for (
+                let blockY = firstBlockY;
+                blockY <= lastBlockY && clear;
+                blockY++
+            ) {
+                for (let blockX = firstBlockX; blockX <= lastBlockX; blockX++) {
+                    const block = this.world.getBlockAtWorldPosition(
+                        blockX * BLOCK_SIZE,
+                        blockY * BLOCK_SIZE,
+                        false,
+                        this.dimension,
+                    );
+                    if (!block || hasBlockCollision(block)) {
+                        clear = false;
+                        break;
+                    }
+                }
+            }
+
+            if (!clear) continue;
+
+            this.position.x = x;
+            this.position.y = y;
+            return true;
+        }
+
+        return false;
     }
 
     getXInChunk() {

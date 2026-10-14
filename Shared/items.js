@@ -239,6 +239,7 @@ export const Items = Object.freeze({
     JungleDoor: 4003,
     AcaciaDoor: 4004,
     IronDoor: 4005,
+    Bed: 4006,
 });
 
 export const items = [
@@ -250,6 +251,7 @@ export const items = [
     new Item({ itemId: Items.JungleDoor, name: "Jungle Door", sprite: "door_jungle", placeBlock: 806 }),
     new Item({ itemId: Items.AcaciaDoor, name: "Acacia Door", sprite: "door_acacia", placeBlock: 808 }),
     new Item({ itemId: Items.IronDoor, name: "Iron Door", sprite: "door_iron", placeBlock: 810 }),
+    new Item({ itemId: Items.Bed, name: "Red Bed", sprite: "bed", placeBlock: 904 }),
 
     //#region Wooden Tools
     new Item({

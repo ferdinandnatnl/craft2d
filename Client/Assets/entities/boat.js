@@ -3,9 +3,22 @@ import { Entity, EntityTypes } from "../game/entity.js";
 import { Vector2, uuidv4 } from "../utils/classes.js";
 import { BLOCK_SIZE } from "../utils/globals.js";
 import { runtime } from "../utils/runtime.js";
+import { getSpriteUrl } from "../utils/texturePackLoader.js";
 
 const BOAT_WIDTH = 1.8;
 const BOAT_HEIGHT = 0.55;
+let boatSpriteSource = null;
+let boatSprite = null;
+
+function getBoatSprite() {
+    const source = getSpriteUrl("items/boat");
+    if (source !== boatSpriteSource) {
+        boatSpriteSource = source;
+        boatSprite = new Image();
+        boatSprite.src = source;
+    }
+    return boatSprite;
+}
 
 export class Boat extends Entity {
     constructor(
@@ -209,89 +222,12 @@ export class Boat extends Entity {
             (this.hitbox.x - width) / 2;
         const y = this.position.y + unit * 0.05 - (viewCamera?.y || 0) +
             Math.sin(this.bobPhase) * unit * 0.025;
-        const w = width;
-        const h = height;
-        const point = (x, y) => [Math.round(x), Math.round(y)];
-        const polygon = (points, fill, stroke = null, lineWidth = 1) => {
-            ctx.beginPath();
-            points.forEach(([px, py], index) => {
-                const [drawX, drawY] = point(px, py);
-                if (index === 0) ctx.moveTo(drawX, drawY);
-                else ctx.lineTo(drawX, drawY);
-            });
-            ctx.closePath();
-            ctx.fillStyle = fill;
-            ctx.fill();
-            if (stroke) {
-                ctx.strokeStyle = stroke;
-                ctx.lineWidth = lineWidth;
-                ctx.stroke();
-            }
-        };
-        const drawOar = (anchorX, anchorY, angle, faded = false) => {
-            ctx.save();
-            ctx.translate(anchorX, anchorY);
-            ctx.rotate(angle);
-            ctx.globalAlpha = faded ? 0.62 : 1;
-            ctx.lineCap = "square";
-            ctx.strokeStyle = "#432914";
-            ctx.lineWidth = Math.max(3, unit * 0.055);
-            ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.lineTo(unit * 0.43, 0);
-            ctx.stroke();
-            polygon([
-                [unit * 0.38, -unit * 0.075],
-                [unit * 0.53, -unit * 0.055],
-                [unit * 0.56, 0],
-                [unit * 0.53, unit * 0.055],
-                [unit * 0.38, unit * 0.075],
-            ], "#986233", "#432914", Math.max(1, unit * 0.018));
-            ctx.restore();
-        };
+        const sprite = getBoatSprite();
+        if (!sprite?.complete || !sprite.naturalWidth) return;
 
         ctx.save();
         ctx.imageSmoothingEnabled = false;
-
-        const row = Math.sin(this.paddlePhase) * 0.12;
-        drawOar(w * 0.34, h * 0.43, 2.18 + row, true);
-
-        // A low, open hull with raised ends reads as a boat from the side.
-        polygon([
-            [w * 0.055, h * 0.16], [w * 0.945, h * 0.16],
-            [w * 0.87, h * 0.62], [w * 0.72, h * 0.94],
-            [w * 0.28, h * 0.94], [w * 0.13, h * 0.62],
-        ], "#74451f", "#382313", Math.max(2, unit * 0.035));
-        polygon([
-            [w * 0.13, h * 0.19], [w * 0.87, h * 0.19],
-            [w * 0.76, h * 0.42], [w * 0.24, h * 0.42],
-        ], "#4a2d18", "#382313", Math.max(1, unit * 0.018));
-
-        // The inside floor and cross-seat make the hull visibly open.
-        polygon([
-            [w * 0.31, h * 0.36], [w * 0.69, h * 0.36],
-            [w * 0.66, h * 0.43], [w * 0.34, h * 0.43],
-        ], "#8f5b2d");
-        ctx.fillStyle = "#b17b43";
-        ctx.fillRect(...point(w * 0.37, h * 0.35), Math.round(w * 0.26), Math.max(3, Math.round(unit * 0.045)));
-
-        // Plank seams and a lighter upper rail give the side some depth.
-        ctx.strokeStyle = "#4b2b17";
-        ctx.lineWidth = Math.max(1, unit * 0.018);
-        for (const seamY of [0.51, 0.70, 0.84]) {
-            ctx.beginPath();
-            ctx.moveTo(...point(w * 0.12, h * seamY));
-            ctx.lineTo(...point(w * 0.88, h * seamY));
-            ctx.stroke();
-        }
-        ctx.strokeStyle = "#c18a4b";
-        ctx.lineWidth = Math.max(3, unit * 0.055);
-        ctx.beginPath();
-        ctx.moveTo(...point(w * 0.08, h * 0.16));
-        ctx.lineTo(...point(w * 0.92, h * 0.16));
-        ctx.stroke();
-
-        drawOar(w * 0.64, h * 0.43, 0.96 - row);
+        ctx.drawImage(sprite, Math.round(x), Math.round(y), width, height);
         ctx.restore();
     }
 }

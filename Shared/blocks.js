@@ -190,6 +190,9 @@ export const Blocks = Object.freeze({
     CaimanEgg: 901,
     SeaLantern: 902,
     SeaPickle: 903,
+    BedFoot: 904,
+    BedHead: 905,
+    BedFootWest: 906,
 });
 
 export const doorBlockPairs = Object.freeze([
@@ -2499,6 +2502,41 @@ export const blockTypes = [
             excludeFromCreativeInventory: true,
         }),
     ]),
+    new BlockType({
+        blockId: Blocks.BedFoot,
+        name: "Red Bed",
+        sprite: "bed",
+        hardness: 0.2,
+        specialType: SpecialType.Bed,
+        dropBlock: null,
+        dropItem: Items.Bed,
+        excludeFromCreativeInventory: true,
+        cannotBeConverted: true,
+        extendedBlock: [{ blockId: Blocks.BedHead, offset: { x: 1, y: 0 } }],
+    }),
+    new BlockType({
+        blockId: Blocks.BedFootWest,
+        name: "Red Bed",
+        sprite: "bed",
+        hardness: 0.2,
+        specialType: SpecialType.Bed,
+        dropBlock: null,
+        dropItem: Items.Bed,
+        excludeFromCreativeInventory: true,
+        cannotBeConverted: true,
+        extendedBlock: [{ blockId: Blocks.BedHead, offset: { x: -1, y: 0 } }],
+    }),
+    new BlockType({
+        blockId: Blocks.BedHead,
+        name: "Red Bed",
+        sprite: "bed",
+        hardness: 0.2,
+        specialType: SpecialType.Bed,
+        dropBlock: null,
+        dropItem: Items.Bed,
+        excludeFromCreativeInventory: true,
+        cannotBeConverted: true,
+    }),
     //#endregion
 ];
 

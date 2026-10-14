@@ -48,6 +48,23 @@ export const recipes = [
         ],
         output: new InventoryItem({ itemId: Items.IronDoor, count: 3 }),
     }),
+    // Red Bed
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [
+                new RecipeItem({ blockId: Blocks.RedWool }),
+                new RecipeItem({ blockId: Blocks.RedWool }),
+                new RecipeItem({ blockId: Blocks.RedWool }),
+            ],
+            [
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+                new RecipeItem({ blockCategory: BlockCategory.Planks }),
+            ],
+        ],
+        output: new InventoryItem({ itemId: Items.Bed, count: 1 }),
+    }),
 
     //#region Planks
     // Oak Planks

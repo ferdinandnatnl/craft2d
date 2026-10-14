@@ -168,8 +168,20 @@ export class VolumetricSky {
         this.camera = new THREE.Camera();
     }
 
-    draw(renderer, { width, height, time, seconds, cameraX, cameraY, surfaceY, fov }) {
-        const scale = Math.min(0.5, 960 / width, 540 / height);
+    draw(renderer, {
+        width,
+        height,
+        time,
+        seconds,
+        cameraX,
+        cameraY,
+        surfaceY,
+        fov,
+        mobilePerformanceMode = false,
+    }) {
+        const scale = mobilePerformanceMode
+            ? Math.min(0.4, 640 / width, 360 / height)
+            : Math.min(0.5, 960 / width, 540 / height);
         const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
         if (this.target.width !== w || this.target.height !== h) this.target.setSize(w, h);
         const uniforms = this.material.uniforms;

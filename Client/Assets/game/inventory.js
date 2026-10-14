@@ -15,15 +15,32 @@ import { getBlock } from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { CREATIVE_TABS, canUseAsWallpaper, creativeCategory, creativeMatchesSearch } from "./creativeCatalog.js";
 
-const CREATIVE_SCALE = 3.5;
+const VANILLA_GUI_SCALE = 2;
+const LEGACY_GUI_SCALE = 3.5;
 const CREATIVE_ROW_SIZE = 9;
 const CREATIVE_VISIBLE_ROWS = 5;
-const CREATIVE_SLOT_STEP = 18 * CREATIVE_SCALE;
 const CREATIVE_TAB_STEP = 24;
+// The fourth row follows the four standard inventory rows in saved inventory grids.
+const OFFHAND_ROW = 4;
+// Vanilla player-inventory GUI coordinates, scaled to match the existing screen.
+const OFFHAND_POSITION = { x: 77 * LEGACY_GUI_SCALE, y: 62 * LEGACY_GUI_SCALE };
+
+function getVanillaGuiScale() {
+    if (!CANVAS) return VANILLA_GUI_SCALE;
+    const bounds = CANVAS.getBoundingClientRect();
+    if (!bounds.width || !CANVAS.width) return VANILLA_GUI_SCALE;
+    const displayedScale = Math.max(1, Math.floor(Math.min(
+        VANILLA_GUI_SCALE,
+        (bounds.width - 16) / 195,
+        (bounds.height - 16) / 200,
+    )));
+    return displayedScale * CANVAS.width / bounds.width;
+}
 
 export class Inventory {
     constructor() {
         this.inventoryUI = { x: 492, y: 150 };
+        this.lastVanillaLayoutScale = null;
 
         this.items = [];
         this.craftingSlots = null;
@@ -113,6 +130,18 @@ export class Inventory {
         this.populateCreativeInventory();
     }
 
+    getGuiScale() {
+        return this.openUIImage.url === "inventory" ||
+            this.openUIImage.url.startsWith("creative_inventory/")
+            ? getVanillaGuiScale()
+            : LEGACY_GUI_SCALE;
+    }
+
+    usesVanillaInventoryLayout() {
+        return this.openUIImage.url === "inventory" ||
+            this.openUIImage.url.startsWith("creative_inventory/");
+    }
+
     serializeInventoryForMultiplayer() {
         return Array.isArray(this.items)
             ? this.items.map((row) =>
@@ -167,27 +196,46 @@ export class Inventory {
             }
         }
 
+        this.items[OFFHAND_ROW] = [
+            new InventorySlot({
+                position: { ...OFFHAND_POSITION },
+                item: new InventoryItem(),
+            }),
+        ];
+
         this.createCraftingArray();
     }
 
     createCraftingArray(range = 2) {
         this.craftingSlots = [];
-        const basePosition = this.craftingTable
-            ? this.craftingTablePosition
-            : this.craftingPosition;
-
         for (let y = 0; y < range; y++) {
             this.craftingSlots[y] = [];
             for (let x = 0; x < range; x++) {
-                const position = {
-                    x: basePosition.x + x * 63,
-                    y: basePosition.y + y * 63,
-                };
-
                 this.craftingSlots[y][x] = new InventorySlot({
-                    position: position,
+                    position: { x: 0, y: 0 },
                     item: new InventoryItem(),
                 });
+            }
+        }
+        this.positionCraftingSlots();
+    }
+
+    positionCraftingSlots() {
+        const scale = this.getGuiScale();
+        const basePosition = this.craftingTable
+            ? { x: 31 * scale, y: 18 * scale }
+            : { x: 98 * scale, y: 18 * scale };
+        this.craftingOutputPosition = this.craftingTable
+            ? { x: 125 * scale, y: 36 * scale }
+            : { x: 143 * scale, y: 36 * scale };
+        this.craftingOutputSlot.position = { ...this.craftingOutputPosition };
+
+        for (let y = 0; y < this.craftingSlots.length; y++) {
+            for (let x = 0; x < this.craftingSlots[y].length; x++) {
+                this.craftingSlots[y][x].position = {
+                    x: basePosition.x + x * 18 * scale,
+                    y: basePosition.y + y * 18 * scale,
+                };
             }
         }
     }
@@ -218,8 +266,9 @@ export class Inventory {
     }
 
     isSlotHovered(x, y) {
-        const slotSize = this.openUIImage.url.startsWith("creative_inventory/")
-            ? CREATIVE_SLOT_STEP : 16 * 3;
+        const slotSize = this.usesVanillaInventoryLayout()
+            ? 18 * this.getGuiScale()
+            : 16 * 3;
         return mouseOverPosition(
             this.inventoryUI.x + x + this.openUIOffset.x,
             this.inventoryUI.y + y + this.openUIOffset.y,
@@ -322,6 +371,7 @@ export class Inventory {
         for (let y = 0; y < array.length; y++) {
             for (let x = 0; x < array[y].length; x++) {
                 let slot = array[y][x];
+                if (this.isOffhandSlot(array, y, x)) continue;
                 if (
                     !slot.isEmpty() &&
                     slot.item.blockId === newItem.blockId &&
@@ -345,6 +395,7 @@ export class Inventory {
         for (let y = 0; y < array.length; y++) {
             for (let x = 0; x < array[y].length; x++) {
                 let slot = array[y][x];
+                if (this.isOffhandSlot(array, y, x)) continue;
                 if (slot.isEmpty()) {
                     if (slot.onlyTake) continue;
 
@@ -367,6 +418,18 @@ export class Inventory {
             count: item.count,
             props: structuredClone(item.props || {}),
         });
+    }
+
+    isOffhandSlot(array, y, x) {
+        return array === this.items && y === OFFHAND_ROW && x === 0;
+    }
+
+    getOffhandItem() {
+        return this.items[OFFHAND_ROW]?.[0]?.item ?? null;
+    }
+
+    removeOffhandItem(count = 1) {
+        this.removeItem(OFFHAND_ROW, 0, count);
     }
 
     handleShiftClick(slot, array) {
@@ -462,6 +525,7 @@ export class Inventory {
             url: "converter",
             crop: { x: 0, y: 0, width: 176, height: 166 },
         };
+        this.positionPlayerInventorySlots(false);
 
         slots = [
             [
@@ -521,6 +585,7 @@ export class Inventory {
             url: "hopper",
             crop: { x: 0, y: 0, width: 176, height: 133 },
         };
+        this.positionPlayerInventorySlots(false);
 
         for (let x = 0; x < this.storage[0].length; x++) {
             slots[0].push(
@@ -703,6 +768,7 @@ export class Inventory {
             url: "furnace",
             crop: { x: 0, y: 0, width: 176, height: 166 },
         };
+        this.positionPlayerInventorySlots(false);
 
         this.createFurnaceSlots();
     }
@@ -779,7 +845,7 @@ export class Inventory {
         const rect = CANVAS.getBoundingClientRect();
         const scaleX = rect.width / CANVAS.width;
         const scaleY = rect.height / CANVAS.height;
-        const scale = CREATIVE_SCALE;
+        const scale = getVanillaGuiScale();
         this.creativeSearchInput.style.left = `${rect.left +
             (this.inventoryUI.x + 5 * scale) * scaleX}px`;
         this.creativeSearchInput.style.top = `${rect.top +
@@ -792,20 +858,62 @@ export class Inventory {
     }
 
     positionPlayerInventorySlots(creative) {
+        const scale = this.getGuiScale();
+        const slotStep = 18 * scale;
         for (let y = 0; y < this.items.length; y++) {
             for (let x = 0; x < this.items[y].length; x++) {
-                this.items[y][x].position = creative
-                    ? { x: 8 * CREATIVE_SCALE + x * CREATIVE_SLOT_STEP,
-                        y: (y === 3 ? 112 : 54 + y * 18) * CREATIVE_SCALE }
-                    : { x: 32 + x * 63, y: y === 3 ? 501 : 298 + y * 63 };
+                if (y === OFFHAND_ROW) {
+                    this.items[y][x].position = {
+                        x: 77 * scale,
+                        y: 62 * scale,
+                    };
+                } else if (creative) {
+                    this.items[y][x].position = {
+                        x: 8 * scale + x * slotStep,
+                        y: (y === 3 ? 112 : 54 + y * 18) * scale,
+                    };
+                } else {
+                    this.items[y][x].position = {
+                        x: 8 * scale + x * slotStep,
+                        y: (y === 3 ? 142 : 84 + y * 18) * scale,
+                    };
+                }
             }
         }
+        this.lastVanillaLayoutScale = scale;
     }
 
     getVisibleCreativeItems() {
         if (this.creativeTab === "search") {
             return this.creativeItems.filter(({ name }) =>
                 creativeMatchesSearch(name, this.creativeSearch),
+            );
+        }
+        const isCombatItem = ({ name }) =>
+            /sword|bow|arrow|armor|helmet|chestplate|leggings|boots|shield/i.test(name);
+        const isMaterial = ({ name }) =>
+            /ingot|diamond|emerald|coal|charcoal|redstone|quartz|lapis|nugget|dye|leather|bone|gunpowder|feather|string|slime|sugar/i.test(name);
+
+        if (this.creativeTab === "tools") {
+            return this.creativeItems.filter((item) =>
+                item.category === "tools" && !isCombatItem(item),
+            );
+        }
+        if (this.creativeTab === "combat") {
+            return this.creativeItems.filter((item) =>
+                item.category === "combat" ||
+                item.category === "tools" && isCombatItem(item),
+            );
+        }
+        if (this.creativeTab === "food") {
+            return this.creativeItems.filter((item) =>
+                item.category === "food" && !isMaterial(item),
+            );
+        }
+        if (this.creativeTab === "materials") {
+            return this.creativeItems.filter((item) =>
+                item.category === "materials" ||
+                item.category === "food" && isMaterial(item),
             );
         }
         return this.creativeItems.filter(
@@ -827,11 +935,17 @@ export class Inventory {
     }
 
     getCreativeTabBounds(index) {
+        const tab = typeof index === "number" ? CREATIVE_TABS[index] : index;
+        const rowTabs = CREATIVE_TABS.filter(({ row }) => row === tab.row);
+        const column = rowTabs.findIndex(({ id }) => id === tab.id);
+        const scale = this.getGuiScale();
         return {
-            x: this.inventoryUI.x + index * CREATIVE_TAB_STEP * CREATIVE_SCALE,
-            y: this.inventoryUI.y - 28 * CREATIVE_SCALE,
-            width: CREATIVE_TAB_STEP * CREATIVE_SCALE,
-            height: 32 * CREATIVE_SCALE,
+            x: this.inventoryUI.x + column * CREATIVE_TAB_STEP * scale,
+            y: tab.row === "bottom"
+                ? this.inventoryUI.y + 136 * scale
+                : this.inventoryUI.y - 32 * scale,
+            width: 28 * scale,
+            height: 32 * scale,
         };
     }
 
@@ -849,23 +963,25 @@ export class Inventory {
         }
 
         if (this.creativeTab === "inventory") {
-            if (mouseOverPosition(this.inventoryUI.x + 173 * CREATIVE_SCALE,
-                this.inventoryUI.y + 111 * CREATIVE_SCALE,
-                18 * CREATIVE_SCALE, 18 * CREATIVE_SCALE) &&
+            const scale = this.getGuiScale();
+            if (mouseOverPosition(this.inventoryUI.x + 173 * scale,
+                this.inventoryUI.y + 111 * scale,
+                18 * scale, 18 * scale) &&
                 input.isLeftMouseButtonPressed()) this.holdingItem = null;
             return;
         }
 
-        const trackX = this.inventoryUI.x + 174 * CREATIVE_SCALE;
-        const trackY = this.inventoryUI.y + 18 * CREATIVE_SCALE;
-        if (mouseOverPosition(trackX, trackY, 15 * CREATIVE_SCALE,
-            90 * CREATIVE_SCALE) && input.isLeftMouseDown()) {
+        const scale = this.getGuiScale();
+        const trackX = this.inventoryUI.x + 174 * scale;
+        const trackY = this.inventoryUI.y + 18 * scale;
+        if (mouseOverPosition(trackX, trackY, 15 * scale,
+            90 * scale) && input.isLeftMouseDown()) {
             const maxRow = Math.max(0,
                 Math.ceil(this.getVisibleCreativeItems().length / CREATIVE_ROW_SIZE) -
                 CREATIVE_VISIBLE_ROWS);
             const mouseY = input.getMousePosition().y;
             const ratio = Math.max(0, Math.min(1,
-                (mouseY - trackY) / (90 * CREATIVE_SCALE)));
+                (mouseY - trackY) / (90 * scale)));
             const nextRow = Math.round(ratio * maxRow);
             this.scrollCreative(nextRow - this.creativeScrollRow);
             input.isLeftMouseButtonPressed();
@@ -880,14 +996,16 @@ export class Inventory {
         const slots = [];
         const visibleItems = this.getVisibleCreativeItems();
         const startIndex = this.creativeScrollRow * CREATIVE_ROW_SIZE;
+        const scale = this.getGuiScale();
+        const slotStep = 18 * scale;
 
         for (let y = 0; y < CREATIVE_VISIBLE_ROWS; y++) {
             slots[y] = [];
             for (let x = 0; x < CREATIVE_ROW_SIZE; x++) {
                 const entry = visibleItems[startIndex + y * CREATIVE_ROW_SIZE + x];
                 slots[y][x] = new InventorySlot({
-                    position: { x: 8 * CREATIVE_SCALE + x * CREATIVE_SLOT_STEP,
-                        y: 18 * CREATIVE_SCALE + y * CREATIVE_SLOT_STEP },
+                    position: { x: 8 * scale + x * slotStep,
+                        y: 18 * scale + y * slotStep },
                     item: entry?.item ?? new InventoryItem(),
                     infiniteTake: true,
                 });
@@ -973,6 +1091,7 @@ export class Inventory {
             url: "single_chest",
             crop: { x: 0, y: 0, width: 176, height: 166 },
         };
+        this.positionPlayerInventorySlots(false);
 
         this.createChestSlots();
     }
@@ -1046,6 +1165,7 @@ export class Inventory {
                 url: "crafting_table",
                 crop: { x: 0, y: 0, width: 176, height: 166 },
             };
+            this.positionPlayerInventorySlots(false);
         }
 
         this.createCraftingArray(this.craftingTable ? 3 : 2);
@@ -1277,7 +1397,9 @@ export class Inventory {
     }
 
     addToExistingStack(newItem, remainingCount) {
-        for (let row of this.items) {
+        for (let rowIndex = 0; rowIndex < this.items.length; rowIndex++) {
+            if (rowIndex === OFFHAND_ROW) continue;
+            const row = this.items[rowIndex];
             for (let slot of row) {
                 const item = slot.item;
                 if (
@@ -1317,7 +1439,7 @@ export class Inventory {
 
         // If no slot was found in row 3, proceed to check from row 0 onwards
         for (let rowIndex = 0; rowIndex < this.items.length; rowIndex++) {
-            if (rowIndex === 3) continue; // Skip row 3 since we've already checked it
+            if (rowIndex === 3 || rowIndex === OFFHAND_ROW) continue;
             for (let slot of this.items[rowIndex]) {
                 const item = slot.item;
                 if (item.blockId === null && item.itemId === null) {
@@ -1472,6 +1594,10 @@ export class Inventory {
     mouseOverCheck(array) {
         if (!array) return;
         for (let y = 0; y < array.length; y++) {
+            if (array === this.items && y === OFFHAND_ROW &&
+                this.openUIImage.url !== "inventory" &&
+                !(this.openUIImage.url.startsWith("creative_inventory/") &&
+                    this.creativeTab === "inventory")) continue;
             if (array === this.items &&
                 this.openUIImage.url.startsWith("creative_inventory/") &&
                 this.creativeTab !== "inventory" && y !== 3) continue;
@@ -1816,6 +1942,16 @@ export class Inventory {
             return;
         }
 
+        if (this.usesVanillaInventoryLayout()) {
+            const scale = this.getGuiScale();
+            if (scale !== this.lastVanillaLayoutScale) {
+                const creative = this.openUIImage.url.startsWith("creative_inventory/");
+                this.positionPlayerInventorySlots(creative);
+                if (creative) this.createCreativeSlots();
+                else this.positionCraftingSlots();
+            }
+        }
+
         let path = "inventory";
         let crop = null;
 
@@ -1836,9 +1972,12 @@ export class Inventory {
             url: spriteUrl,
             x: CANVAS.width / 2 + this.openUIImageOffset.x,
             y: path.startsWith("creative_inventory/")
-                ? (CANVAS.height - 136 * CREATIVE_SCALE) / 2
-                : CANVAS.height / 6 + this.openUIImageOffset.y,
-            scale: 3.5,
+                ? (CANVAS.height - 200 * this.getGuiScale()) / 2 +
+                    32 * this.getGuiScale()
+                : path === "inventory"
+                    ? (CANVAS.height - 166 * this.getGuiScale()) / 2
+                    : CANVAS.height / 6 + this.openUIImageOffset.y,
+            scale: this.getGuiScale(),
         };
 
         if (crop) {
@@ -1918,11 +2057,9 @@ export class Inventory {
         )
             return;
 
-        const creative = this.openUIImage.url.startsWith("creative_inventory/");
-        const INVENTORY_PLAYER_OFFSET = creative
-            ? { x: 31 * CREATIVE_SCALE, y: 4 * CREATIVE_SCALE }
-            : { x: 128, y: 48 };
-        const INVENTORY_PLAYER_SCALE = creative ? 5 : 6.65;
+        const scale = this.getGuiScale();
+        const INVENTORY_PLAYER_OFFSET = { x: 36 * scale, y: 12 * scale };
+        const INVENTORY_PLAYER_SCALE = 2 * scale;
 
         const baseX =
             this.inventoryUI.x +
@@ -1952,29 +2089,31 @@ export class Inventory {
 
     drawCreativeTabs() {
         const tabsUrl = getSpriteUrl("gui/container/creative_inventory/tabs");
-        for (let i = 0; i < CREATIVE_TABS.length; i++) {
-            const tab = CREATIVE_TABS[i];
-            const bounds = this.getCreativeTabBounds(i);
+        const scale = this.getGuiScale();
+        for (const tab of CREATIVE_TABS) {
+            const rowTabs = CREATIVE_TABS.filter(({ row }) => row === tab.row);
+            const column = rowTabs.findIndex(({ id }) => id === tab.id);
+            const bounds = this.getCreativeTabBounds(tab);
             const selected = this.creativeTab === tab.id;
             drawImage({
                 url: tabsUrl,
                 x: bounds.x,
                 y: bounds.y,
-                crop: { x: (i % 6) * 28,
+                crop: { x: column * 28,
                     y: selected ? 32 : 0,
                     width: 28, height: 32 },
-                scale: CREATIVE_SCALE,
+                scale,
                 centerX: false,
             });
             const icon = new InventorySlot({
-                position: { x: bounds.x + 25, y: bounds.y + 28 },
+                position: { x: bounds.x + 6 * scale, y: bounds.y + 8 * scale },
                 item: new InventoryItem({ ...tab.icon, count: 1 }),
             });
-            icon.draw();
+            icon.draw(0, 0, null, scale / 3);
             if (mouseOverPosition(bounds.x, bounds.y, bounds.width, bounds.height)) {
                 const mouse = input.getMousePosition();
                 drawText({ text: tab.label, x: mouse.x + 12, y: mouse.y - 8,
-                    size: 22, textAlign: "left" });
+                    size: 20, textAlign: "left" });
             }
         }
     }
@@ -1982,7 +2121,7 @@ export class Inventory {
     drawCreativeSearchField(ctx) {
         if (this.creativeTab !== "search") return;
 
-        const scale = CREATIVE_SCALE;
+        const scale = this.getGuiScale();
         const x = this.inventoryUI.x + 2 * scale;
         const y = this.inventoryUI.y + 3 * scale;
         const width = 172 * scale;
@@ -2001,20 +2140,25 @@ export class Inventory {
         const maxRow = Math.max(0,
             Math.ceil(this.getVisibleCreativeItems().length / CREATIVE_ROW_SIZE) -
             CREATIVE_VISIBLE_ROWS);
-        const x = this.inventoryUI.x + 175 * CREATIVE_SCALE;
+        const scale = this.getGuiScale();
+        const x = this.inventoryUI.x + 175 * scale;
         const y = this.inventoryUI.y + (18 +
-            (maxRow ? (this.creativeScrollRow / maxRow) * 75 : 0)) * CREATIVE_SCALE;
+            (maxRow ? (this.creativeScrollRow / maxRow) * 75 : 0)) * scale;
         ctx.fillStyle = "#c6c6c6";
-        ctx.fillRect(x, y, 13 * CREATIVE_SCALE, 15 * CREATIVE_SCALE);
+        ctx.fillRect(x, y, 13 * scale, 15 * scale);
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x, y, 13 * CREATIVE_SCALE, CREATIVE_SCALE);
+        ctx.fillRect(x, y, 13 * scale, scale);
         ctx.fillStyle = "#555555";
-        ctx.fillRect(x, y + 14 * CREATIVE_SCALE,
-            13 * CREATIVE_SCALE, CREATIVE_SCALE);
+        ctx.fillRect(x, y + 14 * scale, 13 * scale, scale);
     }
 
     drawItems() {
         this.drawHoverSlot();
+        if (this.openUIImage.url === "inventory" ||
+            (this.openUIImage.url.startsWith("creative_inventory/") &&
+                this.creativeTab === "inventory")) {
+            this.drawOffhandSlotBackground();
+        }
         if (this.openUIImage.url.startsWith("creative_inventory/") &&
             this.creativeTab !== "inventory") {
             this.drawSlots([this.items[3]]);
@@ -2030,6 +2174,22 @@ export class Inventory {
         this.drawSlots(this.creativeSlots);
         this.drawSlots(this.storageSlots);
         this.drawFurnaceExtras();
+    }
+
+    drawOffhandSlotBackground() {
+        const slot = this.items[OFFHAND_ROW]?.[0];
+        if (!slot) return;
+
+        const spritePath = "gui/container/inventory";
+        // Reuse the existing Minecraft inventory slot texture.
+        drawImage({
+            url: getSpriteUrl(spritePath, isEqualToOriginal(spritePath)),
+            x: this.inventoryUI.x + slot.position.x + this.openUIOffset.x,
+            y: this.inventoryUI.y + slot.position.y + this.openUIOffset.y,
+            scale: this.getGuiScale(),
+            centerX: false,
+            crop: { x: 7, y: 83, width: 18, height: 18 },
+        });
     }
 
     getCraftingGuideRecipes() {
@@ -2452,13 +2612,16 @@ export class Inventory {
         if (!slot) return;
         if (slot.onlyTake) return;
 
+        const scale = this.usesVanillaInventoryLayout()
+            ? this.getGuiScale()
+            : LEGACY_GUI_SCALE;
         ctx.globalAlpha = 0.5;
         ctx.fillStyle = "white";
         ctx.fillRect(
-            slot.position.x + this.inventoryUI.x - 4 + this.openUIOffset.x,
-            slot.position.y + this.inventoryUI.y - 4 + this.openUIOffset.y,
-            18.5 * 3,
-            18.5 * 3,
+            slot.position.x + this.inventoryUI.x - scale + this.openUIOffset.x,
+            slot.position.y + this.inventoryUI.y - scale + this.openUIOffset.y,
+            18.5 * scale,
+            18.5 * scale,
         );
         ctx.globalAlpha = 1;
     }
@@ -2568,7 +2731,9 @@ export class Inventory {
         }
 
         const drawHeight = actualHeight - cutoff * actualHeight; // Height after cutoff
-        const targetHeight = 40; // Desired height in pixels
+        const targetHeight = this.usesVanillaInventoryLayout()
+            ? 16 * this.getGuiScale()
+            : 40;
         const scale = targetHeight / actualHeight; // Scale based on full height, not cropped
 
         const cropY = cutoff * actualHeight; // Crop from the top by the cutoff amount
@@ -2614,6 +2779,8 @@ export class Inventory {
         slot.draw(
             this.inventoryUI.x + this.openUIOffset.x,
             this.inventoryUI.y + this.openUIOffset.y,
+            null,
+            this.usesVanillaInventoryLayout() ? this.getGuiScale() / 3 : 1,
         );
     }
 }
