@@ -1818,14 +1818,14 @@ export function renderServers(serverStatuses) {
         const serverIPElement = serverElement.querySelector(".world-date");
         const serverImageElement = serverElement.querySelector(".world-image");
 
-        const safeName = sanitizeHtml(runtime.server.name);
-        const safeIp = sanitizeHtml(runtime.server.ip);
+        const safeName = sanitizeHtml(server.name);
+        const safeIp = sanitizeHtml(server.ip);
 
         serverNameElement.innerHTML = `${safeName} <span class="ip">(${safeIp})</span>`;
 
-        serverElement.setAttribute("data-id", runtime.server.id);
+        serverElement.setAttribute("data-id", server.id);
 
-        if (runtime.server.id === selectedServerId) {
+        if (server.id === selectedServerId) {
             serverElement.classList.add("selected");
         }
 
@@ -1857,7 +1857,7 @@ export function renderServers(serverStatuses) {
         serverElement.style.display = "flex";
 
         serverElement.addEventListener("click", () => {
-            selectServer(runtime.server.id, serverElement);
+            selectServer(server.id, serverElement);
         });
         serverListContainer.appendChild(serverElement);
     });
