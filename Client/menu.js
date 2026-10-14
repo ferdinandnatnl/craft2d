@@ -2232,6 +2232,11 @@ export async function connectToServer() {
         }
 
         if (isLanMultiplayerHost(ip)) {
+            const continueWithLanAddress = window.confirm(
+                `${ip} is a private local-network address. It only works on the host's Wi-Fi. For internet play, the host must forward TCP ports 4173 and 25565, then share their public Game URL. Continue with this LAN address?`,
+            );
+            if (!continueWithLanAddress) return;
+
             const url = new URL(`http://${ip}:4173/game.html`);
             url.searchParams.set("multiplayer", "true");
             url.searchParams.set("server", `${ip}:${portNumber}`);

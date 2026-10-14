@@ -55,6 +55,9 @@ if (addresses.length > 0) {
     console.log(`  Server: <host-ip>:${serverPort}`);
 }
 console.log("Share these addresses with people on the same Wi-Fi.");
+console.log(
+    `For internet play without renting a server, forward TCP ports ${previewPort} and ${serverPort} from your router to this computer. Friends can then open http://<your-public-ip>:${previewPort}/worlds.html and connect to <your-public-ip>:${serverPort}. This requires a public IP; port forwarding will not work behind carrier-grade NAT.`,
+);
 console.log("Press Ctrl+C to stop hosting.");
 
 const children = [

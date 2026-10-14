@@ -87,6 +87,16 @@ access. If the browser blocks the connection, use the printed local Game URL
 instead. Keep the host process running while people play. The server world is
 saved in `Server/world/`.
 
+To let friends join from other networks without renting a cloud server, forward
+TCP ports 4173 and 25565 from your router to the computer running `npm run lan`.
+Keep that computer on, allow the ports through its firewall, and share its
+public Game URL (`http://<public-ip>:4173/worlds.html`). Friends should open
+that URL, choose **Multiplayer → Direct Connection**, and enter
+`<public-ip>:25565`. Keep the host's local address reserved in the router so
+the forwarding rules stay pointed at the right computer. This only works when
+your internet provider gives your router a public IP; carrier-grade NAT blocks
+incoming connections and requires a relay or public game host instead.
+
 To run only the game server, run `node server.js` from the `Server` directory.
 By default, it listens on port 25565.
 
