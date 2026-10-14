@@ -185,7 +185,17 @@ export class Game {
             );
             connectMultiplayerServer();
 
+            const seedDeadline = Date.now() + 15000;
             while (!runtime.world.generator.multiplayerSeedLoaded) {
+                if (Date.now() >= seedDeadline) {
+                    if (runtime.server) {
+                        runtime.server.suppressCloseWarning = true;
+                        runtime.server.ws?.close();
+                    }
+                    throw new Error(
+                        "Timed out waiting for the host's world data. Allow local network access and check that the Wi-Fi allows devices to connect.",
+                    );
+                }
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
         }

@@ -68,6 +68,10 @@ const children = [
         {
             cwd: clientDirectory,
             stdio: "inherit",
+            env: {
+                ...process.env,
+                VITE_LAN_SERVER_PORT: String(serverPort),
+            },
         },
     ),
 ];

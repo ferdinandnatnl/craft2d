@@ -32,6 +32,10 @@ const { initializeTextures } = await import(
 );
 await initializeTextures((progress) => boot.setProgress(progress));
 
+if (new URLSearchParams(window.location.search).get("multiplayer") === "true") {
+    boot.setMessage("Connecting to multiplayer server...");
+}
+
 const { initButtonCenterImages } = await import("./buttonUtils.js");
 initButtonCenterImages();
 
@@ -74,5 +78,10 @@ Object.assign(window, {
 boot.hide();
 } catch (error) {
     console.error("Game resources could not load:", error);
-    boot.fail("Could not load game resources. Check the console and reload.");
+    const detail = error instanceof Error ? error.message : String(error);
+    boot.fail(
+        detail
+            ? `Could not load game resources: ${detail.slice(0, 160)}`
+            : "Could not load game resources. Check the console and reload.",
+    );
 }

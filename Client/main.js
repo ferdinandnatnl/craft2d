@@ -14,6 +14,7 @@ drawLoadScreen();
 // may already have fired.
 await runtime.game.initGame().catch((error) => {
     console.error("Failed to initialize game:", error);
+    throw error;
 });
 
 requestAnimationFrame(() => runtime.game.gameLoop());

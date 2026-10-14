@@ -3,6 +3,10 @@ import { callbacks, processMessage } from "./messageHandler.js";
 import { uuidv4 } from "../utils/classes.js";
 import { multiplayer } from "../utils/globals.js";
 import { saveWorld } from "../world/saving.js";
+import {
+    getMultiplayerWebSocketUrl,
+    isLanMultiplayerHost,
+} from "./connection.js";
 
 export function getMultiplayerUsername() {
     const fallback = "Player";
@@ -27,7 +31,7 @@ export function getMultiplayerUsername() {
 export class Server {
     constructor(ip, port) {
         this.suppressCloseWarning = false;
-        this.ws = new WebSocket(`ws://${ip}:${port}`);
+        this.ws = new WebSocket(getMultiplayerWebSocketUrl(ip, port));
 
         this.ws.onopen = () => {
             console.log("Connected to server!");
@@ -242,6 +246,23 @@ window.addEventListener("beforeunload", () => {
 
 export function connectMultiplayerServer() {
     if (!multiplayer || runtime.server) return runtime.server;
+
+    const lanServer = new URLSearchParams(window.location.search).get("server");
+    if (lanServer) {
+        const [host, port = "25565"] = lanServer.split(":");
+        const portNumber = Number(port);
+        if (
+            !isLanMultiplayerHost(host) ||
+            !Number.isInteger(portNumber) ||
+            portNumber < 1 ||
+            portNumber > 65535
+        ) {
+            throw new Error("The LAN server address is invalid.");
+        }
+
+        localStorage.setItem("multiplayerIP", host);
+        localStorage.setItem("multiplayerPort", String(portNumber));
+    }
 
     const ip = localStorage.getItem("multiplayerIP");
     const port = localStorage.getItem("multiplayerPort");

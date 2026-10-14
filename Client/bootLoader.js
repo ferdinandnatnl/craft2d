@@ -25,6 +25,9 @@ export function createBootLoader() {
     }
 
     return {
+        setMessage(message) {
+            if (title) title.textContent = String(message);
+        },
         setProgress(value) {
             const p = Math.max(0, Math.min(1, Number(value) || 0));
             const label = `${Math.round(p * 100)}%`;

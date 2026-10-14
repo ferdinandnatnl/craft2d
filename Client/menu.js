@@ -1485,6 +1485,22 @@ function isLocalNetworkHost(host) {
     );
 }
 
+function isLanMultiplayerHost(host) {
+    const normalizedHost = String(host).trim().toLowerCase();
+    return (
+        isLocalNetworkHost(normalizedHost) &&
+        normalizedHost !== "localhost" &&
+        !normalizedHost.endsWith(".localhost") &&
+        !normalizedHost.startsWith("127.")
+    );
+}
+
+function getMultiplayerWebSocketUrl(host, port) {
+    return isLanMultiplayerHost(host)
+        ? `ws://${host}:4173/multiplayer`
+        : `ws://${host}:${port}`;
+}
+
 export async function pingServer(server, { userInitiated = false } = {}) {
     return new Promise((resolve) => {
         const [ip, port = "25565"] = server.ip.split(":");
@@ -1514,7 +1530,7 @@ export async function pingServer(server, { userInitiated = false } = {}) {
             return;
         }
 
-        const ws = new WebSocket(`ws://${ip}:${port}`);
+        const ws = new WebSocket(getMultiplayerWebSocketUrl(ip, port));
         const startTime = Date.now();
         let latency = null;
         let status = null;
@@ -2038,6 +2054,26 @@ export async function connectToServer() {
     const connectButtonWasDisabled = connectButton.disabled;
     connectButton.disabled = true;
     try {
+        const [ip, port = "25565"] = serverAddress.split(":");
+        const portNumber = Number(port);
+        if (
+            !isValidServerIp(ip) ||
+            !Number.isInteger(portNumber) ||
+            portNumber < 1 ||
+            portNumber > 65535
+        ) {
+            alert("Invalid server IP or port.");
+            return;
+        }
+
+        if (isLanMultiplayerHost(ip)) {
+            const url = new URL(`http://${ip}:4173/game.html`);
+            url.searchParams.set("multiplayer", "true");
+            url.searchParams.set("server", `${ip}:${portNumber}`);
+            window.location.href = url.href;
+            return;
+        }
+
         const result = await pingServer(
             { ip: serverAddress },
             { userInitiated: true },
@@ -2054,9 +2090,8 @@ export async function connectToServer() {
             return;
         }
 
-        const [ip, port = "25565"] = serverAddress.split(":");
         localStorage.setItem("multiplayerIP", ip);
-        localStorage.setItem("multiplayerPort", port);
+        localStorage.setItem("multiplayerPort", String(portNumber));
         window.location.href = "game.html?multiplayer=true";
     } finally {
         connectingToServer = false;

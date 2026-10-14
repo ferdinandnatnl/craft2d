@@ -64,6 +64,14 @@ export default defineConfig({
             allow: [resolve(__dirname, "..")],
         },
     },
+    preview: {
+        proxy: {
+            "/multiplayer": {
+                target: `ws://127.0.0.1:${Number(process.env.VITE_LAN_SERVER_PORT) || 25565}`,
+                ws: true,
+            },
+        },
+    },
     optimizeDeps: {
         include: ["jszip", "tooloud"],
     },
