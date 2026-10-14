@@ -1,3 +1,4 @@
+import { WORLDGEN_VERSION } from "@2dcraft.com/shared/overworldGeneration.js";
 import { runtime } from "../utils/runtime.js";
 import { Drop } from "../entities/drop.js";
 import { Player } from "../entities/player.js";
@@ -23,7 +24,7 @@ export class World {
     constructor() {
         this.name = "New World";
         this.seed = 0;
-        this.worldgenVersion = 2;
+        this.worldgenVersion = WORLDGEN_VERSION;
         this.entities = [];
         this.damageIndicators = [];
         this.swordSlashEffects = [];
@@ -960,7 +961,7 @@ export class World {
             ) {
                 this.getDimensionChunks(entity.dimension)
                     .get(entity.myChunkX)
-                    .removeEntityFromChunk(entity);
+                    ?.removeEntityFromChunk(entity);
             }
         }
         const index = this.entities.findIndex((e) => e.UUID === entity.UUID);
@@ -1111,8 +1112,8 @@ export class World {
             { dx: 0, dy: -1 },
             { dx: 0, dy: 1 },
         ];
-        while (queue.length > 0) {
-            const current = queue.shift();
+        for (let index = 0; index < queue.length; index++) {
+            const current = queue[index];
             const currentLevel = current.lightLevel;
             if (currentLevel <= 1) continue;
             const currentPosX = current.transform.position.x;

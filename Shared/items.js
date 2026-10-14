@@ -83,6 +83,10 @@ export const Items = Object.freeze({
 
     Coal: 20,
     IronIngot: 21,
+    RawCopper: 3100,
+    CopperIngot: 3101,
+    GlowBerries: 3102,
+    RawIron: 3103,
     Charcoal: 22,
     Diamond: 23,
     GoldIngot: 24,
@@ -1462,6 +1466,16 @@ export const items = [
     }),
     //#endregion
 ];
+
+items.push(
+    new Item({ itemId: Items.RawIron, name: "Raw Iron", sprite: "raw_iron",
+        smeltOutput: { itemId: Items.IronIngot } }),
+    new Item({ itemId: Items.RawCopper, name: "Raw Copper", sprite: "raw_copper",
+        smeltOutput: { itemId: Items.CopperIngot } }),
+    new Item({ itemId: Items.CopperIngot, name: "Copper Ingot", sprite: "copper_ingot" }),
+    new Item({ itemId: Items.GlowBerries, name: "Glow Berries", sprite: "glow_berries",
+        foodValue: 2, foodSaturation: 0.4 }),
+);
 
 export const itemMap = new Map(items.map((item) => [item.itemId, item]));
 bindItemMap(itemMap);

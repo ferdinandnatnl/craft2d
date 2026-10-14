@@ -8,6 +8,7 @@ export class Structure {
         underground = false,
         shift = { x: 0, y: 1 },
         dimension = Dimensions.Overworld,
+        villageGround = null,
     }) {
         this.blocks = blocks;
         this.walls = walls;
@@ -15,5 +16,6 @@ export class Structure {
         this.underground = underground;
         this.shift = shift;
         this.dimension = dimension;
+        this.villageGround = villageGround;
     }
 }

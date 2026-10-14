@@ -1,3 +1,4 @@
+import { WORLDGEN_VERSION, savedWorldgenVersion } from "@2dcraft.com/shared/overworldGeneration.js";
 import { Dimension } from "./dimension.js";
 import { randomMinecraftSeed } from "@2dcraft.com/shared/seed.js";
 import { WeatherCycle } from "@2dcraft.com/shared/weather.js";
@@ -5,6 +6,7 @@ import { WeatherCycle } from "@2dcraft.com/shared/weather.js";
 export class World {
     constructor() {
         this.seed = randomMinecraftSeed();
+        this.worldgenVersion = WORLDGEN_VERSION;
         this.time = 1;
         this.weather = new WeatherCycle(this.seed);
         this.dimensions = [
@@ -32,6 +34,7 @@ export class World {
         }
 
         this.setSeed(world.seed);
+        this.worldgenVersion = world.worldgenVersion == null ? 2 : savedWorldgenVersion(world.worldgenVersion);
         this.time = Number.isFinite(world.time)
             ? Math.max(0, Math.min(8, world.time))
             : 1;
@@ -72,6 +75,7 @@ export class World {
     saveWorld() {
         let world = {
             seed: this.seed,
+            worldgenVersion: this.worldgenVersion,
             time: this.time,
             weather: this.weather.getState(),
             dimensions: [],

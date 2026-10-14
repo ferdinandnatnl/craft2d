@@ -4,6 +4,76 @@ import { ChestLoot } from "./chestLoot.js";
 import { Dimensions } from "./dimensions.js";
 import { Structure } from "./structure.js";
 
+function villageTemplate({
+    biome,
+    planks,
+    timber,
+    roof,
+    foundation,
+    path,
+    doorLower,
+    doorUpper,
+    roofCap = null,
+}) {
+    const width = 16;
+    const height = 10;
+    const blocks = Array.from({ length: height }, () =>
+        Array(width).fill(Blocks.Air),
+    );
+    const walls = Array.from({ length: height }, () =>
+        Array(width).fill(Blocks.Air),
+    );
+
+    for (let x = 0; x < width; x++) blocks[height - 1][x] = path;
+
+    const addHouse = (startX, workstation) => {
+        const groundY = height - 1;
+        for (let x = 0; x < 6; x++) {
+            blocks[groundY][startX + x] = foundation;
+            blocks[4][startX + x] = planks;
+        }
+        for (let x = 1; x <= 4; x++) {
+            blocks[3][startX + x] = planks;
+            walls[3][startX + x] = planks;
+        }
+        for (let x = 2; x <= 3; x++) {
+            blocks[2][startX + x] = roofCap ?? roof;
+        }
+
+        for (let y = 5; y <= 8; y++) {
+            blocks[y][startX] = timber;
+            blocks[y][startX + 5] = timber;
+            for (let x = 1; x <= 4; x++) {
+                blocks[y][startX + x] = Blocks.StructureAir;
+                walls[y][startX + x] = planks;
+            }
+        }
+
+        blocks[6][startX + 1] = Blocks.Glass;
+        blocks[6][startX + 4] = Blocks.Glass;
+        blocks[7][startX + 2] = doorUpper;
+        blocks[8][startX + 2] = doorLower;
+        walls[7][startX + 2] = Blocks.Air;
+        walls[8][startX + 2] = Blocks.Air;
+        blocks[8][startX + 3] = workstation;
+    };
+
+    addHouse(0, Blocks.CraftingTable);
+    addHouse(10, Blocks.Furnace);
+
+    // Keep the center lane clear so villagers and players can pass the houses.
+    blocks[6][5] = Blocks.Torch;
+    blocks[6][10] = Blocks.Torch;
+
+    return new Structure({
+        biome,
+        blocks,
+        walls,
+        shift: { x: 0, y: 0 },
+        villageGround: biome.secondLayer,
+    });
+}
+
 export const Structures = Object.freeze({
     Village: new Structure({
         biome: OverworldBiomes.Plains,
@@ -44,6 +114,57 @@ export const Structures = Object.freeze({
                 ...Array(4).fill(Blocks.OakPlanks), Blocks.Air],
             Array(16).fill(Blocks.Air),
         ],
+    }),
+    VillagePlains: villageTemplate({
+        biome: OverworldBiomes.Plains,
+        planks: Blocks.OakPlanks,
+        timber: Blocks.OakLog,
+        roof: Blocks.OakSlab,
+        foundation: Blocks.Cobblestone,
+        path: Blocks.Cobblestone,
+        doorLower: Blocks.OakDoorLower,
+        doorUpper: Blocks.OakDoorUpper,
+    }),
+    VillageDesert: villageTemplate({
+        biome: OverworldBiomes.Desert,
+        planks: Blocks.SmoothSandstone,
+        timber: Blocks.CarvedSandstone,
+        roof: Blocks.SandstoneSlab,
+        foundation: Blocks.Sandstone,
+        path: Blocks.Sandstone,
+        doorLower: Blocks.OakDoorLower,
+        doorUpper: Blocks.OakDoorUpper,
+    }),
+    VillageTaiga: villageTemplate({
+        biome: OverworldBiomes.Taiga,
+        planks: Blocks.SprucePlanks,
+        timber: Blocks.SpruceLog,
+        roof: Blocks.SpruceSlab,
+        foundation: Blocks.Cobblestone,
+        path: Blocks.Gravel,
+        doorLower: Blocks.SpruceDoorLower,
+        doorUpper: Blocks.SpruceDoorUpper,
+    }),
+    VillageSavanna: villageTemplate({
+        biome: OverworldBiomes.Savanna,
+        planks: Blocks.AcaciaPlanks,
+        timber: Blocks.AcaciaLog,
+        roof: Blocks.AcaciaSlab,
+        foundation: Blocks.Cobblestone,
+        path: Blocks.Sandstone,
+        doorLower: Blocks.AcaciaDoorLower,
+        doorUpper: Blocks.AcaciaDoorUpper,
+    }),
+    VillageSnowy: villageTemplate({
+        biome: OverworldBiomes.SnowyPlains,
+        planks: Blocks.SprucePlanks,
+        timber: Blocks.SpruceLog,
+        roof: Blocks.SpruceSlab,
+        foundation: Blocks.Cobblestone,
+        path: Blocks.Cobblestone,
+        doorLower: Blocks.SpruceDoorLower,
+        doorUpper: Blocks.SpruceDoorUpper,
+        roofCap: Blocks.SnowBlock,
     }),
     RuinedPortal: new Structure({
         blocks: [

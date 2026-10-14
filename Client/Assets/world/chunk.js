@@ -1,3 +1,7 @@
+import { LEGACY_DEPTH_SHIFT, seaLevelForVersion } from "@2dcraft.com/shared/overworldGeneration.js";
+import { hasBlockLightAt } from "@2dcraft.com/shared/mobSpawning.js";
+import { caveDecorationAt } from "@2dcraft.com/shared/caveDecorations.js";
+import { oreBlockAt, undergroundRockAt } from "@2dcraft.com/shared/oreGeneration.js";
 import { runtime } from "../utils/runtime.js";
 import { Entities } from "../entities/entities.js";
 import { Items } from "@2dcraft.com/shared/items.js";
@@ -42,7 +46,12 @@ function getMutantVariant(entityType) {
         : entityType;
 }
 
-function caveFeatureFor(seed, cellIndex) {
+function caveFeatureFor(seed, cellIndex, version, centerY) {
+    if (version >= 4) {
+        return centerY < 80 &&
+            seedHash(seed, `deep-mineshaft:${cellIndex}`) % 19 === 0
+            ? "mineshaft" : null;
+    }
     const roll = seedHash(seed, `cave:${cellIndex}`) % 6;
     // Wardens belong to Deep Dark/Ancient City generation. This small-cave
     // feature set has no such biome or structure, so do not invent a Warden den.
@@ -69,7 +78,8 @@ function alexCaveBiomeFor(world, cavern, spawnX) {
     const climate = {
         continentalness: noiseToClimate(noiseMaps.continentalness, cavern.centerX),
         temperature: noiseToClimate(noiseMaps.temperature, cavern.centerX),
-        depth: (surface - cavern.centerY) / CHUNK_HEIGHT,
+        depth: (surface - cavern.centerY) /
+            (world.generator.worldgenVersion >= 4 ? CHUNK_HEIGHT : 110),
     };
     const distanceFromSpawn = Math.abs(cavern.alexRegion.centerX - spawnX);
     if (distanceFromSpawn < cavern.alexRegion.minSpawnDistance) return null;
@@ -371,7 +381,8 @@ export class Chunk {
             }
 
             if (this.world.generator.specialWorldProps.flat) {
-                height = CHUNK_HEIGHT / 2;
+                height = this.world.generator.worldgenVersion >= 4
+                    ? CHUNK_HEIGHT / 2 : 55 + LEGACY_DEPTH_SHIFT;
             }
 
             if (this.world.generator.specialWorldProps.redstone) {
@@ -382,9 +393,36 @@ export class Chunk {
                 continue;
             }
 
-            // Draw the top layer (first level) with a constant thickness.
+            // Mountain cover follows each column's elevation, not an entire
+            // biome chunk. This avoids straight snow/ice bands down a slope.
+            let topLayer = this.biome.topLayer;
+            let secondLayer = this.biome.secondLayer;
+            if (this.dimension === Dimensions.Overworld &&
+                this.world.generator.worldgenVersion >= 4 &&
+                [OverworldBiomes.FrozenPeaks, OverworldBiomes.JaggedPeaks,
+                    OverworldBiomes.SnowySlopes, OverworldBiomes.Grove]
+                    .includes(this.biome)) {
+                const aboveSea = height - seaLevelForVersion(4);
+                if (aboveSea < 12) {
+                    topLayer = Blocks.GrassBlock;
+                    secondLayer = Blocks.Dirt;
+                } else if (aboveSea < 28) {
+                    topLayer = Blocks.SnowedGrassBlock;
+                    secondLayer = Blocks.Dirt;
+                } else if (aboveSea < 48) {
+                    topLayer = Blocks.SnowBlock;
+                    secondLayer = this.biome === OverworldBiomes.JaggedPeaks
+                        ? Blocks.Stone : Blocks.Dirt;
+                }
+            }
+            if (this.world.generator.worldgenVersion >= 3 &&
+                this.biome === OverworldBiomes.Mountain &&
+                getDimension(this.dimension).noiseMaps.heightDetail.getNoise(
+                    this.x / BLOCK_SIZE + x, 45500) > 1.5) {
+                topLayer = Blocks.Calcite;
+            }
             for (let y = height; y > height - this.biome.firstLayerWidth; y--) {
-                this.setBlockType(x, y, this.biome.topLayer);
+                this.setBlockType(x, y, topLayer);
             }
 
             // Draw the second layer immediately below the top layer.
@@ -396,7 +434,7 @@ export class Chunk {
                     this.biome.secondLayerWidth;
                 y--
             ) {
-                this.setBlockType(x, y, this.biome.secondLayer);
+                this.setBlockType(x, y, secondLayer);
             }
 
             // Fill the remaining depth with stone.
@@ -408,8 +446,14 @@ export class Chunk {
                 y > 0;
                 y--
             ) {
-                this.setBlockType(x, y, this.biome.baseBlock);
-                this.setBlockType(x, y, this.biome.baseBlock, true);
+                const rock = this.dimension === Dimensions.Overworld &&
+                    (this.world.generator.worldgenVersion >= 3 ||
+                        y < LEGACY_DEPTH_SHIFT) &&
+                    !this.world.generator.specialWorldProps.flat
+                    ? undergroundRockAt(this.x / BLOCK_SIZE + x, y,
+                        this.world.generator.worldgenVersion) : this.biome.baseBlock;
+                this.setBlockType(x, y, rock);
+                this.setBlockType(x, y, rock, true);
             }
         }
     }
@@ -418,7 +462,8 @@ export class Chunk {
         // Flat worlds use a fixed surface, so the normal height noise cannot
         // decide where water belongs. Keep new flat chunks dry and consistent.
         if (this.world.generator.specialWorldProps.flat) return;
-        const maxWaterLevel = TERRAIN_HEIGHT + this.biome.waterLevel; // Calculate max water height
+        const maxWaterLevel = seaLevelForVersion(this.world.generator.worldgenVersion) +
+            this.biome.waterLevel - 10; // Calculate max water height
 
         for (let x = 0; x < this.width; x++) {
             const terrainHeight = this.getHeight(x); // Get terrain height at this x
@@ -449,6 +494,30 @@ export class Chunk {
                     this.setBlockType(x + 1, y, this.biome.waterSandType);
             }
         }
+    }
+
+    hostileSpawnIsDark(worldX, worldY) {
+        const x = Math.floor(worldX / BLOCK_SIZE);
+        const y = Math.floor(worldY / BLOCK_SIZE);
+        const sample = (bx, by) => {
+            const block = this.world.getBlockAtWorldPosition(
+                bx * BLOCK_SIZE, by * BLOCK_SIZE, false, this.dimension);
+            if (!block) return null;
+            const def = getBlock(block.blockType);
+            return { emission: block.lightSourceLevel ?? def.lightLevel ?? 0,
+                opaque: def.collision && !def.transparent && !def.air };
+        };
+        if (!sample(x, y) || hasBlockLightAt(x, y, sample)) return false;
+        // Overworld monsters may spawn outdoors at night, but never in daylight.
+        if (daylightFactor(runtime.time) > 0.45) {
+            for (let above = y; above >= 0; above--) {
+                const block = sample(x, above);
+                if (!block) return false;
+                if (block.opaque) return true;
+            }
+            return false;
+        }
+        return true;
     }
 
     spawnMobs(passive = true) {
@@ -523,6 +592,9 @@ export class Chunk {
                 if (groundLevel === 0) continue;
                 spawnFeetY = (this.height - groundLevel) * BLOCK_SIZE;
             }
+
+            if (!passive && this.dimension === Dimensions.Overworld &&
+                !this.hostileSpawnIsDark(this.x + randomX * BLOCK_SIZE, spawnFeetY - 1)) continue;
 
             const baseEntity = passive
                 ? this.biome.mobs[randomRange(0, this.biome.mobs.length)]
@@ -622,7 +694,8 @@ export class Chunk {
                 if (!floor?.collision || floor.fluid ||
                     this.getBlockType(x, y) !== Blocks.Air ||
                     this.getBlockType(x, y + 1) !== Blocks.Air ||
-                    (this.getBlock(x, y)?.lightLevel ?? 0) > 7) continue;
+                    !this.hostileSpawnIsDark(this.x + x * BLOCK_SIZE,
+                        (this.height - y - 0.5) * BLOCK_SIZE)) continue;
                 floors.push({ x, y });
             }
         }
@@ -932,13 +1005,31 @@ export class Chunk {
         }
     }
 
+    createCaveSampler() {
+        const columns = new Map();
+        const seed = this.world.seed;
+        const version = this.world.generator.worldgenVersion;
+        const spawnX = caveBiomeSpawnX(this.world);
+        const biomeCache = new Map();
+        return (x, y) => {
+            if (!columns.has(x)) {
+                const column = caveColumnAt(x, seed, spawnX, version);
+                assignAlexCaveBiomes(this.world, column.caverns, spawnX, biomeCache);
+                columns.set(x, { column, surface: this.world.generator.getTerrainHeight(x, this.dimension) });
+            }
+            const { column, surface } = columns.get(x);
+            return caveCellAt(x, y, surface, column);
+        };
+    }
+
     generateOverworldCaves() {
+        const sample = this.world.generator.worldgenVersion >= 3 ? this.createCaveSampler() : null;
         const spawnX = caveBiomeSpawnX(this.world);
         const alexBiomeCache = new Map();
         for (let x = 0; x < this.width; x++) {
             const worldX = this.x / BLOCK_SIZE + x;
             const surface = this.getHeight(x);
-            const column = caveColumnAt(worldX, this.world.seed, spawnX);
+            const column = caveColumnAt(worldX, this.world.seed, spawnX, this.world.generator.worldgenVersion);
             assignAlexCaveBiomes(
                 this.world,
                 column.caverns,
@@ -965,6 +1056,14 @@ export class Chunk {
                         break;
                     }
                 }
+                if (sample && !column.caverns.some(room => room.alexBiome)) {
+                    const current = this.getBlockType(x, y);
+                    if ([Blocks.Air, Blocks.Stone, Blocks.Deepslate].includes(current)) {
+                        const decoration = caveDecorationAt(worldX, y, surface, sample,
+                            this.world.generator.worldgenVersion);
+                        if (decoration !== null) this.setBlockType(x, y, decoration);
+                    }
+                }
             }
         }
     }
@@ -979,7 +1078,7 @@ export class Chunk {
         const rooms = new Map();
         for (let x = 0; x < this.width; x++) {
             const worldX = worldStart + x;
-            const column = caveColumnAt(worldX, this.world.seed, spawnX);
+            const column = caveColumnAt(worldX, this.world.seed, spawnX, this.world.generator.worldgenVersion);
             assignAlexCaveBiomes(
                 this.world,
                 column.caverns,
@@ -988,7 +1087,8 @@ export class Chunk {
             );
             for (const cavern of column.caverns) {
                 if (cavern.alexBiome) continue;
-                const feature = caveFeatureFor(this.world.seed, cavern.cellIndex);
+                const feature = caveFeatureFor(this.world.seed, cavern.cellIndex,
+                    this.world.generator.worldgenVersion, cavern.centerY);
                 if (feature && cavern.centerX >= worldStart &&
                     cavern.centerX < worldEnd) {
                     const localCenterX = Math.max(0, Math.min(this.width - 1,
@@ -1066,6 +1166,33 @@ export class Chunk {
     }
 
     generateOres() {
+        if (this.dimension === Dimensions.Overworld &&
+            this.world.generator.worldgenVersion >= 3 &&
+            !this.world.generator.specialWorldProps.flat) {
+            const sample = this.createCaveSampler();
+            const mountain = ["Stony Peaks", "Frozen Peaks", "Jagged Peaks", "Snowy Slopes", "Grove", "Meadow"]
+                .includes(this.biome.name);
+            for (let x = 0; x < this.width; x++) {
+                const worldX = this.x / BLOCK_SIZE + x;
+                const surface = this.getHeight(x);
+                for (let y = 2; y < surface - 3; y++) {
+                    if (![Blocks.Stone, Blocks.Deepslate].includes(this.getBlockType(x, y))) continue;
+                    if (sample(worldX, y) !== "solid") continue;
+                    const exposed = [[-1, 0], [1, 0], [0, -1], [0, 1]]
+                        .some(([dx, dy]) => sample(worldX + dx, y + dy) === "air");
+                    const ore = oreBlockAt(worldX, y, surface, mountain, exposed,
+                        this.world.generator.worldgenVersion);
+                    if (ore !== null) this.setBlockType(x, y, ore);
+                }
+            }
+            // Retain the existing stone/dirt/gravel patches above deepslate.
+            const ores = getDimension(this.dimension).noiseMaps.ores;
+            for (const [key, index] of [["gravel", 5], ["sand", 6], ["dirt", 7]]) {
+                const ore = ores[key];
+                if (ore) this.generateOre(ore.noise, ore.threshold, ore.block, index * 10000);
+            }
+            return;
+        }
         const noiseMaps = getDimension(this.dimension).noiseMaps;
 
         if (!noiseMaps.ores) return;
@@ -1712,7 +1839,8 @@ export class Chunk {
 
                 if (
                     (!def.air && !def.transparent && def.collision) ||
-                    y > CHUNK_HEIGHT - (TERRAIN_HEIGHT + this.biome.waterLevel)
+                    y > CHUNK_HEIGHT - (seaLevelForVersion(this.world.generator.worldgenVersion) +
+                        this.biome.waterLevel - 10)
                 ) {
                     skyLight = Math.max(skyLight - 1, 1);
                     stopped = true;

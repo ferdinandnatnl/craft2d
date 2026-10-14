@@ -223,8 +223,8 @@ export class Inventory {
     positionCraftingSlots() {
         const scale = this.getGuiScale();
         const basePosition = this.craftingTable
-            ? { x: 31 * scale, y: 18 * scale }
-            : { x: 98 * scale, y: 18 * scale };
+            ? { x: 30 * scale, y: 17 * scale }
+            : { x: 88 * scale, y: 26 * scale };
         this.craftingOutputPosition = this.craftingTable
             ? { x: 125 * scale, y: 36 * scale }
             : { x: 143 * scale, y: 36 * scale };
@@ -435,11 +435,12 @@ export class Inventory {
     handleShiftClick(slot, array) {
         if (!input.shiftPressed || !array || slot.isEmpty()) return false;
 
-        let targetArray = null;
+        let targetArrays = null;
         if (array === this.items && this.storageSlots) {
-            targetArray = this.storageSlots; // Shift-clicking from inventory to hopper/chest
+            targetArrays = [this.storageSlots]; // Shift-clicking from inventory to hopper/chest
         } else if (array === this.storageSlots && this.items) {
-            targetArray = this.items; // Shift-clicking from hopper/chest to inventory
+            // Fill the main inventory before the hotbar when moving items out of storage.
+            targetArrays = [this.items.slice(0, 3), this.items.slice(3, 4)];
         } else {
             if (this.creativeSlots && !slot.infiniteTake) {
                 this.clearSlot(slot);
@@ -449,24 +450,23 @@ export class Inventory {
 
         if (slot.onlyTake) return false;
 
-        // Check if there are any non-onlyTake slots available in targetArray
-        let hasValidTarget = false;
-        for (let y = 0; y < targetArray.length; y++) {
-            for (let x = 0; x < targetArray[y].length; x++) {
-                if (!targetArray[y][x].onlyTake) {
-                    hasValidTarget = true;
-                    break;
-                }
-            }
-            if (hasValidTarget) break;
-        }
+        // Check whether any destination has slots that can accept items.
+        const hasValidTarget = targetArrays.some((targetArray) =>
+            targetArray.some((row) => row.some((targetSlot) => !targetSlot.onlyTake)),
+        );
         if (!hasValidTarget) return false; // No valid slots to transfer into
 
         let itemToTransfer = this.cloneItem(slot.item);
         let originalCount = itemToTransfer.count;
 
-        // Add items to the target array (addItemToArray now respects onlyTake and props)
-        let remaining = this.addItemToArray(itemToTransfer, targetArray);
+        // Process each destination in order so hotbar stacks do not take items before
+        // the main inventory has had a chance to accept them.
+        let remaining = originalCount;
+        for (const targetArray of targetArrays) {
+            if (remaining <= 0) break;
+            itemToTransfer.count = remaining;
+            remaining = this.addItemToArray(itemToTransfer, targetArray);
+        }
         let moved = originalCount - remaining;
 
         // Deduct the moved amount from the source slot
@@ -477,7 +477,7 @@ export class Inventory {
             }
 
             // If transferring TO storageSlots (e.g., hopper), sync this.storage with the updated storageSlots
-            if (targetArray === this.storageSlots) {
+            if (targetArrays.includes(this.storageSlots)) {
                 for (let i = 0; i < this.storageSlots.length; i++) {
                     for (let j = 0; j < this.storageSlots[i].length; j++) {
                         this.storage[i][j] = this.cloneItem(
@@ -864,8 +864,8 @@ export class Inventory {
             for (let x = 0; x < this.items[y].length; x++) {
                 if (y === OFFHAND_ROW) {
                     this.items[y][x].position = {
-                        x: 77 * scale,
-                        y: 62 * scale,
+                        x: (creative ? 34 : 77) * scale,
+                        y: (creative ? 19 : 62) * scale,
                     };
                 } else if (creative) {
                     this.items[y][x].position = {
@@ -944,7 +944,7 @@ export class Inventory {
             y: tab.row === "bottom"
                 ? this.inventoryUI.y + 136 * scale
                 : this.inventoryUI.y - 32 * scale,
-            width: 28 * scale,
+            width: 26 * scale,
             height: 32 * scale,
         };
     }
@@ -2058,27 +2058,37 @@ export class Inventory {
             return;
 
         const scale = this.getGuiScale();
-        const INVENTORY_PLAYER_OFFSET = { x: 36 * scale, y: 12 * scale };
-        const INVENTORY_PLAYER_SCALE = 2 * scale;
-
-        const baseX =
-            this.inventoryUI.x +
-            INVENTORY_PLAYER_OFFSET.x +
-            this.openUIOffset.x;
-        const baseY =
-            this.inventoryUI.y +
-            INVENTORY_PLAYER_OFFSET.y +
-            this.openUIOffset.y;
+        const creativeInventoryTab = this.openUIImage.url.startsWith(
+            "creative_inventory/",
+        );
+        const previewOffset = creativeInventoryTab
+            ? { x: 78 * scale, y: 5 * scale }
+            : { x: 36 * scale, y: 12 * scale };
+        const previewScale = (creativeInventoryTab ? 1.35 : 2) * scale;
+        const baseX = this.inventoryUI.x + previewOffset.x + this.openUIOffset.x;
+        const baseY = this.inventoryUI.y + previewOffset.y + this.openUIOffset.y;
+        if (creativeInventoryTab) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(
+                this.inventoryUI.x + 72 * scale + this.openUIOffset.x,
+                this.inventoryUI.y + 5 * scale + this.openUIOffset.y,
+                34 * scale,
+                45 * scale,
+            );
+            ctx.clip();
+        }
         drawSkinPreview(
             ctx,
             runtime.world.player.body.image,
             baseX,
             baseY,
-            INVENTORY_PLAYER_SCALE,
+            previewScale,
             runtime.world.player.skinModel ||
                 localStorage.getItem("playerSkinModel") ||
                 "steve",
         );
+        if (creativeInventoryTab) ctx.restore();
     }
 
     drawButtons(ctx) {
@@ -2088,20 +2098,19 @@ export class Inventory {
     }
 
     drawCreativeTabs() {
-        const tabsUrl = getSpriteUrl("gui/container/creative_inventory/tabs");
         const scale = this.getGuiScale();
         for (const tab of CREATIVE_TABS) {
             const rowTabs = CREATIVE_TABS.filter(({ row }) => row === tab.row);
             const column = rowTabs.findIndex(({ id }) => id === tab.id);
             const bounds = this.getCreativeTabBounds(tab);
             const selected = this.creativeTab === tab.id;
+            const spritePath = `gui/sprites/container/creative_inventory/tab_${tab.row}_${
+                selected ? "selected" : "unselected"
+            }_${column + 1}`;
             drawImage({
-                url: tabsUrl,
+                url: getSpriteUrl(spritePath),
                 x: bounds.x,
                 y: bounds.y,
-                crop: { x: column * 28,
-                    y: selected ? 32 : 0,
-                    width: 28, height: 32 },
                 scale,
                 centerX: false,
             });
@@ -2144,19 +2153,19 @@ export class Inventory {
         const x = this.inventoryUI.x + 175 * scale;
         const y = this.inventoryUI.y + (18 +
             (maxRow ? (this.creativeScrollRow / maxRow) * 75 : 0)) * scale;
-        ctx.fillStyle = "#c6c6c6";
-        ctx.fillRect(x, y, 13 * scale, 15 * scale);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x, y, 13 * scale, scale);
-        ctx.fillStyle = "#555555";
-        ctx.fillRect(x, y + 14 * scale, 13 * scale, scale);
+        const scroller = maxRow ? "scroller" : "scroller_disabled";
+        drawImage({
+            url: getSpriteUrl(`gui/sprites/container/creative_inventory/${scroller}`),
+            x,
+            y,
+            scale,
+            centerX: false,
+        });
     }
 
     drawItems() {
         this.drawHoverSlot();
-        if (this.openUIImage.url === "inventory" ||
-            (this.openUIImage.url.startsWith("creative_inventory/") &&
-                this.creativeTab === "inventory")) {
+        if (this.openUIImage.url === "inventory") {
             this.drawOffhandSlotBackground();
         }
         if (this.openUIImage.url.startsWith("creative_inventory/") &&

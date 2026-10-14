@@ -3,10 +3,11 @@
 export const RENDER_DISTANCE = 1; // In Chunks
 export const ENTITY_UPDATE_DISTANCE = 50; // In Blocks
 export const CHUNK_WIDTH = 16;
-export const CHUNK_HEIGHT = 110; // 150
+export const LEGACY_CHUNK_HEIGHT = 110;
+export const CHUNK_HEIGHT = 256;
 export const BLOCK_SIZE = 64; // 64
 export const CAVES_THRESHOLD = 4;
-export const TERRAIN_HEIGHT = 50; // 50
+export const TERRAIN_HEIGHT = 140;
 export const WATER_LEVEL = 10;
 export const CHUNK_FILE_SIZE = 7.5; // kB
 export const GRAVITY = 30 * BLOCK_SIZE;

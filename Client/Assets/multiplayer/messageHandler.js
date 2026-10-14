@@ -1,3 +1,4 @@
+import { savedWorldgenVersion } from "@2dcraft.com/shared/overworldGeneration.js";
 import { runtime } from "../utils/runtime.js";
 import { Drop } from "../entities/drop.js";
 import { Entities } from "../entities/entities.js";
@@ -213,6 +214,10 @@ export function processMessage(data) {
                 typeof message.dimensionIndex === "number"
                     ? message.dimensionIndex : 0);
             break;
+        case "worldgenVersion":
+            runtime.world.worldgenVersion = savedWorldgenVersion(message);
+            runtime.world.generator.worldgenVersion = runtime.world.worldgenVersion;
+            break;
         case "seed":
             console.log("Received seed:", message);
             runtime.world.generator.loadCustomSeed(message);
@@ -350,7 +355,7 @@ export function processMessage(data) {
 
             break;
 
-        case "placeBlock":
+        case "placeBlock": {
             if (
                 !getDimensionChunks(message.dimensionIndex)?.has(message.chunkX)
             ) {
@@ -362,6 +367,9 @@ export function processMessage(data) {
                 return;
             }
 
+            const placementMetaData = message.isWall === true
+                ? { placedWallpaper: true }
+                : null;
             getDimensionChunks(message.dimensionIndex)
                 .get(message.chunkX)
                 .setBlockTypeLocal(
@@ -369,10 +377,11 @@ export function processMessage(data) {
                     message.y,
                     message.blockType,
                     message.isWall,
-                    null,
+                    placementMetaData,
                     true,
                 );
             break;
+        }
         case "breakBlock":
             if (
                 !getDimensionChunks(message.dimensionIndex)?.has(message.chunkX)

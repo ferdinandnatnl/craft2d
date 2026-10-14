@@ -1,19 +1,21 @@
+import { cacheFarChunks } from "./chunkCache.js";
+import { WORLDGEN_VERSION, mountainBiomeAt, normalizeClimate, seaLevelForVersion } from "@2dcraft.com/shared/overworldGeneration.js";
 import { runtime } from "../utils/runtime.js";
 import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, TERRAIN_HEIGHT, WATER_LEVEL, multiplayer } from "../utils/globals.js";
 import { camera } from "../utils/renderer.js";
-import { AllBiomes, OverworldBiomes } from "@2dcraft.com/shared/biome.js";
+import { AllBiomes, ClimateOverworldBiomes, LowlandOverworldBiomes, OverworldBiomes } from "@2dcraft.com/shared/biome.js";
 import { getBlock, Metadata } from "./block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { Chunk } from "./chunk.js";
 import { activeDimension, dimensions } from "./dimension.js";
-import { loadChunk } from "./saving.js";
+import { loadChunk, saveChunk } from "./saving.js";
 import { Structures } from "@2dcraft.com/shared/structures.js";
 import { terrainHeightAt } from "@2dcraft.com/shared/terrainHeight.js";
 import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
-import { isVillageChunk } from "@2dcraft.com/shared/village.js";
+import { isVillageChunk, villageStructureForBiome } from "@2dcraft.com/shared/village.js";
 import { createSeededRandom, perlinSeed, randomInt, randomMinecraftSeed, seedHash } from "@2dcraft.com/shared/seed.js";
 import { isRandomSpreadChunk } from "@2dcraft.com/shared/randomSpread.js";
 import { Entities } from "../entities/entities.js";
@@ -73,7 +75,7 @@ export class WorldGenerator {
         this.world = world;
         this.specialWorldProps = {};
         this.multiplayerSeedLoaded = !multiplayer;
-        this.worldgenVersion = world.worldgenVersion ?? 2;
+        this.worldgenVersion = multiplayer ? 2 : (world.worldgenVersion ?? WORLDGEN_VERSION);
         this.world.worldgenVersion = this.worldgenVersion;
         this.forceToBiome = null;
         this.loadingWorld = true;
@@ -139,13 +141,13 @@ export class WorldGenerator {
                 : [center + radius, center - radius];
 
             for (const chunkIndex of candidates) {
-                if (!isVillageChunk(this.world.seed, chunkIndex)) continue;
+                if (!isVillageChunk(this.world.seed, chunkIndex, this.worldgenVersion)) continue;
 
                 const biome = this.calculateChunkBiome(
                     chunkIndex,
                     Dimensions.Overworld,
                 );
-                if (biome !== OverworldBiomes.Plains) continue;
+                if (!villageStructureForBiome(biome)) continue;
 
                 const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
                     this.getTerrainHeight(
@@ -155,7 +157,7 @@ export class WorldGenerator {
                 );
                 const floorY = Math.max(...levels);
                 if (
-                    floorY <= TERRAIN_HEIGHT + biome.waterLevel + 1 ||
+                    floorY <= seaLevelForVersion(this.worldgenVersion) + biome.waterLevel - WATER_LEVEL + 1 ||
                     floorY - Math.min(...levels) > 4
                 ) continue;
 
@@ -405,6 +407,10 @@ export class WorldGenerator {
                         );
                     }
                 }
+            } else if (!dimension.chunks.has(chunkX) && dimension.storedChunks.has(chunkX)) {
+                const saved = dimension.storedChunks.get(chunkX);
+                loadChunk(chunkX, saved, dimensionIndex);
+                dimension.storedChunks.delete(chunkX);
             } else if (!dimension.chunks.has(chunkX)) {
                 const oldChunkData = this.getNeighborBiomeData(
                     i,
@@ -436,6 +442,7 @@ export class WorldGenerator {
                 this.world.uploadChunkToServer(chunkX, dimensionIndex);
             }
         }
+        if (!multiplayer) cacheFarChunks(dimension, currentChunkIndex, saveChunk);
     }
 
     generateStructure(
@@ -571,7 +578,7 @@ export class WorldGenerator {
     findSpawnBlockX() {
         if (this.specialWorldProps.flat || this.specialWorldProps.void) return 0;
 
-        const maxRadius = CHUNK_WIDTH * 16;
+        const maxRadius = CHUNK_WIDTH * (this.worldgenVersion >= 4 ? 64 : 16);
         let steepFallback = null;
 
         for (let radius = 0; radius <= maxRadius; radius++) {
@@ -582,7 +589,7 @@ export class WorldGenerator {
                     Math.floor(worldX / CHUNK_WIDTH),
                     Dimensions.Overworld,
                 );
-                const waterline = TERRAIN_HEIGHT + (biome?.waterLevel ?? WATER_LEVEL);
+                const waterline = seaLevelForVersion(this.worldgenVersion) + (biome?.waterLevel ?? WATER_LEVEL) - WATER_LEVEL;
                 if (height <= waterline + 2) continue;
 
                 if (steepFallback === null) steepFallback = worldX;
@@ -600,17 +607,35 @@ export class WorldGenerator {
     calculateChunkBiome(chunkIndex, dimensionIndex = activeDimension) {
         const dimension = dimensions[dimensionIndex];
         const { temperature, wetness, mountains } = dimension.noiseMaps;
-        const temp = temperature.getNoise(chunkIndex, 20000);
-        const wet = wetness.getNoise(chunkIndex, 10000);
-        const mount = mountains.getNoise(chunkIndex, 30000);
+        const climateIndex = this.worldgenVersion >= 4 && dimensionIndex === Dimensions.Overworld
+            ? chunkIndex / 4 : chunkIndex;
+        const temp = temperature.getNoise(climateIndex, 20000);
+        const wet = wetness.getNoise(climateIndex, 10000);
+        const mount = mountains.getNoise(climateIndex, 30000);
 
         let biome = this.getBiomeForNoise(
             temp,
             wet,
             mount,
-            dimension.biomeSet,
+            dimensionIndex === Dimensions.Overworld
+                ? (this.worldgenVersion >= 3 ? LowlandOverworldBiomes : ClimateOverworldBiomes)
+                : dimension.biomeSet,
             dimension.noiseMaps,
         );
+
+        if (dimensionIndex === Dimensions.Overworld && this.worldgenVersion >= 3 &&
+            !this.specialWorldProps.flat) {
+            const worldX = chunkIndex * CHUNK_WIDTH + CHUNK_WIDTH / 2;
+            const peaks = dimension.noiseMaps.peaks;
+            const key = mountainBiomeAt({
+                seaLevel: seaLevelForVersion(this.worldgenVersion),
+                height: terrainHeightAt(worldX, null, dimension.noiseMaps, false, this.worldgenVersion),
+                temperature: normalizeClimate(temp, temperature),
+                wetness: normalizeClimate(wet, wetness),
+                peaks: normalizeClimate(peaks.getNoise(this.worldgenVersion >= 4 ? worldX / 4 : worldX, 20000), peaks),
+            });
+            if (key) biome = OverworldBiomes[key];
+        }
 
         if (this.specialWorldProps.flat)
             biome = dimension.biomeSet.Plains || biome;
@@ -764,12 +789,14 @@ export class WorldGenerator {
             }
 
             const chunkIndex = chunkX / (CHUNK_WIDTH * BLOCK_SIZE);
+            const villageStructure = villageStructureForBiome(chunk.biome);
             if (dimensionIndex === Dimensions.Overworld &&
-                chunk.biome === OverworldBiomes.Plains &&
-                isVillageChunk(this.world.seed, chunkIndex) &&
+                villageStructure &&
+                isVillageChunk(this.world.seed, chunkIndex, this.worldgenVersion) &&
                 this.generateVillage(
                     chunk,
                     dimensionIndex,
+                    villageStructure,
                     createSeededRandom(this.world.seed, `structure:village:${chunkIndex}`),
                 )) {
                 return;
@@ -777,7 +804,10 @@ export class WorldGenerator {
 
             for (const placement of STRUCTURE_PLACEMENTS) {
                 if (placement.dimension !== dimensionIndex ||
-                    !isRandomSpreadChunk(this.world.seed, chunkIndex, placement)) continue;
+                    !isRandomSpreadChunk(this.world.seed, chunkIndex,
+                        this.worldgenVersion >= 4
+                            ? { ...placement, spacing: placement.spacing * 4,
+                                separation: placement.separation * 4 } : placement)) continue;
                 if (placement.biome && chunk.biome !== placement.biome) continue;
 
                 const structure = Structures[placement.name];
@@ -791,7 +821,7 @@ export class WorldGenerator {
                 const surfaceAirY = chunk.findGroundLevel(localX, false, true);
                 if (
                     placement.drySurface &&
-                    surfaceAirY <= TERRAIN_HEIGHT + chunk.biome.waterLevel + 1
+                    surfaceAirY <= seaLevelForVersion(this.worldgenVersion) + chunk.biome.waterLevel - WATER_LEVEL + 1
                 ) continue;
                 const surfaceGroundY = surfaceAirY - 1;
                 let structureY;
@@ -827,25 +857,32 @@ export class WorldGenerator {
         });
     }
 
-    generateVillage(chunk, dimensionIndex, random = Math.random) {
+    generateVillage(
+        chunk,
+        dimensionIndex,
+        structureName,
+        random = Math.random,
+    ) {
         const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
             chunk.findGroundLevel(x, false, true));
         const floorY = Math.max(...levels);
         if (
-            floorY <= TERRAIN_HEIGHT + chunk.biome.waterLevel + 1 ||
+            floorY <= seaLevelForVersion(this.worldgenVersion) + chunk.biome.waterLevel - WATER_LEVEL + 1 ||
             floorY - Math.min(...levels) > 4
         ) {
             return false;
         }
 
         // Support the lane and floors where the ground dips below the village.
+        const villageGround = Structures[structureName]?.villageGround ??
+            Blocks.Cobblestone;
         levels.forEach((level, x) => {
             for (let y = level; y < floorY; y++) {
-                chunk.setBlockType(x, y, Blocks.Cobblestone);
+                chunk.setBlockType(x, y, villageGround);
             }
         });
         this.generateStructure(
-            "Village",
+            structureName,
             chunk.x,
             floorY * BLOCK_SIZE,
             dimensionIndex,

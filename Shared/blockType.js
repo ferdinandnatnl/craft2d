@@ -73,6 +73,7 @@ export class BlockType {
         dropItem = null,
 
         breakWithoutBlockUnderneath = false,
+        breakWithoutBlockAbove = false,
         onlyPlacableOn = null,
 
         lightLevel = 0,
@@ -159,6 +160,7 @@ export class BlockType {
         this.ambientSound = ambientSound;
 
         this.breakWithoutBlockUnderneath = breakWithoutBlockUnderneath;
+        this.breakWithoutBlockAbove = breakWithoutBlockAbove;
         this.onlyPlacableOn = onlyPlacableOn;
 
         this.toolType = toolType;

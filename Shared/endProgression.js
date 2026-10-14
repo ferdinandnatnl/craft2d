@@ -1,4 +1,4 @@
-import { BLOCK_SIZE, CHUNK_HEIGHT } from "./constants.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, LEGACY_CHUNK_HEIGHT } from "./constants.js";
 
 // The first stronghold is a fixed landmark so an Eye of Ender can lead to it.
 export const END_SHRINE_X = 80;
@@ -31,6 +31,7 @@ export function nearestEndShrineX(blockX, unavailable = () => false) {
 
 export function endIslandSurfaceY(blockX) {
     const distance = Math.abs(blockX);
+    const offset = CHUNK_HEIGHT - LEGACY_CHUNK_HEIGHT;
     if (distance > END_ISLAND_RADIUS) {
         if (distance < END_OUTER_ISLAND_FIRST - END_OUTER_ISLAND_RADIUS) return null;
         const center = END_OUTER_ISLAND_FIRST +
@@ -38,11 +39,11 @@ export function endIslandSurfaceY(blockX) {
                 END_OUTER_ISLAND_SPACING;
         const edgeDistance = Math.abs(distance - center);
         if (edgeDistance > END_OUTER_ISLAND_RADIUS) return null;
-        return Math.floor(CHUNK_HEIGHT / 2 - 2 +
+        return Math.floor(offset + LEGACY_CHUNK_HEIGHT / 2 - 2 +
             Math.pow(edgeDistance / END_OUTER_ISLAND_RADIUS, 2) * 4);
     }
     const edge = distance / END_ISLAND_RADIUS;
-    return Math.floor(CHUNK_HEIGHT / 2 - 2 + edge * edge * 5);
+    return Math.floor(offset + LEGACY_CHUNK_HEIGHT / 2 - 2 + edge * edge * 5);
 }
 
 export function endIslandSurfaceWorldY(blockX) {

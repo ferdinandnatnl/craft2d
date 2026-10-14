@@ -59,6 +59,7 @@ export class Dimension {
         this.name = name;
 
         this.chunks = new Map();
+        this.storedChunks = new Map();
         this.pendingBlocks = new Map();
 
         this.biomeSet = biomeSet;

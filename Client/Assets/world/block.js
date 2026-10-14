@@ -31,6 +31,15 @@ function InventoryItem(...args) {
     return new inventoryRegistry.InventoryItem(...args);
 }
 
+const bedTextureImages = new Map();
+function getBedTexture(sprite) {
+    if (bedTextureImages.has(sprite)) return bedTextureImages.get(sprite);
+    const image = new Image();
+    image.src = getSpriteUrl(`blocks/${sprite}`);
+    bedTextureImages.set(sprite, image);
+    return image;
+}
+
 import {
     BlockType,
     SpecialType,
@@ -1669,7 +1678,7 @@ export class Block extends Square {
 
         player.spawnPoint = new Vector2(
             bedLeftX + BLOCK_SIZE - player.hitbox.x / 2,
-            bed.transform.position.y - player.hitbox.y,
+            getBlockCollisionTop(bed) - player.hitbox.y,
         );
 
         if (!isNight) {
@@ -1683,6 +1692,8 @@ export class Block extends Square {
             );
             return;
         }
+
+        if (player.beginSleeping?.(bed, bedLeftX)) return;
 
         runtime.time = 1;
         runtime.day = true;
@@ -2057,6 +2068,15 @@ export class Block extends Square {
         if (this.wall) return;
         const blockDef = getBlock(this.blockType);
 
+        if (blockDef.breakWithoutBlockAbove) {
+            const above = this.world.getBlockAtWorldPosition(
+                this.transform.position.x, this.transform.position.y - BLOCK_SIZE);
+            if (above && getBlock(above.blockType).air) {
+                this.breakBlock(blockDef.dropWithoutTool, true);
+                return;
+            }
+        }
+
         // Check for blocks that should break if they don't have a solid block underneath
         if (blockDef.breakWithoutBlockUnderneath || blockDef.fall) {
             const blockBelow = this.world.getBlockAtWorldPosition(
@@ -2338,8 +2358,14 @@ export class Block extends Square {
     }
 
     draw(ctx, camera) {
+        const definition = getBlock(this.blockType);
+        if (!this.wall && definition.specialType === SpecialType.Bed) {
+            this.drawBed(ctx, camera, definition);
+            return;
+        }
+
         const isDoor = !this.wall &&
-            getBlock(this.blockType).specialType === SpecialType.Door;
+            definition.specialType === SpecialType.Door;
         if (isDoor && this.img?.complete) {
             const { left, width } = getDoorPanelBounds(
                 this.transform.position.x / BLOCK_SIZE,
@@ -2371,6 +2397,100 @@ export class Block extends Square {
         }
 
         this.drawSignText(ctx, camera);
+    }
+
+    drawBed(ctx, camera, definition) {
+        const headOffset = definition.extendedBlock?.[0]?.offset?.x;
+        if (!headOffset) return;
+
+        const blockSize = BLOCK_SIZE;
+        const footX = this.transform.position.x;
+        const headX = footX + headOffset * blockSize;
+        const left = Math.min(footX, headX);
+        const bottom = this.transform.position.y + blockSize;
+        const screenX = Math.round(left - camera.x);
+        const screenY = Math.round(bottom - camera.y);
+        const width = Math.round(2 * blockSize);
+        const mattressTop = bottom - blockSize * 9 / 16;
+        const mattressHeight = blockSize * 6 / 16;
+        const facing = headOffset > 0 ? "west" : "east";
+        const footSprite = `red_bed_foot_${facing}`;
+        const headSprite = `red_bed_head_${facing}`;
+        const drawTexture = (sprite, sx, sy, sw, sh, x, y, w, h, flip = false) => {
+            const image = getBedTexture(sprite);
+            if (!image.complete || !image.naturalWidth) return;
+
+            const destinationX = Math.round(x - camera.x);
+            const destinationY = Math.round(y - camera.y);
+            const destinationWidth = Math.max(1, Math.round(w));
+            const destinationHeight = Math.max(1, Math.round(h));
+            if (flip) {
+                ctx.save();
+                ctx.translate(destinationX + destinationWidth, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(image, sx, sy, sw, sh, 0, destinationY,
+                    destinationWidth, destinationHeight);
+                ctx.restore();
+            } else {
+                ctx.drawImage(image, sx, sy, sw, sh, destinationX,
+                    destinationY, destinationWidth, destinationHeight);
+            }
+        };
+
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.imageSmoothingEnabled = false;
+        if (this.filterBrightness < 100) {
+            ctx.filter = `brightness(${this.filterBrightness}%)`;
+        }
+
+        const footLegX = headOffset > 0 ? left : left + 2 * blockSize - 3 * blockSize / 16;
+        const headLegX = headOffset > 0 ? left + 2 * blockSize - 3 * blockSize / 16 : left;
+        const footLegSourceX = headOffset > 0 ? 13 : 0;
+        const headLegSourceX = headOffset > 0 ? 0 : 13;
+        const legY = bottom - blockSize * 3 / 16;
+        const legSize = blockSize * 3 / 16;
+
+        // Close the under-bed gap so the background dirt does not show through.
+        const frameY = bottom - legSize;
+        for (const frameX of [footX, headX]) {
+            drawTexture("bed_down", 0, 0, 16, 3,
+                frameX, frameY, blockSize, legSize);
+        }
+
+        // These face crops and dimensions follow Mojang's 16x16 bed model.
+        drawTexture(footSprite, footLegSourceX, 13, 3, 3,
+            footLegX, legY, legSize, legSize);
+        drawTexture(headSprite, headLegSourceX, 13, 3, 3,
+            headLegX, legY, legSize, legSize);
+        drawTexture(footSprite, 0, 7, 16, 6,
+            footX, mattressTop, blockSize, mattressHeight);
+        drawTexture(headSprite, 0, 7, 16, 6,
+            headX, mattressTop, blockSize, mattressHeight, true);
+
+        ctx.beginPath();
+        ctx.rect(screenX, screenY - blockSize * 9 / 16,
+            width, mattressHeight);
+        ctx.rect(Math.round(footLegX - camera.x), screenY - blockSize * 3 / 16,
+            legSize, legSize);
+        ctx.rect(Math.round(headLegX - camera.x), screenY - blockSize * 3 / 16,
+            legSize, legSize);
+        ctx.clip();
+
+        ctx.filter = "none";
+        if (this.dark) {
+            ctx.globalAlpha = 0.5;
+            ctx.fillStyle = "black";
+            ctx.fillRect(screenX, screenY - blockSize * 9 / 16,
+                width, blockSize * 9 / 16);
+        }
+        if (this.lightLevel < 15) {
+            ctx.globalAlpha = 1 - this.getBrightness();
+            ctx.fillStyle = "black";
+            ctx.fillRect(screenX, screenY - blockSize * 9 / 16,
+                width, blockSize * 9 / 16);
+        }
+        ctx.restore();
     }
 
     drawSignText(ctx, camera) {
@@ -2465,6 +2585,15 @@ export function hasBlockCollision(block) {
     const def = getBlock(block.blockType);
     if (!def?.collision) return false;
     return !(def.specialType === SpecialType.Door && block.metaData?.open);
+}
+
+export function getBlockCollisionTop(block) {
+    if (!block) return 0;
+    const definition = getBlock(block.blockType);
+    const height = definition.specialType === SpecialType.Bed
+        ? 9 / 16
+        : Math.max(0, Math.min(1, 1 - (block.cutoff || 0)));
+    return block.transform.position.y + BLOCK_SIZE * (1 - height);
 }
 
 runtime.getBlock = getBlock;

@@ -9,7 +9,12 @@ import {
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, GRAVITY } from "../utils/globals.js";
 import { camera } from "../utils/renderer.js";
 import { getSpriteAverageColor } from "../utils/texturePackLoader.js";
-import { SpecialType, getBlock, hasBlockCollision } from "../world/block.js";
+import {
+    SpecialType,
+    getBlock,
+    getBlockCollisionTop,
+    hasBlockCollision,
+} from "../world/block.js";
 import { Dimensions, activeDimension, enterEnd, getDimensionChunks, gotoDimension, leaveEnd } from "../world/dimension.js";
 import { entityRegistry } from "../entities/entityRegistry.js";
 import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
@@ -213,9 +218,7 @@ export class Entity {
 
         const checkBlockWithCutoff = (block, x, y) => {
             if (!block || !this.canStandOn(block)) return null;
-            const effectiveHeight = BLOCK_SIZE * (1 - block.cutoff);
-            const blockTopY =
-                block.transform.position.y + (BLOCK_SIZE - effectiveHeight);
+            const blockTopY = getBlockCollisionTop(block);
             if (!hasBlockCollision(block)) {
                 if (this.velocity.y < 0) return null;
                 const currentBottomY = this.position.y + this.hitbox.y;
@@ -275,9 +278,7 @@ export class Entity {
         const checkBlockWithCutoff = (block, x, y) => {
             if (!block || !this.isSolid(block)) return null;
             if (!hasBlockCollision(block)) return null;
-            const effectiveHeight = BLOCK_SIZE * (1 - block.cutoff);
-            const blockTopY =
-                block.transform.position.y + (BLOCK_SIZE - effectiveHeight);
+            const blockTopY = getBlockCollisionTop(block);
             if (
                 this.position.y + this.hitbox.y > blockTopY &&
                 this.position.y < block.transform.position.y + BLOCK_SIZE &&
@@ -323,9 +324,7 @@ export class Entity {
         const checkBlockWithCutoff = (block, x, y) => {
             if (!block || !this.isSolid(block)) return null;
             if (!hasBlockCollision(block)) return null;
-            const effectiveHeight = BLOCK_SIZE * (1 - block.cutoff);
-            const blockTopY =
-                block.transform.position.y + (BLOCK_SIZE - effectiveHeight);
+            const blockTopY = getBlockCollisionTop(block);
             if (
                 this.position.y + this.hitbox.y > blockTopY &&
                 this.position.y < block.transform.position.y + BLOCK_SIZE &&
@@ -373,10 +372,12 @@ export class Entity {
         );
         const blockUpLeft = this.getBlockAtPosition(this.position.x, futureY);
 
-        if (blockUpLeft && this.isSolid(blockUpLeft)) {
+        if (blockUpLeft && this.isSolid(blockUpLeft) &&
+            futureY >= getBlockCollisionTop(blockUpLeft)) {
             return blockUpLeft;
         }
-        if (blockUpRight && this.isSolid(blockUpRight)) {
+        if (blockUpRight && this.isSolid(blockUpRight) &&
+            futureY >= getBlockCollisionTop(blockUpRight)) {
             return blockUpRight;
         }
         return null;
@@ -467,6 +468,22 @@ export class Entity {
         const candidateOffsets = [0];
         for (let distance = 1; distance <= maxSearchDistance; distance++) {
             candidateOffsets.push(distance, -distance);
+        }
+
+        const currentFeetY = this.position.y + this.hitbox.y;
+        for (const x of [
+            this.position.x,
+            this.position.x + this.hitbox.x - 1,
+        ]) {
+            const support = this.getBlockAtPosition(x, currentFeetY - 1);
+            if (!support || !hasBlockCollision(support)) continue;
+            const supportTop = getBlockCollisionTop(support);
+            if (Math.abs(supportTop - currentFeetY) > 1) continue;
+            this.position.y = supportTop - this.hitbox.y;
+            this.standingOnBlockType = support.blockType;
+            this.velocity.y = 0;
+            this.grounded = true;
+            return true;
         }
 
         for (const offset of candidateOffsets) {
@@ -1027,11 +1044,7 @@ export class Entity {
 
         if (nextPositionX > this.position.x) {
             if (rightCollision && this.grounded) {
-                const effectiveHeight =
-                    BLOCK_SIZE * (1 - rightCollision.cutoff);
-                const blockTopY =
-                    rightCollision.transform.position.y +
-                    (BLOCK_SIZE - effectiveHeight);
+                const blockTopY = getBlockCollisionTop(rightCollision);
                 const entityBottomY = this.position.y + this.hitbox.y;
                 const heightDifference = entityBottomY - blockTopY;
 
@@ -1069,10 +1082,7 @@ export class Entity {
         }
         if (nextPositionX < this.position.x) {
             if (leftCollision && this.grounded) {
-                const effectiveHeight = BLOCK_SIZE * (1 - leftCollision.cutoff);
-                const blockTopY =
-                    leftCollision.transform.position.y +
-                    (BLOCK_SIZE - effectiveHeight);
+                const blockTopY = getBlockCollisionTop(leftCollision);
                 const entityBottomY = this.position.y + this.hitbox.y;
                 const heightDifference = entityBottomY - blockTopY;
 
@@ -1138,10 +1148,7 @@ export class Entity {
             if (downCollision && !steppedUp) {
                 this.standingOnBlockType = downCollision.blockType;
                 this.wasColliding = true;
-                const effectiveHeight = BLOCK_SIZE * (1 - downCollision.cutoff);
-                const blockTopY =
-                    downCollision.transform.position.y +
-                    (BLOCK_SIZE - effectiveHeight);
+                const blockTopY = getBlockCollisionTop(downCollision);
                 this.position.y = blockTopY - this.hitbox.y;
                 this.ground();
             } else if (!steppedUp) {
@@ -1278,10 +1285,7 @@ export class Entity {
                         continue;
                     }
 
-                    const effectiveHeight = BLOCK_SIZE * (1 - block.cutoff);
-                    const blockTopY =
-                        block.transform.position.y +
-                        (BLOCK_SIZE - effectiveHeight);
+                    const blockTopY = getBlockCollisionTop(block);
                     const entityBottomY = this.position.y + this.hitbox.y;
                     const entityTopY = this.position.y;
 

@@ -42,3 +42,29 @@ test("village cottages have roofs, open entrances, rear windows, and a clear lan
     assert.equal(rows[5][1], Blocks.CraftingTable);
     assert.equal(rows[5][14], Blocks.Furnace);
 });
+
+test("biome village roofs connect and the center lane stays walkable", () => {
+    for (const name of ["VillagePlains", "VillageDesert", "VillageTaiga",
+        "VillageSavanna", "VillageSnowy"]) {
+        const village = Structures[name];
+        const rows = village.blocks;
+        assert.equal(rows.length, 10, name);
+        assert.ok(rows.every(row => row.length === 16), name);
+        for (const start of [0, 10]) {
+            for (const x of [start + 2, start + 3]) {
+                assert.notEqual(rows[2][x], Blocks.Air, name);
+                assert.equal(rows[3][x], rows[4][x], name);
+                assert.equal(rows[4][x], village.walls[3][x], name);
+            }
+        }
+        for (let x = 6; x <= 9; x++) {
+            assert.equal(rows[9][x], rows[9][6], name);
+            assert.notEqual(rows[9][x], Blocks.Water, name);
+            assert.notEqual(rows[9][x], Blocks.Farmland, name);
+            for (let y = 6; y <= 8; y++) {
+                assert.equal(rows[y][x], Blocks.Air, name);
+            }
+        }
+        assert.equal(village.villageGround, village.biome.secondLayer, name);
+    }
+});

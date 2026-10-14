@@ -1,3 +1,4 @@
+import { seaLevelForVersion } from "@2dcraft.com/shared/overworldGeneration.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { seedHash } from "@2dcraft.com/shared/seed.js";
 import { BLOCK_SIZE, TERRAIN_HEIGHT } from "../utils/globals.js";
@@ -23,7 +24,9 @@ export function getAmbientContext(world) {
     const blockX = centerX / BLOCK_SIZE;
     const feetBlockY = Math.floor(feetY / BLOCK_SIZE);
     const surfaceBlockY = world.generator.getTerrainHeight(blockX, dimensionIndex);
-    const depth = feetBlockY - surfaceBlockY;
+    const usesUserY = typeof world.worldToUserBlockY === "function";
+    const feetUserY = usesUserY ? world.worldToUserBlockY(feetY) : null;
+    const depth = usesUserY ? surfaceBlockY - feetUserY : feetBlockY - surfaceBlockY;
     const chunk = world.getChunkForX(centerX, dimensionIndex);
     const biome = chunk?.biome || world.generator.calculateChunkBiome(
         Math.floor(centerX / (BLOCK_SIZE * 16)),
@@ -36,8 +39,11 @@ export function getAmbientContext(world) {
         dimensionIndex,
     );
     const underwater = headBlock?.blockType === Blocks.Water;
-    const waterSurfaceY = TERRAIN_HEIGHT + (biome?.waterLevel ?? 10);
-    const waterDepth = Math.max(0, feetBlockY - waterSurfaceY);
+    const waterSurfaceY = (world.generator.worldgenVersion == null
+        ? 60 : seaLevelForVersion(world.generator.worldgenVersion)) +
+        (biome?.waterLevel ?? 10) - 10;
+    const waterDepth = Math.max(0, usesUserY
+        ? waterSurfaceY - feetUserY : feetBlockY - waterSurfaceY);
     const nearWater = isWaterBlock(world, centerX, feetY, dimensionIndex) ||
         isWaterBlock(world, centerX, feetY + BLOCK_SIZE, dimensionIndex);
     const dimensionName = getDimension(dimensionIndex)?.name || "Overworld";
@@ -53,7 +59,8 @@ export function getAmbientContext(world) {
         underground,
         deepCave: underground && depth >= 20,
         nearWater,
-        inAir: feetBlockY < surfaceBlockY - 4,
+        inAir: usesUserY ? feetUserY > surfaceBlockY + 4
+            : feetBlockY < surfaceBlockY - 4,
         openSky: headBlock?.sunLight === true,
         rainSound: seedHash(world.seed ?? 0, "ambient-sounds:rain") % 2
             ? "rain2"

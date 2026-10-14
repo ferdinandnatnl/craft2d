@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { terrainHeightAt } from "../../Shared/terrainHeight.js";
 import { Noise, NoisePresets } from "../../Shared/noise.js";
 import tooloud from "../../Shared/tooloud.js";
-import { CHUNK_HEIGHT, CHUNK_WIDTH } from "../../Shared/constants.js";
+import { CHUNK_HEIGHT, CHUNK_WIDTH, LEGACY_CHUNK_HEIGHT } from "../../Shared/constants.js";
 import { terrainColumnFaces } from "../Assets/rendering/heightfield.js";
+import { perlinSeed } from "../../Shared/seed.js";
 
 const noiseMaps = {
     continentalness: new Noise(6, 18, 0),
@@ -53,8 +54,24 @@ test("terrain height does not change when the surface biome changes", () => {
 
 test("flat worlds keep the same surface even without noise or biome data", () => {
     for (const x of [-100000, -16, -1, 0, 15, 16, 100000]) {
-        assert.equal(terrainHeightAt(x, null, null, true), CHUNK_HEIGHT / 2);
+        assert.equal(terrainHeightAt(x, null, null, true),
+            LEGACY_CHUNK_HEIGHT / 2 + CHUNK_HEIGHT - LEGACY_CHUNK_HEIGHT);
+        assert.equal(terrainHeightAt(x, null, null, true, 4), CHUNK_HEIGHT / 2);
     }
+});
+
+test("new mountain profiles break up straight flanks without altering saved v4 terrain", () => {
+    tooloud.Perlin.setSeed(perlinSeed(1847));
+    const profile = version => Array.from({ length: 320 }, (_, i) =>
+        terrainHeightAt(-3920 + i, biomeAt, noiseMaps, false, version));
+    const saved = profile(4);
+    const current = profile(5);
+    assert.deepEqual([0, 96, 160, 192, 224, 256, 304].map(i => saved[i]),
+        [157, 167, 209, 238, 238, 221, 153]);
+    assert.ok(current[192] - current[240] >= 20, "main summit has a distinct flank");
+    assert.ok(current[256] - current[240] >= 6, "flank has a second rise");
+    assert.ok(current.every(height => height < CHUNK_HEIGHT - 18),
+        "mountain top is not clipped into a flat ceiling");
 });
 
 test("separate scenery meshes match a continuous surface across chunk seams", () => {

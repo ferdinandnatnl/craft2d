@@ -15,7 +15,12 @@ import { Vector2, calculateDirection, lerp, randomRange, uuidv4 } from "../utils
 import { BLOCK_SIZE, CHUNK_HEIGHT, INTERACT_DISTANCE, ToolType, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
 import { camera, drawText, isColliding, mouseOverPosition } from "../utils/renderer.js";
-import { SpecialType, getBlock, hasBlockCollision } from "../world/block.js";
+import {
+    SpecialType,
+    getBlock,
+    getBlockCollisionTop,
+    hasBlockCollision,
+} from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { activeDimension, getDimensionChunks, gotoDimension } from "../world/dimension.js";
 import { nearestEndShrineX } from "@2dcraft.com/shared/endProgression.js";
@@ -135,6 +140,7 @@ export class Player extends Entity {
         this.isDead = false;
         this.deathCause = "";
         this.spawnPoint = null;
+        this.sleepState = null;
 
         this.breakingStage = 0;
         this.breakingTime = 0;
@@ -320,6 +326,15 @@ export class Player extends Entity {
             return;
         }
 
+        if (this.sleepState) {
+            this.updateSleepState();
+            this.shieldBlocking = false;
+            this.updateEntity();
+            this.mutliplayerSyncPlayerState();
+            this.applyLimbTextures();
+            return;
+        }
+
         this.shieldBlocking = this.isShieldRaised();
 
         if (!this.windowOpen && input.isActionPressed("minionMenu")) {
@@ -357,6 +372,154 @@ export class Player extends Entity {
         this.applyLimbTextures();
 
         if (this.windowOpen) this.inventory.update();
+    }
+
+    beginSleeping(bed, bedLeftX) {
+        if (this.sleepState || this.boat || !bed) return false;
+        const headX = bed.transform.position.x +
+            (bed.blockType === Blocks.BedFootWest ? -BLOCK_SIZE : BLOCK_SIZE);
+        const headDirection = Math.sign(headX - bed.transform.position.x) || 1;
+        this.sleepState = {
+            bedX: bed.transform.position.x,
+            bedY: bed.transform.position.y,
+            bedLeftX,
+            bedTopY: getBlockCollisionTop(bed),
+            bedDimension: bed.dimensionIndex,
+            headDirection,
+            phase: "lyingDown",
+            elapsed: 0,
+            saved: {
+                canMove: this.canMove,
+                noGravity: this.noGravity,
+                noCollision: this.noCollision,
+                grounded: this.grounded,
+                standingOnBlockType: this.standingOnBlockType,
+                direction: this.direction,
+                lookDirection: this.lookDirection,
+            },
+        };
+
+        this.canMove = false;
+        this.noGravity = true;
+        this.noCollision = true;
+        this.grounded = true;
+        this.direction = headDirection;
+        this.lookDirection = headDirection > 0 ? 0 : 180;
+        this.velocity.x = 0;
+        this.velocity.y = 0;
+        this.targetVelocity.x = 0;
+        this.targetVelocity.y = 0;
+        this.shouldAddForce.x = 0;
+        this.shouldAddForce.y = 0;
+        if (this.body) {
+            this.body.swimAmount = 0;
+            this.body.boatAmount = 0;
+            this.body.sleepDirection = headDirection;
+        }
+        this.updateSleepPose(0);
+        return true;
+    }
+
+    updateSleepPose(amount) {
+        const state = this.sleepState;
+        if (!state) return;
+        const easedAmount = Math.max(0, Math.min(1, amount));
+        const angle = easedAmount * Math.PI / 2;
+        const verticalExtent = BLOCK_SIZE * (
+            0.9 * Math.cos(angle) + 0.2 * Math.sin(angle)
+        );
+        const centerX = state.bedLeftX + BLOCK_SIZE;
+        const centerY = state.bedTopY - verticalExtent;
+        this.position.x = centerX - this.hitbox.x / 2;
+        this.position.y = centerY - BLOCK_SIZE * 0.9;
+        if (this.body) {
+            this.body.sleepAmount = easedAmount;
+            this.body.sleepDirection = state.headDirection;
+        }
+    }
+
+    updateSleepState() {
+        const state = this.sleepState;
+        if (!state) return;
+        const currentBed = this.world.getBlockAtWorldPosition(
+            state.bedX,
+            state.bedY,
+            false,
+            state.bedDimension,
+        );
+        const bedStillExists = currentBed &&
+            getBlock(currentBed.blockType).specialType === SpecialType.Bed;
+        const movementRequested = ["jump", "moveLeft", "moveRight", "moveUp", "moveDown"]
+            .some(action => input.isActionDown(action));
+        if (!bedStillExists || movementRequested) {
+            this.wakeFromBed();
+            return;
+        }
+
+        const deltaTime = Math.max(0, Math.min(runtime.deltaTime || 0, 0.1));
+        const animateSeconds = 0.35;
+        state.elapsed += deltaTime;
+        if (state.phase === "lyingDown") {
+            const progress = Math.min(1, state.elapsed / animateSeconds);
+            this.updateSleepPose(progress * progress * (3 - 2 * progress));
+            if (progress >= 1) {
+                state.phase = "asleep";
+                state.elapsed = 0;
+            }
+            return;
+        }
+
+        if (state.phase === "asleep") {
+            this.updateSleepPose(1);
+            if (state.elapsed >= 1) {
+                runtime.time = 1;
+                runtime.day = true;
+                runtime.game?.chat?.message("You slept through the night.");
+                state.phase = "wakingUp";
+                state.elapsed = 0;
+            }
+            return;
+        }
+
+        const progress = Math.min(1, state.elapsed / animateSeconds);
+        const easedProgress = progress * progress * (3 - 2 * progress);
+        this.updateSleepPose(1 - easedProgress);
+        if (progress >= 1) this.wakeFromBed();
+    }
+
+    wakeFromBed() {
+        const state = this.sleepState;
+        if (!state) return;
+        const bed = this.world.getBlockAtWorldPosition(
+            state.bedX,
+            state.bedY,
+            false,
+            state.bedDimension,
+        );
+        const bedStillExists = bed &&
+            getBlock(bed.blockType).specialType === SpecialType.Bed;
+        this.sleepState = null;
+        this.position.x = state.bedLeftX + BLOCK_SIZE - this.hitbox.x / 2;
+        this.position.y = state.bedTopY - this.hitbox.y;
+        this.noGravity = state.saved.noGravity;
+        this.noCollision = state.saved.noCollision;
+        this.canMove = this.isDead ? false : state.saved.canMove;
+        this.grounded = bedStillExists ? true : false;
+        this.standingOnBlockType = bedStillExists
+            ? bed.blockType
+            : state.saved.grounded ? state.saved.standingOnBlockType : null;
+        this.direction = state.saved.direction;
+        this.lookDirection = state.saved.lookDirection;
+        this.velocity.x = 0;
+        this.velocity.y = 0;
+        this.targetVelocity.x = 0;
+        this.targetVelocity.y = 0;
+        this.shouldAddForce.x = 0;
+        this.shouldAddForce.y = 0;
+        if (this.body) {
+            this.body.sleepAmount = 0;
+            this.body.sleepDirection = 1;
+        }
     }
 
     drawOverride() {
@@ -489,6 +652,12 @@ export class Player extends Entity {
             if (Number.isFinite(data.boatPhase)) {
                 this.body.boatPhase = data.boatPhase % (Math.PI * 2);
             }
+            if (Number.isFinite(data.sleepAmount)) {
+                this.body.sleepAmount = Math.max(0, Math.min(1, data.sleepAmount));
+            }
+            if (Number.isFinite(data.sleepDirection)) {
+                this.body.sleepDirection = data.sleepDirection < 0 ? -1 : 1;
+            }
             this.applyLimbTextures();
         }
 
@@ -558,6 +727,8 @@ export class Player extends Entity {
             data.swimPhase = this.body.swimPhase;
             data.boatAmount = this.body.boatAmount;
             data.boatPhase = this.body.boatPhase;
+            data.sleepAmount = this.body.sleepAmount;
+            data.sleepDirection = this.body.sleepDirection;
         }
         data.boatUUID = this.boat?.UUID ?? null;
         if (this.boat) {
@@ -665,6 +836,7 @@ export class Player extends Entity {
         }
         if (cause) this.deathCause = cause;
         if (!this.damage(damage, attacker)) return;
+        this.wakeFromBed();
         if (multiplayer && this.isLocal()) this.mutliplayerSyncPlayerState();
         if (this.invulnerable) return;
         this.knockBack(hitfromX, kb);
@@ -716,6 +888,7 @@ export class Player extends Entity {
     }
 
     respawn() {
+        this.wakeFromBed();
         this.velocity = new Vector2();
         this.shouldAddForce = new Vector2();
         this.resetFoodStats();
@@ -1890,10 +2063,22 @@ export class Player extends Entity {
             }
         }
 
-        if (!this.hoverBlock) {
+        if (!this.hoverBlock && !this.hoverWall) {
             this.resetBreaking();
             return;
         }
+
+        const selectedTool = this.inventory.selectedItem?.toolType;
+        const foregroundIsAir = !this.hoverBlock ||
+            getBlock(this.hoverBlock.blockType).air;
+        const isHammer = selectedTool === ToolType.Hammer;
+        const placedWallpaper =
+            this.hoverWall?.metaData?.placedWallpaper === true;
+        const breakingWall = placedWallpaper &&
+            (isHammer || foregroundIsAir);
+        const breakTarget = isHammer
+            ? (breakingWall ? this.hoverWall : null)
+            : (breakingWall ? this.hoverWall : this.hoverBlock);
 
         const cursorEntity = this.checkForEntityOnMouse();
         const attackingEntityAtCursor = cursorEntity &&
@@ -1902,14 +2087,7 @@ export class Player extends Entity {
             attackDown && !swordSelected && !attackingEntityAtCursor &&
             !meleeTargetInRange
         ) {
-            if (
-                this.inventory.selectedItem &&
-                this.inventory.selectedItem.toolType === ToolType.Hammer
-            ) {
-                this.breakingLogic(this.hoverWall, true);
-            } else {
-                this.breakingLogic(this.hoverBlock);
-            }
+            this.breakingLogic(breakTarget, breakingWall);
         } else {
             this.resetBreaking();
         }
@@ -2083,11 +2261,13 @@ export class Player extends Entity {
         );
 
         // Place the block
-        const placementMetaData =
-            !isWall && placingSeaPickle
-                ? { waterlogged: true, pickles: 1 }
-                : !isWall && blockToPlace.specialType === SpecialType.Door
-                  ? { open: false } : null;
+        // Mark player-placed wallpaper so it stays distinct from generated walls.
+        const placementMetaData = isWall
+            ? { placedWallpaper: true }
+            : placingSeaPickle
+              ? { waterlogged: true, pickles: 1 }
+              : blockToPlace.specialType === SpecialType.Door
+                ? { open: false } : null;
         const newBlock = chunk.setBlockTypeLocal(
             this.hoverBlock.x,
             this.hoverBlock.y,
@@ -2449,6 +2629,11 @@ export class Player extends Entity {
             return;
         }
 
+        if (wall && hover.metaData?.placedWallpaper !== true) {
+            this.resetBreaking();
+            return;
+        }
+
         const heldItem = this.holdItem?.itemId != null
             ? getItem(this.holdItem.itemId)
             : null;
@@ -2476,14 +2661,14 @@ export class Player extends Entity {
 
         let block = getBlock(hover.blockType);
 
-        if (block.air || block.fluid) {
+        if (block.air || (!wall && block.fluid)) {
             this.resetBreaking();
             return;
         }
 
         if (
             !this.abilities.mayBuild ||
-            (getBlock(hover.blockType).hardness < 0 && this.gamemode != 1)
+            (!wall && block.hardness < 0 && this.gamemode != 1)
         ) {
             this.resetBreaking();
             return;
@@ -2506,20 +2691,17 @@ export class Player extends Entity {
             return;
         }
 
-        let currentBlockHardness = block.hardness;
+        let currentBlockHardness = wall
+            ? Math.max(block.hardness, 0.2)
+            : block.hardness;
         const originalBlockHardness = block.hardness;
 
         const selectedTool = this.inventory.selectedItem?.toolType;
-
-        let isWall = false;
-
-        if (selectedTool === ToolType.Hammer) {
-            isWall = true;
-        }
+        const isHammer = selectedTool === ToolType.Hammer;
 
         // set hardness to tooltype
         if (
-            !isWall &&
+            !isHammer &&
             selectedTool &&
             block.toolType === this.inventory.selectedItem.toolType
         ) {
@@ -2528,11 +2710,11 @@ export class Player extends Entity {
             if (currentBlockHardness < 0) currentBlockHardness = 0;
         }
 
-        if (isWall)
+        if (isHammer)
             currentBlockHardness = 2 - this.inventory.selectedItem.toolLevel;
 
         if (this.breakingTime === 0) {
-            this.hoverBlock.clicked(this);
+            if (!wall) hover.clicked(this);
         }
 
         const soundInterval = 0.2;
@@ -2544,7 +2726,7 @@ export class Player extends Entity {
                 array: block.breakingSound,
                 volume: 0.2,
                 positional: true,
-                origin: runtime.world.getBlockWorldPosition(this.hoverBlock),
+                origin: runtime.world.getBlockWorldPosition(hover),
             });
 
             this.playerSwing();
@@ -2566,8 +2748,8 @@ export class Player extends Entity {
                 this.inventory.selectedItem.toolLevel < block.requiredToolLevel
             )
                 shouldDrop = false;
-            if (isWall) shouldDrop = true;
-            hover.breakBlock(shouldDrop, isWall);
+            if (wall) shouldDrop = true;
+            hover.breakBlock(shouldDrop, wall);
 
             if (multiplayer) {
                 runtime.world.serverBreakBlock(
@@ -2575,7 +2757,7 @@ export class Player extends Entity {
                     hover.x,
                     hover.y,
                     Blocks.Air,
-                    isWall,
+                    wall,
                     shouldDrop,
                     activeDimension,
                 );

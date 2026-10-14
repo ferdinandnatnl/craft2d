@@ -28,6 +28,8 @@ export class Body {
         this.opacity = 1;
         this.swimAmount = 0;
         this.swimPhase = 0;
+        this.sleepAmount = 0;
+        this.sleepDirection = 1;
         this.boatAmount = 0;
         this.boatPhase = 0;
 
@@ -186,6 +188,13 @@ export class Body {
             const centerY = this.position.y + BLOCK_SIZE * 0.9;
             ctx.translate(centerX, centerY);
             ctx.rotate(direction * Math.PI / 2 * this.swimAmount);
+            ctx.translate(-centerX, -centerY);
+        }
+        if (this.sleepAmount > 0) {
+            const centerX = this.position.x + BLOCK_SIZE * 0.1;
+            const centerY = this.position.y + BLOCK_SIZE * 0.9;
+            ctx.translate(centerX, centerY);
+            ctx.rotate(this.sleepDirection * Math.PI / 2 * this.sleepAmount);
             ctx.translate(-centerX, -centerY);
         }
         const bendPose = this.bendPose;

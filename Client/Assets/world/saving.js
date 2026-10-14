@@ -1,3 +1,6 @@
+import { isStoredWorldPointer, readWorldSnapshot, writeWorldSnapshot } from "./worldStorage.js";
+import { encodeChunkLayer, decodeChunkLayer, extendLegacyChunk } from "@2dcraft.com/shared/chunkStorage.js";
+import { WORLDGEN_VERSION, savedWorldgenVersion as resolveWorldgenVersion } from "@2dcraft.com/shared/overworldGeneration.js";
 import { DEFAULT_GAME_RULES, runtime } from "../utils/runtime.js";
 import { Colors } from "../game/chat.js";
 import { InventoryItem } from "../game/inventoryItem.js";
@@ -49,7 +52,7 @@ export let currentSave = {
     weather: null,
     inventoryItems: [[]],
     seed: 0,
-    worldgenVersion: 2,
+    worldgenVersion: WORLDGEN_VERSION,
     pendingBlocks: new Map(),
     dimensions: [], // Array of { index, chunks: [{ x, biome, previousChunk, blocks, walls }] }
     caimans: [],
@@ -65,6 +68,8 @@ export let currentSave = {
     minions: [],
 };
 
+let saveQueue = Promise.resolve();
+
 export function saveWorld(message = true, toFile = false) {
     let savedDimensions = [];
 
@@ -72,7 +77,6 @@ export function saveWorld(message = true, toFile = false) {
     dimensions.forEach((dimension, index) => {
         let savedChunks = [];
         dimension.chunks.forEach((chunk) => {
-            ``;
             const newSaveChunk = saveChunk(chunk);
             savedChunks.push({
                 x: chunk.x,
@@ -87,6 +91,10 @@ export function saveWorld(message = true, toFile = false) {
                 walls: newSaveChunk.walls,
             });
         });
+
+        for (const [chunkX, chunk] of dimension.storedChunks ?? []) {
+            savedChunks.push({ x: chunkX, ...chunk });
+        }
 
         // Save dimension-specific pendingBlocks
         const savedPendingBlocks = Array.from(
@@ -143,6 +151,7 @@ export function saveWorld(message = true, toFile = false) {
 
     currentSave.seed = runtime.world.seed;
     currentSave.worldgenVersion = runtime.world.generator.worldgenVersion;
+    currentSave.chunkHeight = CHUNK_HEIGHT;
     currentSave.dimensions = savedDimensions;
     currentSave.villagers = runtime.world.entities
         .filter(entity => entity.name === "Villager" && entity.health > 0)
@@ -277,21 +286,32 @@ export function saveWorld(message = true, toFile = false) {
         worlds = [worldData];
     }
 
-    try {
-        localStorage.setItem(id, saveData);
+    const persist = async () => {
+        if (globalThis.indexedDB) {
+            const previous = localStorage.getItem(id);
+            if (previous && !isStoredWorldPointer(previous) &&
+                !await readWorldSnapshot(`legacy-backup:${id}`)) {
+                await writeWorldSnapshot(`legacy-backup:${id}`, previous);
+            }
+            await writeWorldSnapshot(id, saveData);
+            localStorage.setItem(id, JSON.stringify({
+                storage: "indexeddb-v1", bytes: saveData.length,
+                worldgenVersion: currentSave.worldgenVersion,
+            }));
+        } else {
+            localStorage.setItem(id, saveData);
+        }
         localStorage.setItem("worlds", JSON.stringify(worlds));
-    } catch (error) {
+        if (message) runtime.game.chat.message("World saved successfully!", "", Colors.Green);
+    };
+    saveQueue = saveQueue.catch(() => {}).then(persist).catch((error) => {
         console.error("Failed to save world: ", error);
         runtime.game.chat.message(
             "Failed to save world! Your browser may be out of storage space.",
-            "",
-            Colors.Red,
+            "", Colors.Red,
         );
-        return;
-    }
-
-    if (message)
-        runtime.game.chat.message("World saved successfully!", "", Colors.Green);
+    });
+    return saveQueue;
 }
 
 export function saveChunk(chunk) {
@@ -323,12 +343,12 @@ export function saveChunk(chunk) {
     }
 
     return {
-        blocks,
-        walls,
+        blocks: encodeChunkLayer(blocks),
+        walls: encodeChunkLayer(walls),
     };
 }
 
-export function loadWorldFromLocalStorage() {
+export async function loadWorldFromLocalStorage() {
     let selectedWorld = localStorage.getItem("selectedWorld");
 
     if (selectedWorld) {
@@ -369,7 +389,18 @@ export function loadWorldFromLocalStorage() {
         return;
     }
 
-    loadWorld(selectedWorldData);
+    let saveData = selectedWorldData;
+    if (isStoredWorldPointer(selectedWorldData)) {
+        try {
+            saveData = await readWorldSnapshot(selectedWorld.id);
+            if (!saveData) throw new Error("Saved world data is missing");
+        } catch (error) {
+            console.error("Failed to load world:", error);
+            runtime.game.chat.message("Failed to load saved world data.", "", Colors.Red);
+            return;
+        }
+    }
+    await loadWorld(saveData);
 }
 
 export async function loadWorld(save) {
@@ -392,11 +423,36 @@ export async function loadWorld(save) {
     const savedWorldgenVersion = Number(currentSave.worldgenVersion);
     // Saves from before the terrain change keep their original surface profile
     // as they expand, so new chunks do not form a height seam at saved edges.
-    runtime.world.worldgenVersion = savedWorldgenVersion >= 2 ? 2 : 1;
+    runtime.world.worldgenVersion = resolveWorldgenVersion(savedWorldgenVersion);
     runtime.world.generator.worldgenVersion = runtime.world.worldgenVersion;
 
     runtime.world.generator.loadCustomSeed(currentSave.seed);
     runtime.world.weather?.loadState(currentSave.weather, currentSave.seed);
+
+    const requiredChunks = new Map();
+    const requireChunk = (dimension, worldX, radius = 0) => {
+        if (!Number.isInteger(dimension) || !Number.isFinite(worldX)) return;
+        if (!requiredChunks.has(dimension)) requiredChunks.set(dimension, new Set());
+        const center = Math.floor(worldX / (CHUNK_WIDTH * BLOCK_SIZE));
+        for (let offset = -radius; offset <= radius; offset++) {
+            requiredChunks.get(dimension).add((center + offset) * CHUNK_WIDTH * BLOCK_SIZE);
+        }
+    };
+    try {
+        const player = typeof currentSave.playerPosition === "string"
+            ? JSON.parse(currentSave.playerPosition) : currentSave.playerPosition;
+        requireChunk(currentSave.activeDimension ?? Dimensions.Overworld,
+            player?.x ?? 0, 2);
+    } catch {
+        requireChunk(Dimensions.Overworld, 0, 2);
+    }
+    for (const value of Object.values(currentSave)) {
+        if (!Array.isArray(value) || value.length === 0 || !value[0]?.position) continue;
+        for (const entity of value) {
+            requireChunk(entity.dimension ?? Dimensions.Overworld,
+                entity.position?.x);
+        }
+    }
 
     // Clear chunks and pendingBlocks for all dimensions
     dimensions.forEach((dimension) => {
@@ -414,12 +470,12 @@ export async function loadWorld(save) {
 
             // Load chunks
             dimData.chunks.forEach((chunk) => {
-                loadChunk(
-                    chunk.x,
-                    chunk,
-                    dimData.index,
-                    dimension.pendingBlocks,
-                );
+                if (requiredChunks.get(dimData.index)?.has(chunk.x)) {
+                    loadChunk(chunk.x, chunk, dimData.index,
+                        dimension.pendingBlocks);
+                } else {
+                    dimension.storedChunks.set(chunk.x, chunk);
+                }
             });
 
             // Load dimension-specific pendingBlocks
@@ -441,12 +497,12 @@ export async function loadWorld(save) {
         // Fallback for older saves with global pendingBlocks
         const dimension = getDimension(Dimensions.Overworld);
         currentSave.chunks.forEach((chunk) => {
-            loadChunk(
-                chunk.x,
-                chunk,
-                Dimensions.Overworld,
-                dimension.pendingBlocks,
-            );
+            if (requiredChunks.get(Dimensions.Overworld)?.has(chunk.x)) {
+                loadChunk(chunk.x, chunk, Dimensions.Overworld,
+                    dimension.pendingBlocks);
+            } else {
+                dimension.storedChunks.set(chunk.x, chunk);
+            }
         });
 
         if (currentSave.pendingBlocks && currentSave.pendingBlocks.length > 0) {
@@ -961,8 +1017,6 @@ export function loadChunk(
     dimensionIndex = Dimensions.Overworld,
     pendingBlocks,
 ) {
-    console.log("Loading chunk:", x, chunk, dimensionIndex);
-
     const dimension = getDimension(dimensionIndex);
     const previousChunk = chunk.previousChunk
         ? dimension.chunks.get(chunk.previousChunk)
@@ -977,6 +1031,12 @@ export function loadChunk(
     if (!biome) {
         throw new Error(`Unknown biome in dimension ${dimensionIndex}: ${chunk.biome?.name ?? chunk.biome}`);
     }
+
+    const decoded = { ...chunk,
+        blocks: decodeChunkLayer(chunk.blocks), walls: decodeChunkLayer(chunk.walls) };
+    const expanded = decoded.blocks.length < CHUNK_HEIGHT
+        ? extendLegacyChunk(decoded, x / BLOCK_SIZE, runtime.world.seed, dimensionIndex)
+        : decoded;
 
     const constructedChunk = new Chunk(
         runtime.world,
@@ -1003,8 +1063,8 @@ export function loadChunk(
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
         for (let x = 0; x < CHUNK_WIDTH; x++) {
             // Blocks
-            const blockData = chunk.blocks[y][x];
-            const blockType = blockData.t ? blockData.t : blockData;
+            const blockData = expanded.blocks[y][x];
+            const blockType = typeof blockData === "number" ? blockData : blockData.t;
             const metaData = blockData.m ? blockData.m : null;
 
             constructedChunk.setBlockTypeLocal(
@@ -1018,8 +1078,8 @@ export function loadChunk(
             );
 
             // Walls
-            const wallData = chunk.walls[y][x];
-            const wallType = wallData.t ? wallData.t : wallData;
+            const wallData = expanded.walls[y][x];
+            const wallType = typeof wallData === "number" ? wallData : wallData.t;
             const wallMetaData = wallData.m
                 ? typeof wallData.m === "string"
                     ? JSON.parse(wallData.m)
@@ -1042,14 +1102,14 @@ export function loadChunk(
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
         for (let x = 0; x < CHUNK_WIDTH; x++) {
             // Blocks
-            const blockData = chunk.blocks[y][x];
+            const blockData = expanded.blocks[y][x];
             const block = constructedChunk.blocks[y][x];
             if (blockData.l) {
                 block.linkedBlocks = blockData.l;
             }
 
             // Walls
-            const wallData = chunk.walls[y][x];
+            const wallData = expanded.walls[y][x];
             const wall = constructedChunk.walls[y][x];
             if (wallData.l) {
                 wall.linkedBlocks = typeof wallData.l === "string"
@@ -1073,5 +1133,7 @@ export function loadChunk(
             }
         }
     }
+    constructedChunk.entities = runtime.world.entities?.filter(entity =>
+        entity.myChunkX === x && entity.dimension === dimensionIndex) ?? [];
     dimension.chunks.set(x, constructedChunk);
 }

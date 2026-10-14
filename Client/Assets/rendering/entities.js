@@ -1315,6 +1315,8 @@ export class VoxelEntities {
                 : "leftArm";
             const bendPose = entity.body.bendPose;
             record.pose.rotation.x = swimAmount * Math.PI / 2 + (bendPose?.lean || 0);
+            record.pose.rotation.z = -(entity.body.sleepDirection || 1) *
+                Math.PI / 2 * (entity.body.sleepAmount || 0);
             if (bendPose) record.group.position.y += bendPose.bob;
             record.material.color.setRGB(light, light, light);
             record.material.emissive.set(entity.body.flashingColor || 0);

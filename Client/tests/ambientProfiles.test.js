@@ -57,7 +57,7 @@ test("jungle has no wildlife chirps and forest keeps its leaf ambience", () => {
     }), ["wind/wind-in-leaves.ogg"]);
 });
 
-test("desert, swamp, shore, and high-air contexts use their own layers", () => {
+test("swamps are quiet while desert, shore, and high-air contexts use their own layers", () => {
     assert.deepEqual(sounds({
         dimension: "Overworld",
         biome: { name: "Desert" },
@@ -65,7 +65,7 @@ test("desert, swamp, shore, and high-air contexts use their own layers", () => {
     assert.deepEqual(sounds({
         dimension: "Overworld",
         biome: { name: "Swamp" },
-    }), ["animals/frog/frog1.ogg"]);
+    }), []);
     assert.deepEqual(sounds({
         dimension: "Overworld",
         biome: { name: "Ocean" },

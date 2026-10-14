@@ -1,3 +1,4 @@
+import { deleteWorldSnapshot, isStoredWorldPointer, readWorldSnapshot, writeWorldSnapshot } from "./Assets/world/worldStorage.js";
 import { runtime } from "./Assets/utils/runtime.js";
 import JSZip from "jszip";
 import { SKIN_PREVIEW_PARTS, detectSkinModel, drawSkinPreview } from "./Assets/game/skinPreview.js";
@@ -470,7 +471,9 @@ export function populateWorlds() {
             let worldSize = 0;
 
             if (actualWorld) {
-                worldSize = (actualWorld.length / 1024).toFixed(0);
+                const pointer = isStoredWorldPointer(actualWorld)
+                    ? JSON.parse(actualWorld) : null;
+                worldSize = ((pointer?.bytes ?? actualWorld.length) / 1024).toFixed(0);
             }
 
             worldNameElement.textContent = world.name;
@@ -1473,13 +1476,20 @@ export function getSavedWorld(id) {
 removeWorldButton.disabled = true;
 downloadWorldButton.disabled = true;
 
-export function downloadSelectedWorld() {
+export async function downloadSelectedWorld() {
     if (!selectedWorld) return;
-    const saveData = localStorage.getItem(selectedWorld);
-    if (!saveData) return;
-    const worldMeta = getSavedWorld(selectedWorld);
-    const filename = worldMeta ? worldMeta.name : "world";
-    downloadWorldSave(saveData, filename);
+    const stored = localStorage.getItem(selectedWorld);
+    if (!stored) return;
+    try {
+        const saveData = isStoredWorldPointer(stored)
+            ? await readWorldSnapshot(selectedWorld) : stored;
+        if (!saveData) throw new Error("Saved world data is missing");
+        const worldMeta = getSavedWorld(selectedWorld);
+        downloadWorldSave(saveData, worldMeta ? worldMeta.name : "world");
+    } catch (error) {
+        console.error("Failed to download world:", error);
+        alert("Could not read the saved world for download.");
+    }
 }
 
 export function uploadWorld() {
@@ -1491,7 +1501,7 @@ export function uploadWorld() {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
             const raw = event.target.result;
             let saveData;
             try {
@@ -1519,23 +1529,46 @@ export function uploadWorld() {
                 name: worldName,
                 lastPlayed: new Date().toISOString(),
             };
-            let worlds = JSON.parse(localStorage.getItem("worlds")) || [];
-            worlds.push(worldData);
-            localStorage.setItem("worlds", JSON.stringify(worlds));
-            localStorage.setItem(String(id), JSON.stringify(saveData));
-            populateWorlds();
+            const serialized = JSON.stringify(saveData);
+            try {
+                if (globalThis.indexedDB) {
+                    await writeWorldSnapshot(id, serialized);
+                    localStorage.setItem(String(id), JSON.stringify({
+                        storage: "indexeddb-v1", bytes: serialized.length,
+                    }));
+                } else {
+                    localStorage.setItem(String(id), serialized);
+                }
+                const worlds = JSON.parse(localStorage.getItem("worlds")) || [];
+                worlds.push(worldData);
+                localStorage.setItem("worlds", JSON.stringify(worlds));
+                populateWorlds();
+            } catch (error) {
+                console.error("Failed to import world:", error);
+                alert("Could not store the imported world.");
+            }
         };
         reader.readAsText(file);
     };
     input.click();
 }
 
-export function removeWorld() {
+export async function removeWorld() {
     if (!selectedWorld) return;
     const worlds = JSON.parse(localStorage.getItem("worlds"));
     if (!worlds) return;
     if (!confirm("Are you sure you want to delete this world?")) return;
 
+    if (isStoredWorldPointer(localStorage.getItem(selectedWorld))) {
+        try {
+            await deleteWorldSnapshot(`legacy-backup:${selectedWorld}`);
+            await deleteWorldSnapshot(selectedWorld);
+        } catch (error) {
+            console.error("Failed to remove saved world:", error);
+            alert("Could not remove the saved world.");
+            return;
+        }
+    }
     localStorage.removeItem(selectedWorld);
     localStorage.setItem(
         "worlds",

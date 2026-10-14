@@ -703,6 +703,10 @@ function playerJoined(ws, playerData) {
     });
 
     sendToPlayer(newPlayer.UUID, {
+        type: "worldgenVersion",
+        message: world.worldgenVersion,
+    });
+    sendToPlayer(newPlayer.UUID, {
         type: "seed",
         message: world.seed,
     });

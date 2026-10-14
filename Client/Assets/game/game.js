@@ -222,7 +222,7 @@ export class Game {
 
         // Load world from local storage if not multiplayer
         if (!multiplayer) {
-            loadWorldFromLocalStorage();
+            await loadWorldFromLocalStorage();
         } else {
             const { connectMultiplayerServer } = await import(
                 "../multiplayer/server.js"

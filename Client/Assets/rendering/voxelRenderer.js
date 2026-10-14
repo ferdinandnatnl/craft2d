@@ -1,3 +1,4 @@
+import { seaLevelForVersion } from "@2dcraft.com/shared/overworldGeneration.js";
 import * as THREE from "three";
 import { Water } from "three/addons/objects/Water.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
@@ -52,6 +53,46 @@ function addEndFrameEye(batch, x, y, z, light) {
     batch.quad("endframe_eye", {}, [[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]], [0,0,1], light, sideUv);
     batch.quad("endframe_eye", {}, [[x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0]], [-1,0,0], light, sideUv);
     batch.quad("endframe_eye", {}, [[x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1]], [1,0,0], light, sideUv);
+}
+
+function addBed(batch, x, row, headOffset, light) {
+    const headX = x + headOffset;
+    const left = Math.min(x, headX);
+    const bottom = -row - 1;
+    const front = 0.501;
+    const side = headOffset > 0 ? "west" : "east";
+    const footSprite = `red_bed_foot_${side}`;
+    const headSprite = `red_bed_head_${side}`;
+    const uv = (x0, y0, width, height) => [
+        x0 / 16, 1 - (y0 + height) / 16,
+        (x0 + width) / 16, 1 - y0 / 16,
+    ];
+    const quad = (sprite, x0, y0, width, height, textureUv, planeZ = front) => {
+        batch.quad(sprite, {}, [
+            [x0, y0, planeZ], [x0 + width, y0, planeZ],
+            [x0 + width, y0 + height, planeZ], [x0, y0 + height, planeZ],
+        ], [0, 0, 1], light, textureUv);
+    };
+
+    // Mojang's bed model uses a 6px mattress and 3px feet per block half.
+    const sideUv = uv(0, 7, 16, 6);
+    const headSideUv = uv(16, 7, -16, 6);
+    const mattressY = bottom + 3 / 16;
+    const mattressHeight = 6 / 16;
+    quad(footSprite, x, mattressY, 1, mattressHeight, sideUv);
+    quad(headSprite, headX, mattressY, 1, mattressHeight, headSideUv);
+
+    const footAtLeft = headOffset > 0;
+    const footLegX = footAtLeft ? left : left + 2 - 3 / 16;
+    const headLegX = footAtLeft ? left + 2 - 3 / 16 : left;
+    const footLegUv = uv(headOffset > 0 ? 13 : 0, 13, 3, 3);
+    const headLegUv = uv(headOffset > 0 ? 0 : 13, 13, 3, 3);
+    for (const frameX of [left, left + 1]) {
+        quad("bed_down", frameX, bottom, 1, 3 / 16,
+            uv(0, 0, 16, 3), front + 0.0005);
+    }
+    quad(footSprite, footLegX, bottom, 3 / 16, 3 / 16, footLegUv, front + 0.001);
+    quad(headSprite, headLegX, bottom, 3 / 16, 3 / 16, headLegUv, front + 0.001);
 }
 
 export class VoxelRenderer {
@@ -261,6 +302,12 @@ export class VoxelRenderer {
                 ], [0, 0, 1], shade);
                 continue;
             }
+            if (def.specialType === SpecialType.Bed) {
+                if (def.extendedBlock?.length) {
+                    addBed(batch, x, y, def.extendedBlock[0].offset.x, shade);
+                }
+                continue;
+            }
             if (def.fluid) {
                 const above = world.getBlockAtWorldPosition(x * BLOCK_SIZE, (y - 1) * BLOCK_SIZE, wall);
                 const surface = !above || !getBlock(above.blockType).fluid;
@@ -283,7 +330,9 @@ export class VoxelRenderer {
                 }
                 continue;
             }
-            if (!def.collision && def.transparent && !block.cutoff) {
+            // Chests are non-colliding for gameplay, but still need block volume.
+            if (!def.collision && def.transparent && !block.cutoff &&
+                def.specialType !== SpecialType.SingleChest) {
                 // Crossed cutout planes give grass and flowers a real footprint.
                 const options = { plant: true, emissive: !!block.lightSourceLevel };
                 batch.quad(sprite, options,
@@ -426,7 +475,7 @@ export class VoxelRenderer {
                 right: (center + sceneryRadius + 1) * CHUNK_WIDTH,
                 nearZ: -1.5,
                 farZ: -(SCENERY_DEPTH - 0.5),
-                y: TERRAIN_HEIGHT + WATER_LEVEL - CHUNK_HEIGHT + 0.9,
+                y: seaLevelForVersion(world.generator.worldgenVersion) - CHUNK_HEIGHT + 0.9,
             }
             : null;
         this.sceneryRange = `${center}:${radius}`;
@@ -481,14 +530,21 @@ export class VoxelRenderer {
 
                 const block = sample.block;
                 const definition = getBlock(block.blockType);
-                const sprite = block.spriteName || definition.sprite;
-                if (!sprite || definition.air) continue;
-
                 const x0 = chunk.x / BLOCK_SIZE + x;
                 const x1 = x0 + sample.width;
                 const y0 = y, y1 = y + sample.height;
                 const skyExposure = block.sunLight === true ? 1 : 0;
                 const light = renderLightTint(block.lightLevel, skyExposure, lighting) * fade;
+                if (definition.specialType === SpecialType.Bed) {
+                    if (definition.extendedBlock?.length) {
+                        addBed(batch, chunk.x / BLOCK_SIZE + block.x, block.y,
+                            definition.extendedBlock[0].offset.x, light);
+                    }
+                    continue;
+                }
+
+                const sprite = block.spriteName || definition.sprite;
+                if (!sprite || definition.air) continue;
                 batch.quad(sprite, {
                     plant: !definition.fluid && definition.transparent && !definition.collision,
                     fluid: definition.fluid,
@@ -539,7 +595,8 @@ export class VoxelRenderer {
                 const { biome } = column(x);
                 const y = heightAt(x, depth), z = -depth - 0.5;
                 const waterY = world.generator.specialWorldProps.flat ? floor :
-                    TERRAIN_HEIGHT + biome.waterLevel - CHUNK_HEIGHT + 0.9;
+                    seaLevelForVersion(world.generator.worldgenVersion) +
+                        biome.waterLevel - WATER_LEVEL - CHUNK_HEIGHT + 0.9;
                 const submerged = y < waterY;
                 const surfaceBlock = getBlock(submerged ? biome.waterSandType : biome.topLayer);
                 const surface = surfaceBlock.faceSprites?.top || surfaceBlock.sprite;
@@ -795,7 +852,8 @@ export class VoxelRenderer {
                     seconds,
                     cameraX: camera.x,
                     cameraY: camera.y,
-                    surfaceY: (CHUNK_HEIGHT - TERRAIN_HEIGHT) * BLOCK_SIZE,
+                    surfaceY: (CHUNK_HEIGHT - seaLevelForVersion(world.generator.worldgenVersion) +
+                        WATER_LEVEL) * BLOCK_SIZE,
                     fov: this.camera.fov,
                     mobilePerformanceMode: this.mobilePerformanceMode,
                 });

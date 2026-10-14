@@ -193,6 +193,34 @@ export const Blocks = Object.freeze({
     BedFoot: 904,
     BedHead: 905,
     BedFootWest: 906,
+    MossBlock: 950,
+    DripstoneBlock: 951,
+    PointedDripstone: 952,
+    HangingDripstone: 953,
+    CaveVines: 954,
+    Deepslate: 955,
+    CobbledDeepslate: 956,
+    CopperOre: 957,
+    DeepslateCopperOre: 958,
+    DeepslateIronOre: 959,
+    DeepslateGoldOre: 960,
+    DeepslateDiamondOre: 961,
+    DeepslateRedstoneOre: 962,
+    DeepslateCoalOre: 963,
+    LapisOre: 964,
+    EmeraldOre: 965,
+    DeepslateLapisOre: 966,
+    DeepslateEmeraldOre: 967,
+    Tuff: 968,
+    Granite: 969,
+    Calcite: 970,
+    RawIronBlock: 971,
+    RawCopperBlock: 972,
+    Clay: 973,
+    Azalea: 974,
+    SporeBlossom: 975,
+    CopperBlock: 976,
+
 });
 
 export const doorBlockPairs = Object.freeze([
@@ -2539,6 +2567,65 @@ export const blockTypes = [
     }),
     //#endregion
 ];
+
+// Caves & Cliffs blocks share the existing block registry and mining rules.
+const caveStone = { hardness: 8, toolType: ToolType.Pickaxe, dropWithoutTool: false,
+    breakSound: Sounds.Break_Stone, breakingSound: Sounds.Breaking_Stone };
+blockTypes.push(
+    ...[
+        [Blocks.DripstoneBlock, "Dripstone Block", "dripstone_block"],
+        [Blocks.CobbledDeepslate, "Cobbled Deepslate", "cobbled_deepslate"],
+        [Blocks.Tuff, "Tuff", "tuff"],
+        [Blocks.Granite, "Granite", "granite"],
+        [Blocks.Calcite, "Calcite", "calcite"],
+        [Blocks.CopperBlock, "Block of Copper", "copper_block"],
+    ].map(([blockId, name, sprite]) => new BlockType({ ...caveStone, blockId, name, sprite })),
+    new BlockType({ ...caveStone, blockId: Blocks.Deepslate, name: "Deepslate",
+        sprite: "deepslate", faceSprites: { top: "deepslate_top", bottom: "deepslate_top" },
+        hardness: 12, dropBlock: Blocks.CobbledDeepslate }),
+    new BlockType({ blockId: Blocks.MossBlock, name: "Moss Block", sprite: "moss_block",
+        hardness: 0.3, toolType: ToolType.Hoe, breakSound: Sounds.Break_Grass }),
+    new BlockType({ blockId: Blocks.Clay, name: "Clay", sprite: "clay",
+        hardness: 0.6, toolType: ToolType.Shovel }),
+    new BlockType({ ...caveStone, blockId: Blocks.CopperOre, name: "Copper Ore", sprite: "copper_ore",
+        requiredToolLevel: 13.5, dropItem: Items.RawCopper, dropBlock: null,
+        smeltOutput: { itemId: Items.CopperIngot } }),
+    new BlockType({ ...caveStone, blockId: Blocks.LapisOre, name: "Lapis Lazuli Ore", sprite: "lapis_ore",
+        requiredToolLevel: 13.5, dropItem: Items.LapisLazuli, dropBlock: null }),
+    new BlockType({ ...caveStone, blockId: Blocks.EmeraldOre, name: "Emerald Ore", sprite: "emerald_ore",
+        requiredToolLevel: 14.5, dropItem: Items.Emerald, dropBlock: null }),
+    new BlockType({ ...caveStone, blockId: Blocks.RawIronBlock, name: "Block of Raw Iron", sprite: "raw_iron_block" }),
+    new BlockType({ ...caveStone, blockId: Blocks.RawCopperBlock, name: "Block of Raw Copper", sprite: "raw_copper_block" }),
+    ...[
+        [Blocks.PointedDripstone, "Pointed Dripstone", "pointed_dripstone_up_tip"],
+        [Blocks.HangingDripstone, "Pointed Dripstone", "pointed_dripstone_down_tip"],
+        [Blocks.Azalea, "Azalea", "azalea_side"],
+        [Blocks.SporeBlossom, "Spore Blossom", "spore_blossom"],
+    ].map(([blockId, name, sprite]) => new BlockType({ blockId, name, sprite,
+        hardness: 0.2, transparent: true, collision: false,
+        breakWithoutBlockAbove: [Blocks.HangingDripstone, Blocks.SporeBlossom].includes(blockId),
+        breakWithoutBlockUnderneath: [Blocks.PointedDripstone, Blocks.Azalea].includes(blockId),
+        excludeFromCreativeInventory: blockId === Blocks.HangingDripstone,
+        dropBlock: blockId === Blocks.HangingDripstone ? Blocks.PointedDripstone : blockId })),
+    new BlockType({ blockId: Blocks.CaveVines, name: "Cave Vines", sprite: "cave_vines_lit",
+        hardness: 0.2, collision: false, transparent: true, lightLevel: 14,
+        dropBlock: null, dropItem: Items.GlowBerries, climable: true, breakWithoutBlockAbove: true }),
+);
+for (const [base, blockId, sprite] of [
+    [Blocks.CoalOre, Blocks.DeepslateCoalOre, "deepslate_coal_ore"],
+    [Blocks.IronOre, Blocks.DeepslateIronOre, "deepslate_iron_ore"],
+    [Blocks.CopperOre, Blocks.DeepslateCopperOre, "deepslate_copper_ore"],
+    [Blocks.GoldOre, Blocks.DeepslateGoldOre, "deepslate_gold_ore"],
+    [Blocks.DiamondOre, Blocks.DeepslateDiamondOre, "deepslate_diamond_ore"],
+    [Blocks.RedstoneOre, Blocks.DeepslateRedstoneOre, "deepslate_redstone_ore"],
+    [Blocks.LapisOre, Blocks.DeepslateLapisOre, "deepslate_lapis_ore"],
+    [Blocks.EmeraldOre, Blocks.DeepslateEmeraldOre, "deepslate_emerald_ore"],
+]) {
+    const original = blockTypes.find(block => block.blockId === base);
+    blockTypes.push(new BlockType({ ...original, blockId, sprite, iconSprite: sprite,
+        name: `Deepslate ${original.name}`, hardness: original.hardness * 1.5,
+        dropBlock: original.dropItem ? null : blockId }));
+}
 
 export const blockMap = new Map(
     blockTypes.map((block) => [block.blockId, block])

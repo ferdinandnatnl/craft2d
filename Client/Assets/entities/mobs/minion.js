@@ -680,6 +680,10 @@ export class Minion extends Villager {
         const targetX = Math.floor((owner.position.x - owner.direction * spacing * BLOCK_SIZE) / BLOCK_SIZE);
         const targetY = Math.round((owner.position.y + owner.hitbox.y) / BLOCK_SIZE);
         const candidates = this.stanceCandidatesNear({ x: targetX, y: targetY }, 2, 2);
+        if (this.teleportNearOwner(owner, { x: targetX, y: targetY }, candidates)) {
+            this.broadcastState();
+            return;
+        }
         const distance = Math.abs(this.position.x - owner.position.x);
         if (distance <= spacing * BLOCK_SIZE &&
             Math.abs(this.position.y - owner.position.y) < BLOCK_SIZE) {
@@ -690,6 +694,45 @@ export class Minion extends Villager {
         if (!this.navigateTo(candidates, `follow:${targetX}:${targetY}`)) {
             this.targetVelocity.x = 0;
         }
+    }
+
+    teleportNearOwner(owner, target, candidates) {
+        const followRange = getMinionConfig().minionFollowRange * BLOCK_SIZE;
+        const distance = Math.hypot(
+            this.position.x - owner.position.x,
+            this.position.y - owner.position.y,
+        );
+        if (distance <= followRange || this.carriedByMinionUUID ||
+            this.crocodileGrabbedByUUID || this.isGettingKnockback) return false;
+
+        const destination = candidates
+            .filter((node) =>
+                getMinionStandability(this.world, this.dimension, node) === 0 &&
+                !this.isNodeBlockedByEntity(node),
+            )
+            .sort((a, b) =>
+                Math.abs(a.x - target.x) + Math.abs(a.y - target.y) -
+                Math.abs(b.x - target.x) - Math.abs(b.y - target.y),
+            )[0];
+        if (!destination) return false;
+
+        this.position = new Vector2(
+            destination.x * BLOCK_SIZE + (BLOCK_SIZE - this.hitbox.x) / 2,
+            destination.y * BLOCK_SIZE - this.hitbox.y,
+        );
+        this.velocity.x = 0;
+        this.velocity.y = 0;
+        this.targetVelocity.x = 0;
+        this.targetVelocity.y = 0;
+        this.path = null;
+        this.pathGoalKey = null;
+        this.pathTimer = 0;
+        this.stuckTimer = 0;
+        this.stuckRecoveryAttempts = 0;
+        this.lastX = this.position.x;
+        this.lastSyncedX = this.position.x;
+        this.lastSyncedY = this.position.y;
+        return true;
     }
 
     assistFollowClimb(candidates) {
@@ -1996,7 +2039,14 @@ export class Minion extends Villager {
             x: Math.floor((owner.position.x + owner.hitbox.x / 2) / BLOCK_SIZE),
             y: Math.round((owner.position.y + owner.hitbox.y) / BLOCK_SIZE),
         };
-        if (this.navigateTo(this.stanceCandidatesNear(point, 3, 4), `owner:${owner.UUID}`)) {
+        const candidates = this.stanceCandidatesNear(point, 3, 4);
+        if (this.teleportNearOwner(owner, point, candidates)) {
+            this.job = { type: "follow" };
+            this.state = MinionState.FollowingOwner;
+            this.broadcastState();
+            return;
+        }
+        if (this.navigateTo(candidates, `owner:${owner.UUID}`)) {
             this.job = { type: "follow" };
             this.state = MinionState.FollowingOwner;
         }

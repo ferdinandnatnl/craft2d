@@ -67,8 +67,6 @@ export function getAmbientLayers(context) {
             /ocean|sea/.test(biomeName) ? "water/ocean.ogg" : "water/beach.ogg",
             0.12,
         ));
-    } else if (family === "swamp") {
-        layers.push(layer("frogs", "animals/frog/frog1.ogg", 0.1));
     } else if (family === "desert") {
         layers.push(layer("insects", "animals/cicadas/cicadas-desert1.ogg", 0.1));
         layers.push(layer("wind", "wind/light-wind.ogg", 0.07));

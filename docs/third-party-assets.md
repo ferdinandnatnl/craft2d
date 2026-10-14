@@ -52,3 +52,12 @@ Sources:
 - [Alex's Mobs 1.22.9 release](https://www.curseforge.com/minecraft/mc-mods/alexs-mobs/files/all)
 - [Project license metadata](https://www.curseforge.com/minecraft/mc-mods/alexs-mobs)
 - [LGPL v3 text from GNU](https://www.gnu.org/licenses/lgpl-3.0.html)
+
+## Caves & Cliffs generation materials
+
+The added moss, dripstone, cave-vine, azalea, spore-blossom, clay, deepslate,
+ore, calcite, granite, tuff, raw-metal, and copper textures are unmodified
+Minecraft Java 1.18.2 client textures from Mojang's
+[official client archive](https://piston-data.mojang.com/v1/objects/2e9a3e3107cca00d6bc9c97bf7d149cae163ef21/client.jar).
+The download was verified against the manifest SHA-1
+`2e9a3e3107cca00d6bc9c97bf7d149cae163ef21`. Existing textures were retained.
