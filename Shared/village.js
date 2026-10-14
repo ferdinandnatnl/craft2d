@@ -1,9 +1,10 @@
-/** Stable village locations, independent of chunk generation order. */
+import { isRandomSpreadChunk } from "./randomSpread.js";
+
+/** Vanilla Java village spacing, sampled along this game's 2D world. */
 export function isVillageChunk(seed, chunkIndex) {
-    let hash = 2166136261;
-    for (const character of `village:${seed}:${chunkIndex}`) {
-        hash ^= character.charCodeAt(0);
-        hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0) % 19 === 0;
+    return isRandomSpreadChunk(seed, chunkIndex, {
+        spacing: 34,
+        separation: 8,
+        salt: 10387312,
+    });
 }

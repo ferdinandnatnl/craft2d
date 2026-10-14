@@ -5,6 +5,13 @@ import { LootItem, LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { Sounds, playRandomSoundFromArray } from "../../game/sounds.js";
 import { Vector2 } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
+import {
+    initializeBreedableAnimal,
+    interactWithBreedableAnimal,
+    tickBreedableAnimal,
+} from "./animalBehavior.js";
+
+const BREEDING_FOOD = new Set([Items.Wheat]);
 
 export class Cow extends Mob {
     static spawnSize = Object.freeze({ width: 0.9, height: 1 });
@@ -17,6 +24,9 @@ export class Cow extends Mob {
             position = new Vector2(),
             invulnerable = false,
             myChunkX = 0,
+            babyAgeTicks = 0,
+            loveTicks = 0,
+            breedingCooldown = 0,
             body = createCowBody(),
         } = {},
     ) {
@@ -47,6 +57,15 @@ export class Cow extends Mob {
                 }),
             ]),
         });
+
+        initializeBreedableAnimal(this, {
+            babyAgeTicks,
+            loveTicks,
+            breedingCooldown,
+            adultWidth: Cow.spawnSize.width * BLOCK_SIZE,
+            adultHeight: Cow.spawnSize.height * BLOCK_SIZE,
+            foodItems: BREEDING_FOOD,
+        });
     }
 
     update() {
@@ -67,7 +86,7 @@ export class Cow extends Mob {
     }
 
     dieEvent() {
-        this.dropLoot();
+        if (!this.isBaby) this.dropLoot();
         playRandomSoundFromArray({
             array: Sounds.Cow_Say,
             positional: true,
@@ -78,9 +97,12 @@ export class Cow extends Mob {
 
     tickUpdate() {
         this.entityTickUpdate();
+        tickBreedableAnimal(this, Cow);
     }
 
-    interact(player, item) {}
+    interact(player, item) {
+        return interactWithBreedableAnimal(this, player, item, BREEDING_FOOD);
+    }
 }
 
 export function createCowBody() {

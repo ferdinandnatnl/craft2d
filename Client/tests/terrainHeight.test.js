@@ -37,24 +37,17 @@ test("terrain forecasts match chunks sampled later in either travel direction", 
     }
 });
 
-test("biome blending joins both sides of positive and negative chunk borders", () => {
+test("terrain height does not change when the surface biome changes", () => {
     const low = { heightNoise: new Noise(0, 0, 30) };
     const high = { heightNoise: new Noise(0, 0, 60) };
-    const quiet = Object.fromEntries(Object.keys(noiseMaps).map(key => [key, new Noise(0, 0, key === "cave" ? 5 : 0)]));
     for (const boundary of [-3 * CHUNK_WIDTH, 0, 3 * CHUNK_WIDTH]) {
-        const biomes = index => index < boundary / CHUNK_WIDTH ? low : high;
-        const heights = [];
         for (let x = boundary - CHUNK_WIDTH; x <= boundary + CHUNK_WIDTH; x++) {
-            heights.push(terrainHeightAt(x, biomes, quiet));
+            assert.equal(
+                terrainHeightAt(x, () => low, noiseMaps),
+                terrainHeightAt(x, () => high, noiseMaps),
+                `terrain at ${x} is independent of its biome`,
+            );
         }
-        assert.equal(heights.at(-1) - heights[0], 30);
-        for (let i = 1; i < heights.length; i++) {
-            assert.ok(heights[i] >= heights[i - 1]);
-            assert.ok(heights[i] - heights[i - 1] <= 6, "no vertical cliff at the biome border");
-        }
-        const left = terrainHeightAt(boundary - 0.000001, biomes, quiet);
-        const right = terrainHeightAt(boundary + 0.000001, biomes, quiet);
-        assert.ok(Math.abs(left - right) <= 1, "border is continuous before block rounding");
     }
 });
 

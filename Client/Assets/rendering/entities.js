@@ -5,11 +5,18 @@ import { getSpriteUrl } from "../utils/texturePackLoader.js";
 import { getItem, getItemSpritePath } from "@2dcraft.com/shared/item.js";
 import { Items } from "@2dcraft.com/shared/items.js";
 import { getBlock } from "../world/block.js";
-import { getBoatPartPitch, getHeadPitch, getLimbPitch, getSwimPartPitch } from "./entityPose.js";
+import {
+    getBoatPartPitch,
+    getHeadPitch,
+    getLimbPitch,
+    getSwimPartPitch,
+    getSwordSwingPose,
+} from "./entityPose.js";
 import { skinBox, skinLimbHalf } from "./entityGeometry.js";
+import { createAlexCrocodileRig, updateAlexCrocodileRig } from "./alexsMobsCrocodileRig.js";
+import { createAlexCaimanRig, updateAlexCaimanRig } from "./alexsMobsCaimanRig.js";
 import { createAlexCatfishRig, updateAlexCatfishRig } from "./alexsMobsCatfishRig.js";
-import { createAlexCentipedeRig, updateAlexCentipedeRig } from "./alexsMobsCentipedeRig.js";
-import { mutantPartParent, mutantPartPitch, mutantWalkBob } from "./mutantPose.js";
+import { mutantAttackAmount, mutantPartParent, mutantPartPitch, mutantWalkBob } from "./mutantPose.js";
 import { MUTANT_CREEPER_RIG } from "./mutantCreeperRig.js";
 import { renderLightTint } from "./renderLight.js";
 import ironGolemModel from "../sprites/entity/golem/iron_golem.geo.json" with { type: "json" };
@@ -17,6 +24,8 @@ import ironGolemModel from "../sprites/entity/golem/iron_golem.geo.json" with { 
 // Keep movement side-on while revealing the front of cuboid faces and skins.
 const FACING_YAW = Math.PI / 3;
 const minionModelPosition = ([x, y, z]) => [x / 16, (24 - y) / 16, z / 16];
+const heldItemHandOffsetY = (record, armName) =>
+    record.bends?.[armName] ? -6 / 16 : record.minionModel ? -7 / 16 : -12 / 16;
 
 export class VoxelEntities {
     constructor(scene) {
@@ -36,14 +45,55 @@ export class VoxelEntities {
             return this.createIronGolem(image);
         }
         if (!image?.complete || !image.naturalWidth) return null;
+        const species = spriteName.split("/")[0];
         if (entity.isMinion) return this.createMinionModel(image);
+        if (entity.isCrocodile) {
+            const crownTexture = new THREE.TextureLoader().load(
+                getSpriteUrl("entity/alexsmobs/crocodile_crown.png"),
+            );
+            crownTexture.colorSpace = THREE.SRGBColorSpace;
+            crownTexture.magFilter = THREE.NearestFilter;
+            crownTexture.minFilter = THREE.NearestMipmapLinearFilter;
+            const record = {
+                ...createAlexCrocodileRig(image, crownTexture),
+                source: image.src,
+                crocodileRig: true,
+            };
+            this.scene.add(record.group);
+            return record;
+        }
+        if (entity.isCaiman) {
+            const record = {
+                ...createAlexCaimanRig(image),
+                source: image.src,
+                caimanRig: true,
+            };
+            this.scene.add(record.group);
+            return record;
+        }
+        if (entity.isCatfish) {
+            const record = {
+                ...createAlexCatfishRig(image, entity.catfishSize),
+                source: image.src,
+            };
+            this.scene.add(record.group);
+            return record;
+        }
+        const endermanEyesImage = species === "enderman"
+            ? entity.body.parts.headEyes?.loadSprite(image)
+            : null;
+        if (species === "enderman" &&
+            (!endermanEyesImage?.complete || !endermanEyesImage.naturalWidth)) return null;
         if (spriteName === "golem/snow_golem.svg") {
             return this.createSnowGolem(image);
         }
         if (entity.isCreeperEgg) return this.createCreeperEgg(image);
         if (entity.isMutant) return this.createMutantModel(entity, image);
+        if (species === "chicken") return this.createChickenModel(entity, image);
         const group = new THREE.Group();
-        const aquaticBodyPart = entity.isAquatic ? entity.body.parts.body : null;
+        const aquaticBodyPart = entity.isAquatic || entity.isCrocodile
+            ? entity.body.parts.body
+            : null;
         const textureImage = aquaticBodyPart?.getCroppedSprite(image) ?? image;
         const texture = new THREE.Texture(textureImage);
         texture.colorSpace = THREE.SRGBColorSpace;
@@ -87,27 +137,12 @@ export class VoxelEntities {
             pivots[name] = shoulder;
             bends[name] = elbow;
         };
-        const species = spriteName.split("/")[0];
-        if (entity.isCatfish) {
-            const record = {
-                ...createAlexCatfishRig(image, entity.catfishSize),
-                source: image.src,
-            };
-            this.scene.add(record.group);
-            return record;
-        }
-        if (entity.isCentipede) {
-            const record = {
-                ...createAlexCentipedeRig(image, entity.segmentCount),
-                source: image.src,
-            };
-            this.scene.add(record.group);
-            return record;
-        }
         const quadruped = ["cow", "pig", "sheep"].includes(species);
         const creeper = species === "creeper" || entity.isCreeperMinion;
         const bodylessSprite = !entity.body && entity.voxelSprite;
-        const portraitSprite = spriteName.includes("-art/") || species === "golem" || entity.isAquatic || bodylessSprite;
+        const portraitSprite = spriteName.includes("-art/") ||
+            species === "golem" || entity.isAquatic ||
+            entity.isCrocodile || bodylessSprite;
         if (bodylessSprite) {
             material.side = THREE.DoubleSide;
             const width = entity.hitbox.x / BLOCK_SIZE;
@@ -125,13 +160,13 @@ export class VoxelEntities {
             // Complete entity art stays on one camera-facing plane instead
             // of being sampled as a Minecraft skin atlas.
             material.side = THREE.DoubleSide;
-            const width = entity.isAquatic
+            const width = entity.isAquatic || entity.isCrocodile
                 ? entity.hitbox.x / BLOCK_SIZE
                 : image.width / 16;
-            const height = entity.isAquatic
-                ? image.height / image.width * width
+            const height = entity.isAquatic || entity.isCrocodile
+                ? entity.hitbox.y / BLOCK_SIZE
                 : image.height / 16;
-            const spriteCenterY = entity.isAquatic
+            const spriteCenterY = entity.isAquatic || entity.isCrocodile
                 ? entity.hitbox.y / (2 * BLOCK_SIZE)
                 : height / 2;
             const sprite = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
@@ -139,7 +174,7 @@ export class VoxelEntities {
             sprite.castShadow = true;
             group.add(sprite);
 
-            if (entity.isAquatic) {
+            if (entity.isAquatic || entity.isCrocodile) {
                 const tailPart = entity.body.parts.tail;
                 if (tailPart?.ownSpriteMap) {
                     const tailTexture = new THREE.TextureLoader().load(
@@ -198,10 +233,29 @@ export class VoxelEntities {
             group.scale.setScalar(entity.hitbox.y / BLOCK_SIZE / 1.95);
         } else if (species === "enderman") {
             // Vanilla Endermen use 8x8 heads, an 8x12 torso, and 2x30 limbs.
-            // Their model uses the 64x32 mob atlas, even when the source PNG
-            // has extra rows below it.
+            // The eye layer uses Minecraft's separate, front-only eye atlas.
             const limb = [2, 30, 2];
             part("head", [8, 8, 8], [0, 0], [0, 42 / 16, 0]);
+            const eyesTexture = new THREE.Texture(endermanEyesImage);
+            eyesTexture.colorSpace = THREE.SRGBColorSpace;
+            eyesTexture.magFilter = THREE.NearestFilter;
+            eyesTexture.minFilter = THREE.NearestMipmapLinearFilter;
+            eyesTexture.needsUpdate = true;
+            const eyesMaterial = new THREE.MeshBasicMaterial({
+                map: eyesTexture,
+                transparent: true,
+                alphaTest: 0.1,
+                depthWrite: false,
+                toneMapped: false,
+            });
+            const eyes = new THREE.Mesh(
+                skinBox(8.08, 8.08, 8.08, 0, 0, endermanEyesImage, false, [8, 8, 8]),
+                eyesMaterial,
+            );
+            eyes.position.y = -8 / 32;
+            eyes.renderOrder = 1;
+            eyes.castShadow = eyes.receiveShadow = false;
+            pivots.head.add(eyes);
             part("torso", [8, 12, 4], [32, 16], [0, 33 / 16, 0]);
             part("rightArm", limb, [56, 0], [-3 / 16, 39 / 16, 0], true);
             part("leftArm", limb, [56, 0], [5 / 16, 39 / 16, 0], true, limb, true);
@@ -335,6 +389,7 @@ export class VoxelEntities {
             rotationX: -0.7853982,
         });
 
+        group.scale.y = 8 / 9;
         this.scene.add(group);
         return {
             group,
@@ -344,6 +399,89 @@ export class VoxelEntities {
             source: image.src,
             minionModel: true,
             heldKey: null,
+        };
+    }
+
+    createChickenModel(entity, image) {
+        const group = new THREE.Group();
+        const texture = new THREE.Texture(image);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestMipmapLinearFilter;
+        texture.needsUpdate = true;
+        const material = new THREE.MeshStandardMaterial({
+            map: texture,
+            roughness: 0.98,
+            alphaTest: 0.1,
+        });
+        const textureSize = { width: 64, height: 32 };
+        const pivots = {};
+        const box = (
+            name,
+            dimensions,
+            position,
+            uv,
+            parent = group,
+            { castsShadow = false, rotationX = 0 } = {},
+        ) => {
+            const mesh = new THREE.Mesh(
+                skinBox(
+                    ...dimensions,
+                    ...uv,
+                    textureSize,
+                    false,
+                    dimensions,
+                ),
+                material,
+            );
+            mesh.position.set(...position.map((value) => value / 16));
+            mesh.rotation.x = rotationX;
+            mesh.castShadow = castsShadow;
+            mesh.receiveShadow = true;
+            mesh.name = name;
+            parent.add(mesh);
+            return mesh;
+        };
+
+        // Use the classic chicken atlas layout and the same compact, horizontal body.
+        box("body", [6, 8, 6], [0, 8, 0], [0, 9], group, {
+            castsShadow: true,
+            rotationX: Math.PI / 2,
+        });
+
+        const head = new THREE.Group();
+        head.position.set(0, 9 / 16, 4 / 16);
+        group.add(head);
+        pivots.head = head;
+        box("head", [4, 6, 3], [0, 3, 0.5], [0, 0], head);
+        box("beak", [4, 2, 2], [0, 3, 3], [14, 0], head);
+        box("wattle", [2, 2, 2], [0, 1, 2], [14, 4], head);
+
+        for (const [name, side] of [["leftWing", -1], ["rightWing", 1]]) {
+            const wing = new THREE.Group();
+            wing.position.set(side * 3 / 16, 11 / 16, 0);
+            group.add(wing);
+            pivots[name] = wing;
+            box("wingFeathers", [1, 4, 6], [side * 0.5, -2, 0], [24, 13], wing);
+        }
+
+        for (const [name, x] of [["leftLeg", -1.5], ["rightLeg", 1.5]]) {
+            const leg = new THREE.Group();
+            leg.position.set(x / 16, 5 / 16, 0);
+            group.add(leg);
+            pivots[name] = leg;
+            box("leg", [3, 5, 3], [0, -2.5, 0.5], [26, 0], leg);
+        }
+
+        group.scale.setScalar(entity.hitbox.y / BLOCK_SIZE / (15 / 16));
+        this.scene.add(group);
+        return {
+            group,
+            texture,
+            material,
+            source: image.src,
+            chickenModel: true,
+            pivots,
         };
     }
 
@@ -870,10 +1008,10 @@ export class VoxelEntities {
         map.magFilter = THREE.NearestFilter; map.colorSpace = THREE.SRGBColorSpace;
         const material = new THREE.MeshStandardMaterial({ map, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.9 });
         const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.65, 0.65), material);
-        mesh.position.set(0, -0.5, 0.28); mesh.rotation.y = -Math.PI / 2;
+        mesh.position.set(0, heldItemHandOffsetY(record, armName), 0.28);
+        mesh.rotation.y = -Math.PI / 2;
         mesh.castShadow = true;
         (record.bends?.[armName] || arm).add(mesh); record.held = mesh;
-        if (record.bends?.[armName]) mesh.position.y = -0.12;
     }
 
     update(entities, dimension, camera, seconds, lighting) {
@@ -914,6 +1052,22 @@ export class VoxelEntities {
             const aquaticBob = entity.isAquatic ? Math.sin(aquaticPhase * 2) * 0.015 : 0;
             record.group.position.set((entity.position.x + entity.hitbox.x / 2) / BLOCK_SIZE,
                 -(entity.position.y + entity.hitbox.y) / BLOCK_SIZE + aquaticBob, 0.05);
+            if (record.crocodileRig) {
+                updateAlexCrocodileRig(record, entity, seconds);
+                for (const material of record.materials) {
+                    material.color.setRGB(light, light, light);
+                    material.emissive.set(entity.body.flashingColor || 0);
+                    material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+                }
+                continue;
+            }
+            if (record.caimanRig) {
+                updateAlexCaimanRig(record, entity, seconds);
+                record.material.color.setRGB(light, light, light);
+                record.material.emissive.set(entity.body.flashingColor || 0);
+                record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+                continue;
+            }
             if (record.catfishRig) {
                 updateAlexCatfishRig(record, entity, seconds);
                 record.material.color.setRGB(light, light, light);
@@ -921,18 +1075,29 @@ export class VoxelEntities {
                 record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
                 continue;
             }
-            if (record.centipedeRig) {
-                updateAlexCentipedeRig(record, entity, seconds);
-                for (const material of record.materials) {
-                    material.color.setRGB(light, light, light);
-                    material.emissive.set(entity.body.flashingColor || 0);
-                    material.emissiveIntensity = entity.body.flashingColor ? 0.65 :
-                        (material === record.eyeMaterial ? 0.12 : 0);
-                }
-                continue;
-            }
             if (record.eggModel) {
                 record.material.color.setRGB(light, light, light);
+                continue;
+            }
+            if (record.chickenModel) {
+                record.group.scale.setScalar(
+                    entity.hitbox.y / BLOCK_SIZE / (15 / 16),
+                );
+                record.group.rotation.y = entity.direction < 0
+                    ? -FACING_YAW
+                    : FACING_YAW;
+                const moving = Math.abs(entity.velocity?.x ?? 0) > 5;
+                const stride = moving ? Math.sin(seconds * 9) * 0.45 : 0;
+                record.pivots.leftLeg.rotation.x = stride;
+                record.pivots.rightLeg.rotation.x = -stride;
+                record.pivots.leftWing.rotation.z = moving
+                    ? Math.sin(seconds * 9) * 0.04
+                    : 0;
+                record.pivots.rightWing.rotation.z = -record.pivots.leftWing.rotation.z;
+                record.pivots.head.rotation.x = getHeadPitch(entity.lookDirection);
+                record.material.color.setRGB(light, light, light);
+                record.material.emissive.set(entity.body.flashingColor || 0);
+                record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
                 continue;
             }
             if (record.creeperRig) {
@@ -963,21 +1128,19 @@ export class VoxelEntities {
                 const walkPhase = entity.body.mutantWalkPhase || 0;
                 const stride = entity.body.mutantWalkAmount || 0;
 
-                const attackDuration = entity.attackPoseDuration || 0.4;
                 const attackRemaining = (entity.attackPoseUntil || 0) - seconds;
-                const attackProgress = attackRemaining > 0
-                    ? 1 - attackRemaining / attackDuration
-                    : 0;
-                const attackSwing = attackProgress > 0
-                    ? Math.sin(Math.min(1, attackProgress) * Math.PI)
-                    : 0;
+                const attackSwing = mutantAttackAmount(
+                    entity.entityTypeName, attackRemaining,
+                    entity.attackPoseDuration || 0.4,
+                );
                 const walkAmount = stride * (1 - attackSwing);
                 record.group.position.y += mutantWalkBob(
                     entity.entityTypeName, walkPhase, walkAmount,
                 );
                 const angles = new Map(record.mutantParts.map(part => [part.name,
                     mutantPartPitch(entity.entityTypeName, part.name,
-                        walkPhase, walkAmount, attackSwing, seconds)]));
+                        walkPhase, walkAmount, attackSwing, seconds,
+                        entity.attackPoseKind)]));
                 const positions = record.geometry.getAttribute("position");
                 const normals = record.geometry.getAttribute("normal");
                 for (const part of record.mutantParts) {
@@ -1069,7 +1232,8 @@ export class VoxelEntities {
                     : FACING_YAW;
                 const walkAmount = entity.walkAnimationAmount || 0;
                 const limbPhase = (entity.walkAnimationPhase || 0) * 0.6662;
-                const working = Boolean(entity.miningKey) && entity.miningTimer > 0;
+                const working = (Boolean(entity.miningKey) && entity.miningTimer > 0) ||
+                    seconds < (entity.workSwingUntil || 0);
                 const swing = working
                     ? Math.max(0, Math.min(1, entity.workSwingProgress || 0))
                     : 0;
@@ -1152,9 +1316,16 @@ export class VoxelEntities {
                 record.group.scale.x = entity.direction < 0 ? -1 : 1;
             record.group.rotation.z = entity.isAquatic
                 ? Math.sin(aquaticPhase) * 0.025
-                : 0;
+                : entity.isCrocodile && entity.action === "death_roll"
+                    ? Math.sin(entity.actionTicks * 0.45) * 0.45
+                    : entity.isCrocodile && entity.action === "lunge"
+                        ? Math.sin(Math.min(1, entity.actionTicks / 23) * Math.PI) * 0.12
+                        : 0;
             const swimAmount = entity.body.swimAmount || 0;
             const boatAmount = entity.body.boatAmount || 0;
+            const swordSwing = entity.meleeAttackClock
+                ? getSwordSwingPose(entity.body.swordSwing, entity.holdItem, seconds)
+                : null;
             const bendPose = entity.body.bendPose;
             record.pose.rotation.x = swimAmount * Math.PI / 2 + (bendPose?.lean || 0);
             if (bendPose) record.group.position.y += bendPose.bob;
@@ -1177,7 +1348,7 @@ export class VoxelEntities {
                 record.tailMaterial.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
             }
             for (const [name, joint] of Object.entries(record.pivots)) {
-                if (entity.isAquatic && name === "tail") {
+                if ((entity.isAquatic || entity.isCrocodile) && name === "tail") {
                     joint.rotation.z = entity.body.parts.tail.rotation *
                         Math.PI / 180;
                     continue;
@@ -1207,14 +1378,40 @@ export class VoxelEntities {
                         boatAmount);
                 }
             }
+            if (entity.meleeAttackClock && entity.body.swordSwing) {
+                const arm = record.pivots.leftArm;
+                if (arm) {
+                    arm.rotation.z = swordSwing
+                        ? swordSwing.armAngle * swordSwing.direction
+                        : 0;
+                    if (swordSwing) arm.rotation.x = 0;
+                }
+            }
             this.updateHeld(record, entity);
+            if (entity.meleeAttackClock && record.held) {
+                const heldItem = entity.holdItem?.itemId != null
+                    ? getItem(entity.holdItem.itemId)
+                    : null;
+                const heldTool = heldItem?.toolType !== undefined &&
+                    heldItem.toolType !== ToolType.Nothing;
+                record.held.rotation.y = entity.direction < 0
+                    ? Math.PI / 2
+                    : -Math.PI / 2;
+                record.held.rotation.z = Math.PI / (heldTool ? -1.35 : 2) +
+                    (swordSwing
+                        ? swordSwing.weaponAngle * swordSwing.direction
+                        : 0);
+                record.held.scale.x = heldTool
+                    ? -entity.direction
+                    : entity.direction;
+            }
             if (record.held && entity.holdItem?.itemId === Items.Shield) {
                 const blocking = entity.shieldBlocking === true;
                 const shieldDirection = entity.lookDirection > -90 &&
                     entity.lookDirection < 90 ? 1 : -1;
                 record.held.position.set(
                     shieldDirection * (blocking ? 0.12 : 0),
-                    blocking ? -0.24 : -0.5,
+                    blocking ? -0.24 : heldItemHandOffsetY(record, "leftArm"),
                     blocking ? 0.46 : 0.28,
                 );
                 record.held.rotation.y = shieldDirection < 0
@@ -1249,6 +1446,7 @@ export class VoxelEntities {
             }
         });
         record.texture?.dispose();
+        record.spitTexture?.dispose();
         record.material?.dispose();
         this.scene.remove(record.group); this.models.delete(entity);
     }

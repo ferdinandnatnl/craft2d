@@ -1,6 +1,7 @@
 import { AI, Mob } from "../mob.js";
 import { createZombieBody } from "./zombie.js";
 import { EntityTypes } from "../../game/entity.js";
+import { BodyPart } from "../../game/body.js";
 import { Items } from "@2dcraft.com/shared/items.js";
 import { LootItem, LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { Vector2 } from "../../utils/classes.js";
@@ -42,7 +43,7 @@ export class Enderman extends Mob {
         if (this.attackCooldown) return;
         const player = this.entityCollision(EntityTypes.Player);
         if (!player) return;
-        player.hit(6, this.position.x, 4, "Killed by Enderman");
+        player.hit(6, this.position.x, 4, "Killed by Enderman", this);
         this.attackCooldown = 1;
     }
 
@@ -64,5 +65,15 @@ export class Enderman extends Mob {
 export function createEndermanBody() {
     const body = createZombieBody();
     body.setSprite("enderman/enderman");
+    body.parts.head.spriteCrop = { x: 8, y: 8, width: 8, height: 8 };
+    body.parts.headEyes = new BodyPart({
+        spriteCrop: { x: 8, y: 8, width: 8, height: 8 },
+        ownSpriteMap: "enderman/enderman_eyes",
+        offset: { ...body.parts.head.offset },
+        rotationOrigin: { x: 12, y: 32 },
+        zIndex: body.parts.head.zIndex + 1,
+        eyes: true,
+    });
+    body.initParts();
     return body;
 }

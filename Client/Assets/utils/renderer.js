@@ -20,38 +20,19 @@ import {
     getDimensionChunks,
 } from "../world/dimension.js";
 import { CANVAS, ctx, r } from "./canvas.js";
-import { ShaderRenderer } from "./shaderRenderer.js";
 import { SkyRenderer } from "./skyRenderer.js";
 import { BackgroundTerrain } from "./backgroundTerrain.js";
-import { drawSceneLighting, drawLocalLighting } from "./sceneLighting.js";
-import { TerrainDepth } from "./terrainDepth.js";
-import { WaterSurface } from "./waterSurface.js";
 import { VoxelRenderer } from "../rendering/voxelRenderer.js";
 
 export { CANVAS, ctx, r };
 const skyRenderer = new SkyRenderer();
 const backgroundTerrain = new BackgroundTerrain();
-const terrainDepth = new TerrainDepth();
-const waterSurface = new WaterSurface();
 const voxelRenderer = new VoxelRenderer(document.getElementById("voxel-canvas"));
 let rendererMode = "voxel";
-let shaderMode = "photon";
 let voxelActive = false;
-
-const shaderRenderer = new ShaderRenderer(
-    CANVAS,
-    document.getElementById("shader-canvas"),
-);
-
-export function setShaderMode(mode) {
-    shaderMode = mode;
-    shaderRenderer.setMode(rendererMode === "canvas" ? mode : "off");
-    return mode;
-}
 
 export function setRendererMode(mode) {
     rendererMode = mode === "canvas" ? "canvas" : "voxel";
-    shaderRenderer.setMode(rendererMode === "canvas" ? shaderMode : "off");
     return rendererMode;
 }
 
@@ -190,20 +171,14 @@ export function draw(chunks, frames) {
     voxelActive = rendererMode === "voxel" && voxelRenderer.render(runtime.world, camera, {
         width: CANVAS.width, height: CANVAS.height, dimension: activeDimension,
         time: runtime.time, seconds: runtime.passedTime,
-        lighting: runtime.game.settings.lighting, effects: shaderMode !== "off",
+        lighting: runtime.game.settings.lighting,
+        effects: true,
     });
     document.body.classList.toggle("voxel-active", voxelActive);
-    const classicShader = voxelActive ? "off" : shaderMode;
-    if (shaderRenderer.mode !== classicShader) shaderRenderer.setMode(classicShader);
     if (voxelActive) ctx.clearRect(0, 0, CANVAS.width, CANVAS.height);
     else {
     drawBackground();
     drawChunks(chunks);
-    terrainDepth.prepare(runtime.world, camera, CANVAS.width, CANVAS.height);
-    terrainDepth.draw(ctx, camera);
-    if (shaderRenderer.mode !== "off" && activeDimension === Dimensions.Overworld) {
-        drawSceneLighting(ctx, runtime.world, camera, runtime.time, CANVAS.width, CANVAS.height);
-    }
     }
 
     if (!runtime.hideHud && runtime.world.player && !runtime.game.pauseMenu?.getActive() && !runtime.world.player.isDead) {
@@ -215,20 +190,70 @@ export function draw(chunks, frames) {
     drawParticleEmitters();
 
     drawEntities();
+    drawSwordSlashEffects();
     drawDamageIndicators();
     drawMinionBlindness();
-
-    if (!voxelActive && shaderRenderer.mode !== "off") {
-        waterSurface.draw(ctx, terrainDepth, camera, runtime.passedTime);
-        if (runtime.game.settings.lighting) {
-            drawLocalLighting(ctx, runtime.world, terrainDepth, camera, runtime.time,
-                runtime.passedTime, CANVAS.width, CANVAS.height);
-        }
-    }
 
     afterDraw();
 
     drawLoadScreen();
+}
+
+function drawSwordSlashEffects() {
+    const effects = runtime.world?.swordSlashEffects;
+    if (!effects?.length) return;
+
+    const duration = 0.18;
+    const activeEffects = [];
+    for (const effect of effects) {
+        const age = runtime.passedTime - effect.createdAt;
+        if (age < 0 || age >= duration) continue;
+        activeEffects.push(effect);
+        if (effect.dimension !== activeDimension) continue;
+
+        const progress = age / duration;
+        const alpha = Math.sin(progress * Math.PI) * 0.9;
+        const block = BLOCK_SIZE;
+        const x = effect.x - camera.x + effect.aim.x * block * 0.42;
+        const y = effect.y - camera.y + effect.aim.y * block * 0.42;
+        const drawArc = () => {
+            ctx.beginPath();
+            ctx.moveTo(-block * 0.15, -block * 0.46);
+            ctx.quadraticCurveTo(
+                block * 0.42,
+                -block * 0.4,
+                block * 0.55,
+                -block * 0.1,
+            );
+            ctx.quadraticCurveTo(
+                block * 0.68,
+                block * 0.18,
+                block * 0.1,
+                block * 0.48,
+            );
+            ctx.stroke();
+        };
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.atan2(effect.aim.y, effect.aim.x));
+        ctx.globalAlpha = alpha;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.setLineDash([Math.max(2, progress * block * 2.5), block * 4]);
+        ctx.lineWidth = block * 0.16;
+        ctx.strokeStyle = "#29475c";
+        drawArc();
+        ctx.lineWidth = block * 0.1;
+        ctx.strokeStyle = "#eafaff";
+        drawArc();
+        ctx.lineWidth = block * 0.04;
+        ctx.strokeStyle = "#75d9ff";
+        drawArc();
+        ctx.restore();
+    }
+
+    runtime.world.swordSlashEffects = activeEffects;
 }
 
 function drawMinionBlindness() {
@@ -241,7 +266,6 @@ function drawMinionBlindness() {
     ctx.fillRect(0, 0, CANVAS.width, CANVAS.height);
     ctx.restore();
 }
-
 
 export function drawLoadScreen() {
     if (!runtime.isTexturePackLoaded || runtime.world?.generator?.loadingWorld) {
@@ -265,8 +289,6 @@ export function drawLoadScreen() {
                 CANVAS.height / 2,
             );
     }
-
-    shaderRenderer.render();
 }
 
 export function drawEntities() {
@@ -286,7 +308,6 @@ export function drawEntities() {
                 entity.drawFire?.();
                 entity.drawOverride?.();
             } else {
-                if (!voxelActive) terrainDepth.drawEntityShadow(ctx, entity, camera);
                 entity.draw(ctx, camera);
             }
         } else {
@@ -491,7 +512,6 @@ export function drawMinionDestroyStages() {
         });
     }
 }
-
 
 export function drawChunkLine(chunk) {
     const chunkX = chunk.x;

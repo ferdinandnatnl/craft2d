@@ -4,18 +4,24 @@ import { Items } from "@2dcraft.com/shared/items.js";
 import { LootItem, LootTable } from "@2dcraft.com/shared/lootTable.js";
 import { playPositionalSound } from "../game/sounds.js";
 import { Vector2, randomRange } from "../utils/classes.js";
-import { BLOCK_SIZE, CAVES_THRESHOLD, CHUNK_HEIGHT, CHUNK_WIDTH, TERRAIN_HEIGHT, mobSpawnDelay } from "../utils/globals.js";
+import { BLOCK_SIZE, CAVES_THRESHOLD, CHUNK_HEIGHT, CHUNK_WIDTH, TERRAIN_HEIGHT, mobSpawnDelay, multiplayer } from "../utils/globals.js";
 import { OverworldBiomes } from "@2dcraft.com/shared/biome.js";
-import { Block, getBlock } from "./block.js";
+import { Block, getBlock, hasBlockCollision } from "./block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { findNetherPortalFrame } from "@2dcraft.com/shared/netherPortal.js";
 import { Dimensions, activeDimension, getDimension, getDimensionChunks } from "./dimension.js";
 import { Trees } from "@2dcraft.com/shared/trees.js";
-import { caveCellAt, caveColumnAt } from "@2dcraft.com/shared/caves.js";
-import tooloud from "@2dcraft.com/shared/tooloud.js";
+import {
+    alexCaveAccentBlock,
+    alexCaveBiomeIsSuitable,
+    alexCaveBiomeWallAt,
+    caveCellAt,
+    caveColumnAt,
+} from "@2dcraft.com/shared/caves.js";
 import { END_OUTPOST_X, END_SHRINE_WIDTH, endIslandSurfaceY, isEndShrineChunk } from "@2dcraft.com/shared/endProgression.js";
 import { countMobsNearPlayer, MAX_MOBS_NEAR_PLAYER } from "./mobLimits.js";
 import { daylightFactor } from "../utils/daylight.js";
+import { createSeededRandom, randomInt, seedHash } from "@2dcraft.com/shared/seed.js";
 import { catfishSpawnSize } from "../entities/mobs/catfish.js";
 
 const MUTANT_VARIANTS = {
@@ -27,16 +33,87 @@ const MUTANT_VARIANTS = {
     WitherSkeleton: "MutantSkeleton",
     Enderman: "MutantEnderman",
 };
+const MUTANT_SPAWN_CHANCE = 1 / 4;
+
+function getMutantVariant(entityType) {
+    const mutantVariant = MUTANT_VARIANTS[entityType];
+    return mutantVariant && Math.random() < MUTANT_SPAWN_CHANCE
+        ? mutantVariant
+        : entityType;
+}
+
 function caveFeatureFor(seed, cellIndex) {
-    let hash = 2166136261;
-    for (const character of `cave:${seed}:${cellIndex}`) {
-        hash ^= character.charCodeAt(0);
-        hash = Math.imul(hash, 16777619);
-    }
-    const roll = (hash >>> 0) % 6;
-    if (roll === 0) return "warden";
+    const roll = seedHash(seed, `cave:${cellIndex}`) % 6;
+    // Wardens belong to Deep Dark/Ancient City generation. This small-cave
+    // feature set has no such biome or structure, so do not invent a Warden den.
     if (roll === 2 || roll === 4) return "mineshaft";
     return null;
+}
+
+function noiseToClimate(noise, worldX) {
+    if (!noise || !Number.isFinite(noise.intensity) || noise.intensity === 0) {
+        return 0;
+    }
+    return Math.max(-1, Math.min(1,
+        (noise.getNoise(worldX, 0) - noise.min) / noise.intensity));
+}
+
+function alexCaveBiomeFor(world, cavern, spawnX) {
+    if (!cavern.alexRegion) return null;
+
+    const noiseMaps = getDimension(Dimensions.Overworld).noiseMaps;
+    const surface = world.generator.getTerrainHeight(
+        cavern.centerX,
+        Dimensions.Overworld,
+    );
+    const climate = {
+        continentalness: noiseToClimate(noiseMaps.continentalness, cavern.centerX),
+        temperature: noiseToClimate(noiseMaps.temperature, cavern.centerX),
+        depth: (surface - cavern.centerY) / CHUNK_HEIGHT,
+    };
+    const distanceFromSpawn = Math.abs(cavern.alexRegion.centerX - spawnX);
+    if (distanceFromSpawn < cavern.alexRegion.minSpawnDistance) return null;
+    return alexCaveBiomeIsSuitable(cavern.alexRegion.biome, climate)
+        ? cavern.alexRegion.biome
+        : null;
+}
+
+function caveBiomeSpawnX(world) {
+    const generator = world.generator;
+    if (!Number.isFinite(generator.alexCaveSpawnBlockX)) {
+        generator.alexCaveSpawnBlockX = generator.findSpawnBlockX();
+    }
+    return generator.alexCaveSpawnBlockX;
+}
+
+function assignAlexCaveBiomes(world, caverns, spawnX, biomeCache) {
+    for (const cavern of caverns) {
+        if (!biomeCache.has(cavern.cellIndex)) {
+            biomeCache.set(cavern.cellIndex,
+                alexCaveBiomeFor(world, cavern, spawnX));
+        }
+        cavern.alexBiome = biomeCache.get(cavern.cellIndex);
+    }
+}
+
+function hasMobSpawnClearance(world, position, hitbox, dimension) {
+    const firstX = Math.floor(position.x / BLOCK_SIZE);
+    const lastX = Math.ceil((position.x + hitbox.x) / BLOCK_SIZE) - 1;
+    const firstY = Math.floor(position.y / BLOCK_SIZE);
+    const lastY = Math.ceil((position.y + hitbox.y) / BLOCK_SIZE) - 1;
+
+    for (let y = firstY; y <= lastY; y++) {
+        for (let x = firstX; x <= lastX; x++) {
+            const block = world.getBlockAtWorldPosition(
+                x * BLOCK_SIZE,
+                y * BLOCK_SIZE,
+                false,
+                dimension,
+            );
+            if (!block || hasBlockCollision(block)) return false;
+        }
+    }
+    return true;
 }
 
 export class Chunk {
@@ -58,6 +135,7 @@ export class Chunk {
         this.width = width;
         this.height = CHUNK_HEIGHT;
         this.generated = generated;
+        this.revision = 0;
 
         this.dimension = dimension;
 
@@ -169,7 +247,8 @@ export class Chunk {
                 new LootItem({ itemId: Items.GoldenApple, maxCount: 2 }),
                 new LootItem({ itemId: Items.EnderPearl, maxCount: 3 }),
             ]), blockX * BLOCK_SIZE,
-            (CHUNK_HEIGHT - surface - 2) * BLOCK_SIZE, this);
+            (CHUNK_HEIGHT - surface - 2) * BLOCK_SIZE, this,
+            createSeededRandom(this.world.seed, `end-outpost:${blockX}`));
         }
     }
 
@@ -232,12 +311,18 @@ export class Chunk {
             ]),
             -BLOCK_SIZE * 3,
             (CHUNK_HEIGHT / 2) * BLOCK_SIZE - BLOCK_SIZE,
-            this
+            this,
+            createSeededRandom(this.world.seed, "feature:skyblock-chest"),
         );
 
         // Tree
         setTimeout(() => {
-            this.spawnTreeAt(Trees.Oak.variants[1], 2, CHUNK_HEIGHT / 2);
+            this.spawnTreeAt(
+                Trees.Oak.variants[1],
+                2,
+                CHUNK_HEIGHT / 2,
+                createSeededRandom(this.world.seed, "feature:skyblock-tree"),
+            );
         }, 10);
     }
 
@@ -367,6 +452,10 @@ export class Chunk {
     }
 
     spawnMobs(passive = true) {
+        if (multiplayer && !this.world.isWorldAuthority) {
+            if (!this.spawnTime) this.setMobSpawnTime();
+            return;
+        }
         if (!runtime.GAMERULES.doMobSpawning) return;
 
         // The Nether and End have no passive mob phase.
@@ -404,12 +493,14 @@ export class Chunk {
 
         let spawned = 0;
         let spawnedMutant = false;
+        let spawnedCrocodiles = 0;
+        let spawnedCaimans = 0;
         for (let i = 0; i < count; i++) {
             const randomX = randomRange(0, this.width);
 
             // The Nether has a solid roof. Find a cave floor near the player's
             // height instead of placing mobs on top of bedrock.
-            let netherGround = null;
+            let spawnFeetY = null;
             if (this.dimension === Dimensions.Nether) {
                 const playerFeet = (this.world.player?.position.y ?? 0) +
                     (this.world.player?.hitbox.y ?? 0);
@@ -426,10 +517,11 @@ export class Chunk {
                     }
                 }
                 if (!candidates.length) continue;
-                netherGround = candidates[randomRange(0, candidates.length)];
-            } else if (this.dimension === Dimensions.End &&
-                this.findGroundLevel(randomX) === 0) {
-                continue;
+                spawnFeetY = candidates[randomRange(0, candidates.length)].feet;
+            } else {
+                const groundLevel = this.findGroundLevel(randomX);
+                if (groundLevel === 0) continue;
+                spawnFeetY = (this.height - groundLevel) * BLOCK_SIZE;
             }
 
             const baseEntity = passive
@@ -437,16 +529,53 @@ export class Chunk {
                 : this.biome.googlies[
                       randomRange(0, this.biome.googlies.length)
                   ];
-            const mutantVariant = MUTANT_VARIANTS[baseEntity];
-            const randomEntity = !passive && !spawnedMutant && mutantVariant &&
-                randomRange(0, 12) === 0
-                ? mutantVariant
+            const randomEntity = !passive && !spawnedMutant
+                ? getMutantVariant(baseEntity)
                 : baseEntity;
             if (randomEntity !== baseEntity) spawnedMutant = true;
+            if (
+                randomEntity === "Crocodile" &&
+                (spawnedCrocodiles >= 2 ||
+                    !Entities.Crocodile.canSpawnAt(
+                        this.world,
+                        this.x + randomX * BLOCK_SIZE + BLOCK_SIZE / 2,
+                        spawnFeetY,
+                        this.biome.name,
+                        this.dimension,
+                    ))
+            ) continue;
+            if (
+                randomEntity === "Caiman" &&
+                (spawnedCaimans >= 2 ||
+                    !Entities.Caiman.canSpawnAt(
+                        this.world,
+                        this.x + randomX * BLOCK_SIZE + BLOCK_SIZE / 2,
+                        spawnFeetY,
+                        this.biome.name,
+                        this.dimension,
+                    ))
+            ) continue;
+
+            const EntityType = Entities[randomEntity];
+            const spawnSize = EntityType.spawnSize;
+            const spawnPosition = new Vector2(
+                this.x + randomX * BLOCK_SIZE +
+                    (BLOCK_SIZE - spawnSize.width * BLOCK_SIZE) / 2,
+                spawnFeetY - spawnSize.height * BLOCK_SIZE,
+            );
+            if (!hasMobSpawnClearance(
+                this.world,
+                spawnPosition,
+                new Vector2(
+                    spawnSize.width * BLOCK_SIZE,
+                    spawnSize.height * BLOCK_SIZE,
+                ),
+                this.dimension,
+            )) continue;
 
             const entity = this.world.summonEntity(
-                Entities[randomEntity],
-                new Vector2(randomX * BLOCK_SIZE + this.x, 0),
+                EntityType,
+                spawnPosition,
                 { myChunkX: this.x }
             );
 
@@ -454,19 +583,14 @@ export class Chunk {
             entity.dimension = this.dimension;
             this.entities.push(entity);
             spawned++;
-
-            if (netherGround) {
-                entity.position.y = netherGround.feet - entity.hitbox.y;
-            } else if (this.dimension === Dimensions.End) {
-                entity.setOnGround();
-            } else {
-                setTimeout(() => entity.setOnGround(), 400);
-            }
+            if (randomEntity === "Crocodile") spawnedCrocodiles++;
+            if (randomEntity === "Caiman") spawnedCaimans++;
         }
         if (spawned === 0) this.setMobSpawnTime();
     }
 
     spawnCaveMobs() {
+        if (multiplayer && !this.world.isWorldAuthority) return;
         this.caveSpawnTime = runtime.passedTime + randomRange(25, 46);
         const player = this.world.player;
         if (this.dimension !== Dimensions.Overworld ||
@@ -504,32 +628,20 @@ export class Chunk {
         }
         if (!floors.length) return;
 
-        const hasCentipede = this.entities.some(entity =>
-            entity.isCentipede && entity.health > 0,
-        );
-        let spawnedCentipede = false;
-        if (!hasCentipede && remaining > 0 && randomRange(0, 12) === 0) {
-            const floor = floors.splice(randomRange(0, floors.length), 1)[0];
-            const centipede = this.world.summonEntity(
-                Entities.Centipede,
-                new Vector2(this.x + floor.x * BLOCK_SIZE, 0),
-                { myChunkX: this.x },
-            );
-            centipede.position.y = this.world.userBlockYToWorld(floor.y) -
-                centipede.hitbox.y;
-            centipede.dimension = this.dimension;
-            this.entities.push(centipede);
-            spawnedCentipede = true;
-        }
-
-        for (let i = spawnedCentipede ? 1 : 0; i < remaining && floors.length; i++) {
+        let spawnedMutant = false;
+        for (let i = 0; i < remaining && floors.length; i++) {
             const floor = floors.splice(randomRange(0, floors.length), 1)[0];
             const choices = this.getBlockType(floor.x, floor.y + 2) === Blocks.Air
                 ? this.biome.googlies
                 : this.biome.googlies.filter(name => name !== "Enderman");
             if (!choices.length) break;
+            const baseEntity = choices[randomRange(0, choices.length)];
+            const entityType = spawnedMutant
+                ? baseEntity
+                : getMutantVariant(baseEntity);
+            if (entityType !== baseEntity) spawnedMutant = true;
             const entity = this.world.summonEntity(
-                Entities[choices[randomRange(0, choices.length)]],
+                Entities[entityType],
                 new Vector2(this.x + floor.x * BLOCK_SIZE, 0),
                 { myChunkX: this.x },
             );
@@ -540,6 +652,7 @@ export class Chunk {
     }
 
     spawnAquaticMobs() {
+        if (multiplayer && !this.world.isWorldAuthority) return;
         this.aquaticSpawningInitialized = true;
         if (
             this.dimension !== Dimensions.Overworld ||
@@ -724,7 +837,12 @@ export class Chunk {
                 this.dimension
             ).noiseMaps.tree.getNoise(i);
             if (noiseOutput >= this.biome.treeThreshold) {
-                this.spawnTree(this.getLocalX(i, this));
+                const worldBlockX = Math.floor(i / BLOCK_SIZE);
+                const random = createSeededRandom(
+                    this.world.seed,
+                    `tree:${this.dimension}:${worldBlockX}`,
+                );
+                this.spawnTree(this.getLocalX(i, this), random);
             }
         }
     }
@@ -733,30 +851,34 @@ export class Chunk {
         if (!this.biome.grassType) return;
         if (this.biome.grassType.length == 0) return;
         for (let x = 0; x < CHUNK_WIDTH; x++) {
+            const random = createSeededRandom(
+                this.world.seed,
+                `grass:${this.dimension}:${this.x / BLOCK_SIZE + x}`,
+            );
             if (
                 getDimension(this.dimension).noiseMaps.grass.getNoise(
                     this.getWorldX(x)
-                ) >= 1 && randomRange(0, 5) === 0
+                ) >= 1 && random() < 0.2
             ) {
                 const y = this.findGroundLevel(x, false, true);
                 if (!getBlock(this.getBlockType(x, y)).air) continue;
                 const randomGrass =
                     this.biome.grassType[
-                        randomRange(0, this.biome.grassType.length)
+                        randomInt(random, 0, this.biome.grassType.length)
                     ];
-                if (randomGrass === Blocks.DeadBush && randomRange(0, 5) !== 0) continue;
+                if (randomGrass === Blocks.DeadBush && random() >= 0.2) continue;
 
                 this.setBlockType(x, y, randomGrass);
             }
         }
     }
 
-    spawnTree(x) {
+    spawnTree(x, random = Math.random) {
         const y = this.findGroundLevel(x, false, true); // Find valid ground level`
         if (!getBlock(this.getBlockType(x, y)).air) return;
-        const randomTree = this.getRandomTreeFromBiome(); // Pick a random tree
+        const randomTree = this.getRandomTreeFromBiome(random); // Pick a random tree
         if (!randomTree) return;
-        this.spawnTreeAt(randomTree, x, y); // Spawn the tree at the position
+        this.spawnTreeAt(randomTree, x, y, random); // Spawn the tree at the position
     }
 
     findGroundLevel(x, correctY = false, validGround = false) {
@@ -811,52 +933,36 @@ export class Chunk {
     }
 
     generateOverworldCaves() {
+        const spawnX = caveBiomeSpawnX(this.world);
+        const alexBiomeCache = new Map();
         for (let x = 0; x < this.width; x++) {
             const worldX = this.x / BLOCK_SIZE + x;
             const surface = this.getHeight(x);
-            const column = caveColumnAt(worldX);
-            const carved = [];
+            const column = caveColumnAt(worldX, this.world.seed, spawnX);
+            assignAlexCaveBiomes(
+                this.world,
+                column.caverns,
+                spawnX,
+                alexBiomeCache,
+            );
 
             for (let y = 2; y <= surface; y++) {
                 const cell = caveCellAt(worldX, y, surface, column);
-                carved[y] = cell;
                 if (cell === "air") this.setBlockType(x, y, Blocks.Air);
                 else if (cell === "water") this.setBlockType(x, y, Blocks.Water);
                 else if (cell === "lava") this.setBlockType(x, y, Blocks.Lava);
-            }
-
-            // Dress exposed cavern rock after carving, using the original
-            // profile so new stalagmites cannot grow more stalagmites.
-            for (let y = 3; y < surface - 4; y++) {
-                if (this.getBlockType(x, y) !== this.biome.baseBlock) continue;
-                const cavern = column.caverns.find(room =>
-                    Math.abs(y - room.centerY) < room.radiusY + 4 &&
-                    Math.abs(worldX - room.centerX) < room.radiusX);
-                if (!cavern) continue;
-
-                const feature = tooloud.Perlin.noise(worldX * 0.31, y * 0.23, 3229);
-                if (carved[y + 1] === "air" || carved[y + 1] === "water" ||
-                    carved[y + 1] === "lava") {
-                    const material = carved[y + 1] === "water" ? Blocks.Gravel :
-                        carved[y + 1] === "lava" ? Blocks.SmoothStone :
-                        cavern.style === "moss" ? Blocks.MossyCobblestone :
-                            feature > 0.15 ? Blocks.SmoothStone : this.biome.baseBlock;
-                    this.setBlockType(x, y, material);
-                    if (carved[y + 1] !== "air" || feature < 0.38) continue;
-                    const length = Math.min(3, 1 + Math.floor((feature - 0.38) * 9));
-                    for (let tip = 1; tip <= length && carved[y + tip] === "air"; tip++) {
-                        this.setBlockType(x, y + tip, cavern.style === "moss" ?
-                            Blocks.MossyCobblestone : Blocks.SmoothStone);
-                    }
-                } else if (carved[y - 1] === "air") {
-                    if (cavern.style === "glow" && feature > 0.36) {
-                        this.setBlockType(x, y, Blocks.Glowstone);
-                    } else if (feature > 0.39) {
-                        const length = Math.min(3, 1 + Math.floor((feature - 0.39) * 9));
-                        for (let tip = 1; tip <= length && carved[y - tip] === "air"; tip++) {
-                            this.setBlockType(x, y - tip, cavern.style === "moss" ?
-                                Blocks.MossyCobblestone : Blocks.SmoothStone);
-                        }
+                else {
+                    for (const cavern of column.caverns) {
+                        if (!cavern.alexBiome ||
+                            !alexCaveBiomeWallAt(worldX, y, cavern)) continue;
+                        const accent = alexCaveAccentBlock(
+                            cavern.alexBiome,
+                            this.world.seed,
+                            worldX,
+                            y,
+                        );
+                        if (accent !== null) this.setBlockType(x, y, accent);
+                        break;
                     }
                 }
             }
@@ -868,10 +974,20 @@ export class Chunk {
 
         const worldStart = this.x / BLOCK_SIZE;
         const worldEnd = worldStart + this.width;
+        const spawnX = caveBiomeSpawnX(this.world);
+        const alexBiomeCache = new Map();
         const rooms = new Map();
         for (let x = 0; x < this.width; x++) {
             const worldX = worldStart + x;
-            for (const cavern of caveColumnAt(worldX).caverns) {
+            const column = caveColumnAt(worldX, this.world.seed, spawnX);
+            assignAlexCaveBiomes(
+                this.world,
+                column.caverns,
+                spawnX,
+                alexBiomeCache,
+            );
+            for (const cavern of column.caverns) {
+                if (cavern.alexBiome) continue;
                 const feature = caveFeatureFor(this.world.seed, cavern.cellIndex);
                 if (feature && cavern.centerX >= worldStart &&
                     cavern.centerX < worldEnd) {
@@ -888,8 +1004,9 @@ export class Chunk {
         for (const cavern of rooms.values()) {
             const centerX = Math.max(5, Math.min(this.width - 6,
                 Math.floor(cavern.centerX - worldStart)));
-            if (cavern.feature === "warden") this.generateWardenDen(cavern, centerX, worldStart);
-            else if (cavern.feature === "mineshaft") this.generateCaveMineshaft(cavern, centerX, worldStart);
+            if (cavern.feature === "mineshaft") {
+                this.generateCaveMineshaft(cavern, centerX, worldStart);
+            }
         }
     }
 
@@ -948,47 +1065,6 @@ export class Chunk {
         }
     }
 
-    generateWardenDen(cavern, centerX, worldStart) {
-        const floorY = cavern.lake ? cavern.waterLevel + 2 :
-            this.findCaveFloorY(centerX, cavern) ?? Math.floor(cavern.centerY - 2);
-        if (floorY < 3 || floorY + 3 >= this.height) return;
-
-        // A raised sculk dais keeps the den dry in flooded chambers.
-        for (let x = centerX - 3; x <= centerX + 3; x++) {
-            this.setBlockType(x, floorY - 1,
-                x === centerX - 1 ? Blocks.SculkCatalyst : Blocks.Sculk);
-        }
-        for (let x = centerX - 1; x <= centerX + 1; x++) {
-            for (let y = floorY; y <= floorY + 3; y++) {
-                this.setBlockType(x, y, Blocks.Air);
-            }
-        }
-        this.setBlockType(centerX - 3, floorY, Blocks.SculkSensor);
-        this.setBlockType(centerX + 2, floorY, Blocks.SculkShrieker);
-        this.setBlockType(centerX + 3, floorY, Blocks.SculkSensor);
-
-        this.world.generator.generateChestWithLoot(new LootTable([
-            new LootItem({ itemId: Items.EchoShard, maxCount: 2 }),
-            new LootItem({ itemId: Items.Diamond, maxCount: 3 }),
-            new LootItem({ itemId: Items.GoldenApple, maxCount: 1 }),
-            new LootItem({ itemId: Items.RedstoneDust, maxCount: 8, subtract: 3 }),
-        ]), (worldStart + centerX + 4) * BLOCK_SIZE,
-        this.world.userBlockYToWorld(floorY), this);
-
-        if (this.world.generator.specialWorldProps.noMobs ||
-            this.world.difficulty === "peaceful" ||
-            !runtime.GAMERULES?.doMobSpawning) return;
-
-        const warden = this.world.summonEntity(
-            Entities.Warden,
-            new Vector2((worldStart + centerX) * BLOCK_SIZE,
-                this.world.userBlockYToWorld(floorY) - 3 * BLOCK_SIZE),
-            { myChunkX: this.x },
-        );
-        warden.dimension = this.dimension;
-        this.entities.push(warden);
-    }
-
     generateOres() {
         const noiseMaps = getDimension(this.dimension).noiseMaps;
 
@@ -1036,21 +1112,21 @@ export class Chunk {
         }
     }
 
-    getRandomTreeFromBiome() {
+    getRandomTreeFromBiome(random = Math.random) {
         const trees = this.biome.treeType;
-        const variants = trees[randomRange(0, trees.length)].variants;
+        const variants = trees[randomInt(random, 0, trees.length)].variants;
 
-        return variants[randomRange(0, variants.length)];
+        return variants[randomInt(random, 0, variants.length)];
     }
 
-    spawnTreeAt(tree, x, y) {
+    spawnTreeAt(tree, x, y, random = Math.random) {
         if (y <= 3) return;
 
         // Select a random variant from the tree
         const structure = tree.blocks; // Get the block layout
 
         // Randomly choose to flip (mirroring) the structure.
-        const flip = randomRange(0, 2) === 1; // flip is true 50% of the time
+        const flip = random() >= 0.5; // flip is true 50% of the time
 
         const treeHeight = structure.length;
         const treeWidth = structure[0].length;

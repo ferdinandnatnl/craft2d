@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
 import { MUTANT_CREEPER_RIG } from "../Assets/rendering/mutantCreeperRig.js";
-import { mutantPartPitch, mutantWalkBob } from "../Assets/rendering/mutantPose.js";
+import { mutantAttackAmount, mutantPartPitch, mutantWalkBob } from "../Assets/rendering/mutantPose.js";
 
 const size = {
     pelvis: [10, 14, 8], body: [9, 16, 7], neck: [8, 14, 6],
@@ -76,7 +76,7 @@ globalThis.localStorage = { getItem: () => null };
 
 await import("../Assets/game/inventoryItem.js");
 const [{ MutantCreeper, MutantZombie, MutantSkeleton, MutantEnderman,
-    MutantSnowGolem },
+    MutantSnowGolem, SpiderPig },
     { CreeperMinion, CreeperMinionEgg },
     { Vector2 }, { runtime }, { EntityTypes }] = await Promise.all([
     import("../Assets/entities/mobs/mutants.js"),
@@ -183,7 +183,18 @@ test("hostile mutants damage a Survival player in melee", () => {
     }
 });
 
-test("mutants use their own sounds and do not receive the shared bend pose", () => {
+test("mutant zombie does not crash when no player overlaps it", () => {
+    const { world } = createWorld();
+    const zombie = new MutantZombie(world);
+    world.player.type = EntityTypes.Player;
+    world.player.position.x = 1000;
+    world.entities.push(world.player, zombie);
+    zombie.attackCooldown = 0;
+    assert.doesNotThrow(() => zombie.hitPlayerLogic());
+    assert.equal(world.player.damageTaken, undefined);
+});
+
+test("mutants use their own sounds and animate their attack parts", () => {
     for (const [Type, sound] of [
         [MutantZombie, "mutant_zombie"],
         [MutantSkeleton, "mutant_skeleton"],
@@ -196,9 +207,152 @@ test("mutants use their own sounds and do not receive the shared bend pose", () 
     }
     for (const type of ["MutantZombie", "MutantSkeleton", "MutantEnderman",
         "MutantSnowGolem", "SpiderPig"]) {
-        assert.equal(mutantPartPitch(type, "leftArm", 1, 1, 1, 1), 0);
-        assert.equal(mutantWalkBob(type, 1, 1), 0);
+        assert.equal(mutantPartPitch(type, "leftArm", 1, 0, 0, 1), 0);
+        assert.equal(mutantWalkBob(type, 1, 0), 0);
     }
+    assert.equal(mutantAttackAmount("MutantZombie", 0.4, 0.4), 1);
+    assert.equal(mutantAttackAmount("MutantZombie", 0, 0.4), 0);
+    assert.ok(mutantPartPitch("MutantZombie", "leftArm", 0, 0, 1, 0, "melee") < -1);
+    assert.ok(mutantPartPitch("MutantZombie", "leftArm", 0, 0, 1, 0, "throw") < -2);
+    assert.ok(mutantPartPitch("MutantSkeleton", "rightArm", 0, 0, 1, 0, "shoot") < -1);
+    assert.ok(mutantPartPitch("MutantEnderman", "upperRightArm", 0, 0, 1, 0) < 0);
+    assert.ok(mutantPartPitch("MutantSnowGolem", "rightArm", 0, 0, 1, 0, "throw") < 0);
+    assert.ok(mutantPartPitch("SpiderPig", "head", 0, 0, 1, 0, "bite") < 0);
+});
+
+test("moving mutants swing opposite limbs and settle when they stop", () => {
+    for (const [type, left, right, foot, phase] of [
+        ["MutantZombie", "leftLeg", "rightLeg", "leftFoot", Math.PI / 0.8],
+        ["MutantSkeleton", "leftLeg", "rightLeg", "leftFoot", Math.PI],
+        ["MutantEnderman", "leftLeg", "rightLeg", "leftForeleg", Math.PI / 0.6],
+        ["MutantSnowGolem", "leftLeg", "rightLeg", "leftFoot", Math.PI / 0.9],
+        ["SpiderPig", "frontLeftLeg", "frontRightLeg", "frontLeftFoot", 1],
+    ]) {
+        const leftAngle = mutantPartPitch(type, left, phase, 1, 0, 0);
+        const rightAngle = mutantPartPitch(type, right, phase, 1, 0, 0);
+        assert.ok(Math.abs(leftAngle) > 0.2, `${type} should take a visible step`);
+        assert.ok(leftAngle * rightAngle < 0, `${type} legs should alternate`);
+        assert.ok(mutantPartPitch(type, foot, phase, 1, 0, 0) * leftAngle < 0,
+            `${type} lower leg should bend with the step`);
+        assert.ok(mutantWalkBob(type, phase, 1) > 0, `${type} should step upward`);
+        assert.equal(mutantPartPitch(type, left, phase, 0, 0, 0), 0);
+    }
+});
+
+test("mutant skeleton uses its shooting pose for an arrow volley", () => {
+    const { world, events } = createWorld();
+    world.player.position.x = 5 * 64;
+    const skeleton = new MutantSkeleton(world, { position: new Vector2(0, 0) });
+    skeleton.updateEntity = () => {};
+    skeleton.aiUpdate = () => {};
+    skeleton.hitPlayerLogic = () => {};
+    skeleton.volleyCooldown = 0;
+    skeleton.update();
+    assert.equal(events.spawned.length, 6);
+    assert.equal(skeleton.attackPoseKind, "shoot");
+    assert.equal(skeleton.body.mutantAttackPoseKind, "shoot");
+});
+
+test("mutant arms stay joined during melee and shooting poses", async () => {
+    const { VoxelEntities } = await import("../Assets/rendering/entities.js");
+    for (const [Type, kind] of [[MutantZombie, "melee"],
+        [MutantSkeleton, "shoot"]]) {
+        const { world } = createWorld();
+        const mob = new Type(world);
+        mob.getLightLevel = () => 15;
+        mob.getSkyExposure = () => 1;
+        mob.attackPoseKind = kind;
+        mob.attackPoseDuration = 0.8;
+        mob.attackPoseUntil = 1.8;
+        const renderer = new VoxelEntities(new THREE.Scene());
+        renderer.update([mob], 0, { position: { x: 0 } }, 1, false);
+        const record = renderer.models.get(mob);
+        const positions = record.geometry.getAttribute("position");
+        const bounds = name => {
+            const part = record.mutantPartByName.get(name);
+            const box = new THREE.Box3();
+            for (let i = 0; i < part.base.length; i++) {
+                box.expandByPoint(new THREE.Vector3(
+                    positions.getX(part.vertexStart + i),
+                    positions.getY(part.vertexStart + i),
+                    positions.getZ(part.vertexStart + i),
+                ));
+            }
+            return box;
+        };
+        for (const side of ["left", "right"]) {
+            assert.ok(bounds(`${side}Arm`).intersectsBox(bounds(`${side}Forearm`)),
+                `${Type.name} ${side} elbow should stay joined`);
+            if (Type === MutantSkeleton) {
+                assert.ok(bounds(`${side}Shoulder`).intersectsBox(bounds(`${side}Arm`)),
+                    `${Type.name} ${side} shoulder should stay joined`);
+            }
+        }
+        renderer.dispose();
+    }
+});
+
+test("walking mutant feet remain attached to their moving legs", async () => {
+    const { VoxelEntities } = await import("../Assets/rendering/entities.js");
+    for (const [Type, leg, foot, phase] of [
+        [MutantZombie, "leftLeg", "leftFoot", Math.PI / 0.8],
+        [MutantSkeleton, "leftLeg", "leftFoot", Math.PI],
+        [MutantEnderman, "leftLeg", "leftForeleg", Math.PI / 0.6],
+        [MutantSnowGolem, "leftLeg", "leftFoot", Math.PI / 0.9],
+        [SpiderPig, "frontLeftLeg", "frontLeftFoot", 1],
+    ]) {
+        const { world } = createWorld();
+        const mob = new Type(world);
+        mob.getLightLevel = () => 15;
+        mob.getSkyExposure = () => 1;
+        mob.body.mutantWalkPhase = phase;
+        mob.body.mutantWalkAmount = 1;
+        const renderer = new VoxelEntities(new THREE.Scene());
+        renderer.update([mob], 0, { position: { x: 0 } }, 1, false);
+        const record = renderer.models.get(mob);
+        const positions = record.geometry.getAttribute("position");
+        const bounds = name => {
+            const part = record.mutantPartByName.get(name);
+            const box = new THREE.Box3();
+            for (let i = 0; i < part.base.length; i++) {
+                box.expandByPoint(new THREE.Vector3(
+                    positions.getX(part.vertexStart + i),
+                    positions.getY(part.vertexStart + i),
+                    positions.getZ(part.vertexStart + i),
+                ));
+            }
+            return box;
+        };
+        const part = record.mutantPartByName.get(leg);
+        assert.ok(Math.abs(positions.getY(part.vertexStart) - part.base[0][1]) > 0.01,
+            `${Type.name} leg should move`);
+        assert.ok(bounds(leg).intersectsBox(bounds(foot)),
+            `${Type.name} lower leg should stay joined`);
+        renderer.dispose();
+    }
+});
+
+test("classic mutant sprites move forearms with their upper arms", () => {
+    const { world } = createWorld();
+    const skeleton = new MutantSkeleton(world);
+    const body = skeleton.body;
+    const ctx = { save() {}, restore() {}, translate() {}, scale() {} };
+    for (const part of Object.values(body.parts)) part.draw = () => {};
+    body.draw(ctx, 1, 0, null);
+    const restingX = body.parts.rightForearm.position.x;
+    const restingFootX = body.parts.leftFoot.position.x;
+    body.mutantAttackPoseKind = "shoot";
+    body.mutantAttackPoseDuration = 0.8;
+    body.mutantAttackPoseUntil = runtime.passedTime + 0.8;
+    body.draw(ctx, 1, 0, null);
+    assert.ok(body.parts.rightForearm.position.x > restingX);
+    body.draw(ctx, -1, 180, null);
+    assert.ok(body.parts.rightForearm.position.x < restingX);
+    body.mutantAttackPoseUntil = 0;
+    body.mutantWalkPhase = Math.PI;
+    body.mutantWalkAmount = 1;
+    body.draw(ctx, 1, 0, null);
+    assert.notEqual(body.parts.leftFoot.position.x, restingFootX);
 });
 
 test("mutant snow golem attacks nearby hostile mobs", () => {

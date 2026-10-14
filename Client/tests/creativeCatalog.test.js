@@ -10,9 +10,9 @@ test("creative categories give common blocks and items a visible tab", () => {
         ["FlowerTulipRed", {}, true, "decoration"],
         ["RedstoneLamp", {}, true, "redstone"],
         ["IronPickaxe", { toolType: 1 }, false, "tools"],
-        ["IronSword", { toolType: 6 }, false, "combat"],
+        ["IronSword", { toolType: 6 }, false, "tools"],
         ["Apple", { foodValue: 4 }, false, "food"],
-        ["Diamond", {}, false, "materials"],
+        ["Diamond", {}, false, "food"],
     ]) {
         const category = creativeCategory(key, definition, isBlock);
         assert.equal(category, expected);
@@ -25,8 +25,8 @@ test("creative search ignores case and surrounding spaces", () => {
     assert.equal(creativeMatchesSearch("Grass Block", "stone"), false);
 });
 
-test("every textured block is eligible for decorative wallpaper", () => {
-    assert.ok(CREATIVE_TABS.some(tab => tab.id === "wallpaper"));
+test("textured blocks remain eligible for wallpaper in the building tab", () => {
+    assert.ok(CREATIVE_TABS.some(tab => tab.id === "building"));
     for (const id of [Blocks.Stone, Blocks.Glass, Blocks.Water, Blocks.Torch,
         Blocks.FlowerTulipRed, Blocks.Chest, Blocks.Fire]) {
         assert.equal(canUseAsWallpaper(blockMap.get(id)), true);

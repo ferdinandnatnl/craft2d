@@ -74,7 +74,7 @@ export class WitherSkeleton extends Mob {
 
         if (!touchingPlayer) return;
 
-        touchingPlayer.hit(4, this.position.x, 3, `Killed by ${this.name}`);
+        touchingPlayer.hit(4, this.position.x, 3, `Killed by ${this.name}`, this);
 
         this.attackPoseUntil = runtime.passedTime + 0.4;
         this.attackCooldown = 1;

@@ -1,9 +1,10 @@
-import { runtime } from "../utils/runtime.js";
+import { DEFAULT_GAME_RULES, runtime } from "../utils/runtime.js";
 import { Colors } from "../game/chat.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { Vector2 } from "../utils/classes.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, SPAWN_PLAYER, multiplayer } from "../utils/globals.js";
 import { resolveBiome } from "@2dcraft.com/shared/biome.js";
+import { randomMinecraftSeed } from "@2dcraft.com/shared/seed.js";
 import { getBlock } from "./block.js";
 import { Chunk } from "./chunk.js";
 import { Dimensions, activeDimension, dimensions, getDimension, gotoDimension } from "./dimension.js";
@@ -14,8 +15,14 @@ import { Boat } from "../entities/boat.js";
 import { Warden } from "../entities/mobs/warden.js";
 import { Minecart } from "../entities/minecart.js";
 import { CreeperMinion, CreeperMinionEgg } from "../entities/mobs/creeperMinion.js";
+import { Crocodile } from "../entities/mobs/crocodile.js";
+import { Caiman } from "../entities/mobs/caiman.js";
 import { Catfish } from "../entities/mobs/catfish.js";
-import { Centipede } from "../entities/mobs/centipede.js";
+import { Chicken } from "../entities/mobs/chicken.js";
+import { Cow } from "../entities/mobs/cow.js";
+import { Pig } from "../entities/mobs/pig.js";
+import { Sheep } from "../entities/mobs/sheep.js";
+import { getBreedableAnimalSaveData } from "../entities/mobs/animalBehavior.js";
 import { Minion, normalizeMinionSaveData } from "../entities/mobs/minion.js";
 
 export const AUTOSAVE_INTERVAL = 60000;
@@ -39,19 +46,23 @@ export let currentSave = {
     playerPosition: new Vector2(),
     gamemode: 0,
     time: 0,
+    weather: null,
     inventoryItems: [[]],
     seed: 0,
+    worldgenVersion: 2,
     pendingBlocks: new Map(),
     dimensions: [], // Array of { index, chunks: [{ x, biome, previousChunk, blocks, walls }] }
+    caimans: [],
+    catfish: [],
+    playerStatusEffects: null,
+    animals: [],
     boats: [],
     golems: [],
-    catfish: [],
-    centipedes: [],
-    minions: [],
+    playerBoatUUID: null,
+    playerUUID: null,
     xpLevel: 0,
     minionProgress: { evilDeeds: 0, unlocked: false },
-    playerBoatUUID: null,
-    playerStatusEffects: null,
+    minions: [],
 };
 
 export function saveWorld(message = true, toFile = false) {
@@ -102,6 +113,7 @@ export function saveWorld(message = true, toFile = false) {
     }
 
     currentSave.time = runtime.time;
+    currentSave.weather = runtime.world.weather?.getState?.() ?? null;
     currentSave.gameRules = runtime.GAMERULES;
     currentSave.difficulty = runtime.world.difficulty;
 
@@ -118,6 +130,7 @@ export function saveWorld(message = true, toFile = false) {
         currentSave.activeDimension = activeDimension;
         currentSave.flying = runtime.world.player.abilities.flying;
         currentSave.playerBoatUUID = runtime.world.player.boat?.UUID ?? null;
+        currentSave.playerUUID = runtime.world.player.UUID;
         currentSave.playerStatusEffects = runtime.world.player.getStatusEffectSaveData();
         currentSave.xpLevel = runtime.world.player.xpLevel;
         currentSave.minionProgress = structuredClone(
@@ -129,6 +142,7 @@ export function saveWorld(message = true, toFile = false) {
     }
 
     currentSave.seed = runtime.world.seed;
+    currentSave.worldgenVersion = runtime.world.generator.worldgenVersion;
     currentSave.dimensions = savedDimensions;
     currentSave.villagers = runtime.world.entities
         .filter(entity => entity.name === "Villager" && entity.health > 0)
@@ -168,16 +182,6 @@ export function saveWorld(message = true, toFile = false) {
             health: entity.health,
             dimension: entity.dimension,
         }));
-    currentSave.catfish = runtime.world.entities
-        .filter(entity => entity.isCatfish && entity.health > 0)
-        .map(entity => entity.createSaveData());
-    currentSave.centipedes = runtime.world.entities
-        .filter(entity => entity.isCentipede && entity.health > 0)
-        .map(entity => entity.createSaveData());
-    currentSave.minions = runtime.world.entities
-        .filter(entity => entity.isMinion &&
-            entity.ownerUUID === runtime.world.player?.UUID && entity.health > 0)
-        .map(entity => entity.createSaveData());
     currentSave.minecarts = runtime.world.entities
         .filter(entity => entity.name === "Minecart")
         .map(entity => ({
@@ -201,6 +205,25 @@ export function saveWorld(message = true, toFile = false) {
             hatchAge: entity.hatchAge,
             health: entity.health,
         }));
+    currentSave.crocodiles = runtime.world.entities
+        .filter(entity => entity.isCrocodile && entity.health > 0)
+        .map(entity => entity.createSaveData());
+    currentSave.caimans = runtime.world.entities
+        .filter(entity => entity.isCaiman && entity.health > 0)
+        .map(entity => entity.createSaveData());
+    currentSave.catfish = runtime.world.entities
+        .filter(entity => entity.isCatfish && entity.health > 0)
+        .map(entity => entity.createSaveData());
+    currentSave.animals = runtime.world.entities
+        .filter(entity =>
+            ["Chicken", "Cow", "Pig", "Sheep"].includes(entity.name) &&
+            entity.health > 0,
+        )
+        .map(getBreedableAnimalSaveData);
+    currentSave.minions = runtime.world.entities
+        .filter(entity => entity.isMinion &&
+            entity.ownerUUID === runtime.world.player?.UUID && entity.health > 0)
+        .map(entity => entity.createSaveData());
 
     // Determine world name and id before serializing so the name is included in the save
     let worldName = runtime.world.name || "New World";
@@ -315,7 +338,7 @@ export function loadWorldFromLocalStorage() {
         selectedWorld = {
             id: Date.now(),
             name: "New World",
-            seed: Math.floor(Math.random() * 100000000),
+            seed: randomMinecraftSeed(),
             gameMode: 0,
             difficulty: "easy",
         };
@@ -331,7 +354,8 @@ export function loadWorldFromLocalStorage() {
     if (!selectedWorldData) {
         console.log("World not found in local storage", selectedWorld);
         runtime.game.chat.welcomeMessage();
-        if (selectedWorld.seed)
+        if (selectedWorld.seed !== undefined && selectedWorld.seed !== null &&
+            String(selectedWorld.seed).trim() !== "")
             runtime.world.generator.loadCustomSeed(selectedWorld.seed);
         if (SPAWN_PLAYER) {
             setTimeout(() => {
@@ -355,6 +379,8 @@ export async function loadWorld(save) {
 
     try {
         currentSave = JSON.parse(save);
+        // Drop the removed mob's legacy save records when this world is next saved.
+        delete currentSave.centipedes;
     } catch (error) {
         console.error("Failed to load world: ", error);
         return;
@@ -363,8 +389,14 @@ export async function loadWorld(save) {
     runtime.world.name = currentSave.name || "New World";
 
     runtime.world.generator.loadingWorld = true;
+    const savedWorldgenVersion = Number(currentSave.worldgenVersion);
+    // Saves from before the terrain change keep their original surface profile
+    // as they expand, so new chunks do not form a height seam at saved edges.
+    runtime.world.worldgenVersion = savedWorldgenVersion >= 2 ? 2 : 1;
+    runtime.world.generator.worldgenVersion = runtime.world.worldgenVersion;
 
     runtime.world.generator.loadCustomSeed(currentSave.seed);
+    runtime.world.weather?.loadState(currentSave.weather, currentSave.seed);
 
     // Clear chunks and pendingBlocks for all dimensions
     dimensions.forEach((dimension) => {
@@ -435,6 +467,184 @@ export async function loadWorld(save) {
                 },
             );
         }
+    }
+
+    const savedCrocodiles = Array.isArray(currentSave.crocodiles)
+        ? currentSave.crocodiles : [];
+    for (const saved of savedCrocodiles) {
+        if (!saved ||
+            typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) ||
+            saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) {
+            continue;
+        }
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const crocodile = runtime.world.summonEntity(
+            Crocodile,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                health: Math.min(saved.health, 30),
+                myChunkX: chunkX,
+                tamed: saved.tamed === true,
+                ownerUUID: typeof saved.ownerUUID === "string"
+                    ? saved.ownerUUID : null,
+                sitting: saved.sitting === true,
+                hasEgg: saved.hasEgg === true,
+                babyAgeTicks: Number.isFinite(saved.babyAgeTicks)
+                    ? Math.max(0, Math.min(24_000, saved.babyAgeTicks)) : 0,
+                stunTicks: Number.isFinite(saved.stunTicks)
+                    ? Math.max(0, Math.min(60, saved.stunTicks)) : 0,
+                baskingTimer: Number.isFinite(saved.baskingTimer)
+                    ? Math.max(-3_000, Math.min(2_000, saved.baskingTimer)) : 0,
+                swimTimer: Number.isFinite(saved.swimTimer)
+                    ? Math.max(-3_000, Math.min(1_000, saved.swimTimer)) : -1_000,
+                desert: saved.desert === true,
+            },
+            false,
+            saved.UUID,
+        );
+        crocodile.dimension = dimensionIndex;
+        crocodile.loveTicks = Number.isFinite(saved.loveTicks)
+            ? Math.max(0, Math.min(6_000, saved.loveTicks)) : 0;
+        crocodile.breedingCooldown = Number.isFinite(saved.breedingCooldown)
+            ? Math.max(0, Math.min(6_000, saved.breedingCooldown)) : 0;
+        crocodile.layEggCooldown = Number.isFinite(saved.layEggCooldown)
+            ? Math.max(0, Math.min(6_000, saved.layEggCooldown)) : 0;
+        if (!chunk.entities.includes(crocodile)) chunk.entities.push(crocodile);
+    }
+
+    const savedCaimans = Array.isArray(currentSave.caimans)
+        ? currentSave.caimans : [];
+    for (const saved of savedCaimans) {
+        if (!saved ||
+            typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) ||
+            saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) {
+            continue;
+        }
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const caiman = runtime.world.summonEntity(
+            Caiman,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                health: Math.min(saved.health, 20),
+                myChunkX: chunkX,
+                tamed: saved.tamed === true,
+                ownerUUID: typeof saved.ownerUUID === "string"
+                    ? saved.ownerUUID : null,
+                sitting: saved.sitting === true,
+                command: Number.isFinite(saved.command)
+                    ? Math.max(0, Math.min(2, Math.floor(saved.command))) : 0,
+                hasEgg: saved.hasEgg === true,
+                babyAgeTicks: Number.isFinite(saved.babyAgeTicks)
+                    ? Math.max(0, Math.min(24_000, Math.floor(saved.babyAgeTicks))) : 0,
+                swimTimer: Number.isFinite(saved.swimTimer)
+                    ? Math.max(-3_000, Math.min(1_000, Math.floor(saved.swimTimer))) : -1_000,
+                bellowCooldown: Number.isFinite(saved.bellowCooldown)
+                    ? Math.max(0, Math.min(2_000, Math.floor(saved.bellowCooldown))) : 0,
+                breedingCooldown: Number.isFinite(saved.breedingCooldown)
+                    ? Math.max(0, Math.min(6_000, Math.floor(saved.breedingCooldown))) : 0,
+                loveTicks: Number.isFinite(saved.loveTicks)
+                    ? Math.max(0, Math.min(6_000, Math.floor(saved.loveTicks))) : 0,
+            },
+            false,
+            saved.UUID,
+        );
+        caiman.dimension = dimensionIndex;
+        if (!chunk.entities.includes(caiman)) chunk.entities.push(caiman);
+    }
+
+    const savedCatfish = Array.isArray(currentSave.catfish)
+        ? currentSave.catfish : [];
+    for (const saved of savedCatfish) {
+        if (!saved || typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) || saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) continue;
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const catfishSize = Number.isInteger(saved.catfishSize)
+            ? Math.max(0, Math.min(2, saved.catfishSize)) : 0;
+        const catfish = runtime.world.summonEntity(
+            Catfish,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                catfishSize,
+                health: Math.min(saved.health, 10 + catfishSize * 10),
+                fromBucket: saved.fromBucket === true,
+                stomachItems: Array.isArray(saved.stomachItems)
+                    ? saved.stomachItems : [],
+                swallowedEntity: saved.swallowedEntity ?? null,
+                spitTime: Number.isFinite(saved.spitTime)
+                    ? Math.max(0, Math.min(10, saved.spitTime)) : 0,
+                eatCooldown: Number.isFinite(saved.eatCooldown)
+                    ? Math.max(0, Math.min(120, saved.eatCooldown)) : 0,
+                myChunkX: chunkX,
+            },
+            false,
+            saved.UUID,
+        );
+        catfish.dimension = dimensionIndex;
+        if (!chunk.entities.includes(catfish)) chunk.entities.push(catfish);
+    }
+
+    const savedAnimals = Array.isArray(currentSave.animals)
+        ? currentSave.animals : [];
+    const animalTypes = { Chicken, Cow, Pig, Sheep };
+    for (const saved of savedAnimals) {
+        const AnimalType = animalTypes[saved?.type];
+        if (!AnimalType || typeof saved.UUID !== "string" ||
+            !Number.isFinite(saved.position?.x) ||
+            !Number.isFinite(saved.position?.y) ||
+            !Number.isFinite(saved.health) || saved.health <= 0) continue;
+        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
+        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) continue;
+        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
+            CHUNK_WIDTH * BLOCK_SIZE;
+        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
+        if (!chunk) continue;
+        const maxHealth = saved.type === "Chicken" ? 4 : 10;
+        const animal = runtime.world.summonEntity(
+            AnimalType,
+            new Vector2(saved.position.x, saved.position.y),
+            {
+                health: Math.min(saved.health, maxHealth),
+                myChunkX: chunkX,
+                babyAgeTicks: Number.isFinite(saved.babyAgeTicks)
+                    ? Math.max(0, Math.min(24_000, Math.floor(saved.babyAgeTicks))) : 0,
+                loveTicks: Number.isFinite(saved.loveTicks)
+                    ? Math.max(0, Math.min(6_000, Math.floor(saved.loveTicks))) : 0,
+                breedingCooldown: Number.isFinite(saved.breedingCooldown)
+                    ? Math.max(0, Math.min(6_000, Math.floor(saved.breedingCooldown))) : 0,
+                hasWool: saved.hasWool !== false,
+                woolTimer: Number.isFinite(saved.woolTimer)
+                    ? Math.max(0, Math.min(3_000, Math.floor(saved.woolTimer))) : 0,
+                layEggTimer: Number.isFinite(saved.layEggTimer)
+                    ? Math.max(0, Math.min(12_000, Math.floor(saved.layEggTimer))) : undefined,
+            },
+            false,
+            saved.UUID,
+        );
+        animal.dimension = dimensionIndex;
+        if (!chunk.entities.includes(animal)) chunk.entities.push(animal);
     }
 
     const savedVillagers = Array.isArray(currentSave.villagers)
@@ -562,74 +772,6 @@ export async function loadWorld(save) {
         chunk.entities.push(warden);
     }
 
-    const savedCatfish = Array.isArray(currentSave.catfish)
-        ? currentSave.catfish : [];
-    for (const saved of savedCatfish) {
-        if (!saved || typeof saved.UUID !== "string" ||
-            !Number.isFinite(saved.position?.x) ||
-            !Number.isFinite(saved.position?.y) ||
-            !Number.isFinite(saved.health) || saved.health <= 0) continue;
-        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
-        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) continue;
-        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
-            CHUNK_WIDTH * BLOCK_SIZE;
-        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
-        if (!chunk) continue;
-        const catfishSize = Number.isInteger(saved.catfishSize)
-            ? Math.max(0, Math.min(2, saved.catfishSize)) : 0;
-        const catfish = runtime.world.summonEntity(
-            Catfish,
-            new Vector2(saved.position.x, saved.position.y),
-            {
-                catfishSize,
-                health: Math.min(saved.health, 10 + catfishSize * 10),
-                fromBucket: saved.fromBucket === true,
-                stomachItems: Array.isArray(saved.stomachItems)
-                    ? saved.stomachItems : [],
-                swallowedEntity: saved.swallowedEntity ?? null,
-                spitTime: Number.isFinite(saved.spitTime)
-                    ? Math.max(0, Math.min(10, saved.spitTime)) : 0,
-                eatCooldown: Number.isFinite(saved.eatCooldown)
-                    ? Math.max(0, Math.min(120, saved.eatCooldown)) : 0,
-                myChunkX: chunkX,
-            },
-            false,
-            saved.UUID,
-        );
-        catfish.dimension = dimensionIndex;
-        if (!chunk.entities.includes(catfish)) chunk.entities.push(catfish);
-    }
-
-    const savedCentipedes = Array.isArray(currentSave.centipedes)
-        ? currentSave.centipedes : [];
-    for (const saved of savedCentipedes) {
-        if (!saved || typeof saved.UUID !== "string" ||
-            !Number.isFinite(saved.position?.x) ||
-            !Number.isFinite(saved.position?.y) ||
-            !Number.isFinite(saved.health) || saved.health <= 0) continue;
-        const dimensionIndex = saved.dimension ?? Dimensions.Overworld;
-        if (!Number.isInteger(dimensionIndex) || !dimensions[dimensionIndex]) continue;
-        const chunkX = Math.floor(saved.position.x / (CHUNK_WIDTH * BLOCK_SIZE)) *
-            CHUNK_WIDTH * BLOCK_SIZE;
-        const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
-        if (!chunk) continue;
-        const centipede = runtime.world.summonEntity(
-            Centipede,
-            new Vector2(saved.position.x, saved.position.y),
-            {
-                health: Math.min(saved.health, 35),
-                segmentCount: Number.isFinite(saved.segmentCount)
-                    ? Math.max(5, Math.min(8, Math.floor(saved.segmentCount))) : 5,
-                segmentTrail: saved.segmentTrail,
-                myChunkX: chunkX,
-            },
-            false,
-            saved.UUID,
-        );
-        centipede.dimension = dimensionIndex;
-        if (!chunk.entities.includes(centipede)) chunk.entities.push(centipede);
-    }
-
     const savedMinecarts = Array.isArray(currentSave.minecarts)
         ? currentSave.minecarts : [];
     for (const saved of savedMinecarts) {
@@ -684,9 +826,12 @@ export async function loadWorld(save) {
 
     runtime.time = currentSave.time;
 
-    if (currentSave.gameRules) {
-        runtime.GAMERULES = currentSave.gameRules;
-    }
+    runtime.GAMERULES = {
+        ...DEFAULT_GAME_RULES,
+        ...(currentSave.gameRules && typeof currentSave.gameRules === "object"
+            ? currentSave.gameRules
+            : {}),
+    };
 
     if (currentSave.difficulty) {
         runtime.world.setDifficulty(currentSave.difficulty);
@@ -698,7 +843,11 @@ export async function loadWorld(save) {
 
         setTimeout(() => {
             const position = JSON.parse(currentSave.playerPosition);
-            runtime.world.spawnPlayer(new Vector2(position.x, position.y), false);
+            runtime.world.spawnPlayer(
+                new Vector2(position.x, position.y),
+                false,
+                typeof currentSave.playerUUID === "string" ? currentSave.playerUUID : null,
+            );
 
             const playerInventory = JSON.parse(currentSave.inventoryItems);
             for (let i = 0; i < playerInventory.length; i++) {
@@ -733,6 +882,7 @@ export async function loadWorld(save) {
                     unlocked: savedMinionProgress.unlocked === true,
                 };
             }
+
             if (currentSave.health !== undefined)
                 runtime.world.player.health = currentSave.health;
 
@@ -766,7 +916,6 @@ export async function loadWorld(save) {
             if (currentSave.activeDimension !== undefined)
                 gotoDimension(currentSave.activeDimension);
 
-
             for (const saved of Array.isArray(currentSave.minions)
                 ? currentSave.minions : []) {
                 const data = normalizeMinionSaveData(saved, runtime.world.player.UUID);
@@ -791,6 +940,7 @@ export async function loadWorld(save) {
                 minion.myChunkX = chunkX;
                 if (!chunk.entities.includes(minion)) chunk.entities.push(minion);
             }
+
             const savedBoat = currentSave.playerBoatUUID
                 ? runtime.world.getEntityByUUID(currentSave.playerBoatUUID)
                 : null;

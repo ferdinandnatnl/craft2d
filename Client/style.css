@@ -21,21 +21,21 @@ body:has(#canvas) {
 }
 
 #canvas,
-#shader-canvas,
 #voxel-canvas {
-    image-rendering: crisp-edges; /* Firefox */
-    image-rendering: -moz-crisp-edges; /* Firefox */
-    image-rendering: -webkit-optimize-contrast; /* Safari */
-    image-rendering: pixelated; /* Chrome and modern browsers */
-    image-rendering: -o-crisp-edges; /* Older Opera browsers */
-    image-rendering: optimizeSpeed; /* Optional fallback for older browsers */
-
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100dvh;
 
     user-select: none;
+}
+
+#canvas {
+    image-rendering: pixelated;
+}
+
+#voxel-canvas {
+    image-rendering: auto;
 }
 
 #canvas {
@@ -48,11 +48,11 @@ body:has(#canvas) {
     z-index: 7;
     box-sizing: border-box;
     min-width: 0;
-    padding: 0 4px;
+    padding: 0 3px;
     border: 0;
     border-radius: 0;
     background: transparent;
-    color: white;
+    color: #202020;
     font: 16px "Pixel", sans-serif;
     outline: 2px solid transparent;
     cursor: text;
@@ -60,7 +60,7 @@ body:has(#canvas) {
 }
 
 .creative-search-input::placeholder {
-    color: #999;
+    color: #555;
 }
 
 .creative-search-input:focus-visible {
@@ -171,20 +171,6 @@ body:has(#canvas) {
 body.voxel-active #voxel-canvas { display: block; }
 body.voxel-active #canvas { z-index: 2; opacity: 1; }
 
-#shader-canvas {
-    display: none;
-    z-index: 1;
-    pointer-events: none;
-}
-
-body.shaders-active #canvas {
-    opacity: 0;
-}
-
-body.shaders-active #shader-canvas {
-    display: block;
-}
-
 #loading {
     position: fixed;
     left: 50%;
@@ -214,6 +200,85 @@ body.shaders-active #shader-canvas {
 
 #pause-menu.visible {
     display: flex;
+}
+
+.player-name-onboarding {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: max(1rem, env(safe-area-inset-top))
+        max(1rem, env(safe-area-inset-right))
+        max(1rem, env(safe-area-inset-bottom))
+        max(1rem, env(safe-area-inset-left));
+    border: 0;
+    background: transparent;
+}
+
+.player-name-onboarding:not([open]) {
+    display: none;
+}
+
+.player-name-onboarding::backdrop {
+    background: rgba(0, 0, 0, 0.78);
+}
+
+.player-name-panel {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+    width: min(32rem, 100%);
+    max-height: 100%;
+    overflow-y: auto;
+    padding: clamp(1.25rem, 5vw, 2.5rem);
+    border: 2px solid #777;
+    background: #202020 url("Assets/sprites/blocks/dirt.png") repeat;
+    background-size: 100px;
+    box-shadow: inset 0 0 0 2px #111;
+    color: white;
+    text-align: center;
+}
+
+.player-name-title {
+    color: white;
+    text-align: center;
+}
+
+.player-name-copy {
+    font-size: 1.125rem;
+    line-height: 1.5;
+    text-shadow: 1px 1px #000;
+}
+
+.player-name-panel .input-field-container {
+    width: 100%;
+    text-align: left;
+}
+
+#player-name-input:focus {
+    outline: 2px solid white;
+    outline-offset: 3px;
+}
+
+.player-name-error {
+    min-height: 1.25em;
+    color: #ffb3b3;
+    font-size: 0.875rem;
+}
+
+.player-name-panel .btn {
+    width: 100%;
+    isolation: isolate;
 }
 
 .pause-menu-page {

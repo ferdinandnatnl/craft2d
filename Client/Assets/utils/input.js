@@ -57,7 +57,12 @@ export class InputHandler {
     }
 
     _handleKeyDown(event) {
-        if (event.target?.classList?.contains("creative-search-input")) return;
+        if (
+            event.target?.closest?.("input, textarea, select") ||
+            event.target?.isContentEditable
+        ) {
+            return;
+        }
         if (!runtime.game) return;
         if (runtime.game.chat.inChat) return;
         const key = event.code;

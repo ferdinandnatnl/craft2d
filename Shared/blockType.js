@@ -8,6 +8,7 @@ export class BlockType {
         faceSprites = null,
         wallSprite = null,
         iconSprite = null,
+        particleSprite = null,
         states = [],
         name = "New block",
         hardness = -2,
@@ -99,6 +100,7 @@ export class BlockType {
         this.faceSprites = faceSprites;
         this.wallSprite = wallSprite;
         this.iconSprite = iconSprite ? iconSprite : sprite;
+        this.particleSprite = particleSprite;
         this.states = states;
         this.name = name;
         this.hardness = hardness;

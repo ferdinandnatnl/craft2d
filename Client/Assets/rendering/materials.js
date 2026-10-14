@@ -47,7 +47,6 @@ export class VoxelMaterials {
         entry.image.onload = () => {
             entry.frames = top ? 1 : Math.max(1, Math.floor(entry.image.height / entry.image.width));
             this.updateImage(entry, 0);
-            if (!plant && (!fluid || water)) this.makeNormalMap(entry);
         };
         entry.image.onerror = () => {
             console.warn(`Could not load voxel texture: ${sprite}`);
@@ -71,51 +70,15 @@ export class VoxelMaterials {
         entry.texture.needsUpdate = true;
     }
 
-    makeNormalMap(entry) {
-        // Height inferred from albedo is a modest fallback, not an authored PBR map.
-        // Smooth normals keep the color pixels sharp without sparkling edges.
-        const { size, ctx } = entry;
-        const pixels = ctx.getImageData(0, 0, size, size).data;
-        const height = (x, y) => {
-            const i = (((y + size) % size) * size + (x + size) % size) * 4;
-            return (pixels[i] * 0.2126 + pixels[i + 1] * 0.7152 + pixels[i + 2] * 0.0722) / 255;
-        };
-        const data = new Uint8Array(size * size * 4);
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                const nx = (height(x - 1, y) - height(x + 1, y)) * 1.6;
-                const ny = (height(x, y + 1) - height(x, y - 1)) * 1.6;
-                const length = Math.hypot(nx, ny, 1), i = (y * size + x) * 4;
-                data[i] = (nx / length * 0.5 + 0.5) * 255;
-                data[i + 1] = (ny / length * 0.5 + 0.5) * 255;
-                data[i + 2] = (1 / length * 0.5 + 0.5) * 255;
-                data[i + 3] = 255;
-            }
-        }
-        const map = new THREE.DataTexture(data, size, size);
-        map.flipY = true;
-        map.wrapS = map.wrapT = THREE.RepeatWrapping;
-        map.magFilter = map.minFilter = THREE.LinearFilter;
-        map.needsUpdate = true;
-        entry.normalMap?.dispose();
-        entry.normalMap = map;
-        entry.material.normalMap = map;
-        entry.material.normalScale.set(0.65, 0.65);
-        entry.material.needsUpdate = true;
-    }
-
-    update(seconds, detailed) {
+    update(seconds) {
         for (const entry of this.entries.values()) {
             if (entry.frames > 1) this.updateImage(entry, Math.floor(seconds * 4) % entry.frames);
-            entry.material.normalScale.setScalar(detailed ? (entry.water ? 0.20 : 0.65) : 0);
-            if (entry.water && entry.normalMap) entry.normalMap.offset.set(seconds * 0.035, seconds * 0.018);
         }
     }
 
     disposeEntry(entry) {
         entry.image.onload = entry.image.onerror = null;
         entry.texture.dispose();
-        entry.normalMap?.dispose();
         entry.material.dispose();
     }
 

@@ -48,8 +48,9 @@ export async function loadVanillaTextures(onProgress) {
     // Loop through Entities
     const Entities = entityRegistry.Entities;
     if (Entities) {
-        // Constructors are inspected before a world exists. Some register
-        // themselves with their world to look up their current chunk.
+        // Entity constructors are inspected before a world exists. A few
+        // constructors register themselves with their world to find a chunk,
+        // so provide the harmless lookup they need while reading body sprites.
         const textureInspectionWorld = {
             getChunkForX: () => null,
         };

@@ -12,6 +12,7 @@ const SPAWN_EGG_COLORS = Object.freeze({
     Pig: { baseColor: "#F0A5A2", overlayColor: "#DB635F" },
     Cow: { baseColor: "#443626", overlayColor: "#A1A1A1" },
     Sheep: { baseColor: "#E7E7E7", overlayColor: "#FFB5B5" },
+    Chicken: { baseColor: "#F0A5A2", overlayColor: "#E7E7E7" },
     Zombie: { baseColor: "#00AFAF", overlayColor: "#799C65" },
     Creeper: { baseColor: "#0DA70B", overlayColor: "#000000" },
     Skeleton: { baseColor: "#C1C1C1", overlayColor: "#494949" },
@@ -29,6 +30,8 @@ const SPAWN_EGG_COLORS = Object.freeze({
     TropicalFish: { baseColor: "#EF6915", overlayColor: "#FFF9EF" },
     Squid: { baseColor: "#223B4D", overlayColor: "#708899" },
     Warden: { baseColor: "#0F4649", overlayColor: "#39D6E0" },
+    Crocodile: { baseColor: "#738940", overlayColor: "#A6A15E" },
+    Caiman: { baseColor: "#5C5631", overlayColor: "#BBC45C" },
     Catfish: { baseColor: "#807757", overlayColor: "#8A7466" },
     Centipede: { baseColor: "#342B2E", overlayColor: "#733449" },
 });
@@ -70,6 +73,7 @@ export const Items = Object.freeze({
     GoldenHoe: 48,
     GoldenSword: 49,
     Shield: 442,
+    NetheriteSword: 2008,
 
     WoodHammer: 1000,
     StoneHammer: 1001,
@@ -186,6 +190,7 @@ export const Items = Object.freeze({
     SeaLantern: 1532,
     SeaPickle: 1533,
     PrismarineCrystals: 1534,
+    // Reserved legacy IDs: older worlds may still contain these items.
     CentipedeLeg: 1535,
 
     PigSpawnEgg: 3007,
@@ -208,10 +213,17 @@ export const Items = Object.freeze({
     TropicalFishSpawnEgg: 3024,
     SquidSpawnEgg: 3025,
     WardenSpawnEgg: 3026,
+    CrocodileSpawnEgg: 3027,
+    CrocodileScute: 3028,
+    CrocodileEgg: 3029,
+    CaimanSpawnEgg: 3030,
+    CaimanEgg: 3031,
+    ChickenSpawnEgg: 3032,
     CatfishSpawnEgg: 3033,
     SmallCatfishBucket: 3034,
     MediumCatfishBucket: 3035,
     LargeCatfishBucket: 3036,
+    // Reserved legacy ID; older saves may still contain this inert egg.
     CentipedeSpawnEgg: 3037,
     MutantZombieSpawnEgg: 3000,
     MutantCreeperSpawnEgg: 3001,
@@ -583,6 +595,18 @@ export const items = [
         baseDamage: 3,
 
         durability: 32,
+    }),
+    new Item({
+        itemId: Items.NetheriteSword,
+        name: "Netherite Sword",
+        sprite: "netherite_sword",
+        toolType: ToolType.Sword,
+        toolLevel: 4,
+        heldInHand: true,
+        stackSize: 1,
+        baseDamage: 5,
+
+        durability: 2031,
     }),
     new Item({
         itemId: Items.Shield,
@@ -1040,7 +1064,14 @@ export const items = [
         projectile: "Snowball",
         throwPower: 25,
     }),
-    new Item({ itemId: Items.Egg, name: "Egg", sprite: "egg", stackSize: 16 }),
+    new Item({
+        itemId: Items.Egg,
+        name: "Egg",
+        sprite: "egg",
+        stackSize: 16,
+        projectile: "EggProjectile",
+        throwPower: 25,
+    }),
     new Item({ itemId: Items.PumpkinSeeds, name: "Pumpkin Seeds", sprite: "seeds_pumpkin" }),
     //#endregion
 
@@ -1117,6 +1148,13 @@ export const items = [
         sprite: "spawn_egg",
         spawnEntity: "Sheep",
         spawnEggColors: SPAWN_EGG_COLORS.Sheep,
+    }),
+    new Item({
+        itemId: Items.ChickenSpawnEgg,
+        name: "Chicken Spawn Egg",
+        sprite: "spawn_egg",
+        spawnEntity: "Chicken",
+        spawnEggColors: SPAWN_EGG_COLORS.Chicken,
     }),
     new Item({
         itemId: Items.ZombieSpawnEgg,
@@ -1239,15 +1277,47 @@ export const items = [
     }),
     new Item({
         itemId: Items.CentipedeSpawnEgg,
-        name: "Centipede Spawn Egg",
+        name: "Centipede Spawn Egg (Inactive)",
         sprite: "spawn_egg",
-        spawnEntity: "Centipede",
         spawnEggColors: SPAWN_EGG_COLORS.Centipede,
+        excludeFromCreativeInventory: true,
     }),
     new Item({
         itemId: Items.CentipedeLeg,
         name: "Centipede Leg",
         sprite: "alexsmobs/centipede_leg.png",
+        excludeFromCreativeInventory: true,
+    }),
+    new Item({
+        itemId: Items.CrocodileSpawnEgg,
+        name: "Crocodile Spawn Egg",
+        sprite: "spawn_egg",
+        spawnEntity: "Crocodile",
+        spawnEggColors: SPAWN_EGG_COLORS.Crocodile,
+    }),
+    new Item({
+        itemId: Items.CrocodileScute,
+        name: "Crocodile Scute",
+        sprite: "alexsmobs/crocodile_scute.svg",
+    }),
+    new Item({
+        itemId: Items.CrocodileEgg,
+        name: "Crocodile Egg",
+        sprite: "alexsmobs/crocodile_egg.svg",
+        placeBlock: 900,
+    }),
+    new Item({
+        itemId: Items.CaimanSpawnEgg,
+        name: "Caiman Spawn Egg",
+        sprite: "spawn_egg",
+        spawnEntity: "Caiman",
+        spawnEggColors: SPAWN_EGG_COLORS.Caiman,
+    }),
+    new Item({
+        itemId: Items.CaimanEgg,
+        name: "Caiman Egg",
+        sprite: "alexsmobs/caiman_egg.png",
+        placeBlock: 901,
     }),
     new Item({
         itemId: Items.CatfishSpawnEgg,

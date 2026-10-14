@@ -42,7 +42,7 @@ export class Blaze extends Mob {
         if (this.attackCooldown) return;
         const player = this.entityCollision(EntityTypes.Player);
         if (!player) return;
-        player.hit(4, this.position.x, 3, "Killed by Blaze");
+        player.hit(4, this.position.x, 3, "Killed by Blaze", this);
         player.fire = Math.max(player.fire, 60);
         this.attackCooldown = 1.5;
     }

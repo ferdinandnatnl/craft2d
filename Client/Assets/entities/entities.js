@@ -1,6 +1,7 @@
 import { entityRegistry } from "./entityRegistry.js";
 import { FallingBlock } from "./fallingBlock.js";
 import { Cow } from "./mobs/cow.js";
+import { Chicken } from "./mobs/chicken.js";
 import { Creeper } from "./mobs/creeper.js";
 import { Pig } from "./mobs/pig.js";
 import { Sheep } from "./mobs/sheep.js";
@@ -9,6 +10,7 @@ import { Enderman } from "./mobs/enderman.js";
 import { Blaze } from "./mobs/blaze.js";
 import { Zombie } from "./mobs/zombie.js";
 import { Snowball } from "./projectiles/snowBall.js";
+import { EggProjectile } from "./projectiles/egg.js";
 import { EnderDragon } from "./mobs/ender_dragon.js";
 import { Villager } from "./mobs/villager.js";
 import { IronGolem, SnowGolem } from "./mobs/golem.js";
@@ -28,17 +30,20 @@ import {
 import { ChemicalX } from "./projectiles/chemicalX.js";
 import { MutantBoneArrow, MutantIceShard } from "./projectiles/mutantProjectiles.js";
 import { CreeperMinion, CreeperMinionEgg } from "./mobs/creeperMinion.js";
-import { Catfish } from "./mobs/catfish.js";
-import { Centipede } from "./mobs/centipede.js";
+import { Crocodile } from "./mobs/crocodile.js";
+import { Caiman } from "./mobs/caiman.js";
 import { Minion } from "./mobs/minion.js";
+import { Catfish } from "./mobs/catfish.js";
 
 export const Entities = Object.freeze({
     Pig: Pig,
     Cow: Cow,
+    Chicken: Chicken,
     Zombie: Zombie,
     Creeper: Creeper,
     Sand: FallingBlock,
     Snowball: Snowball,
+    EggProjectile: EggProjectile,
     Sheep: Sheep,
     WitherSkeleton: WitherSkeleton,
     EnderDragon: EnderDragon,
@@ -62,9 +67,10 @@ export const Entities = Object.freeze({
     MutantCreeper: MutantCreeper,
     CreeperMinion: CreeperMinion,
     CreeperMinionEgg: CreeperMinionEgg,
-    Catfish: Catfish,
-    Centipede: Centipede,
+    Crocodile: Crocodile,
+    Caiman: Caiman,
     Minion: Minion,
+    Catfish: Catfish,
     MutantSkeleton: MutantSkeleton,
     MutantEnderman: MutantEnderman,
     MutantSnowGolem: MutantSnowGolem,

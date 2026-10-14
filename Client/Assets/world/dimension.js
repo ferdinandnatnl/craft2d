@@ -37,7 +37,6 @@ export class Dimension {
         },
         noiseMaps = {
             grass: new Noise(550, 0.2, 1),
-            structure: new Noise(500, 1, 10),
             temperature: new Noise(60, 1, 0.5),
             wetness: new Noise(60, 1, 0.5),
             tree: new Noise(50, 10, 5),
@@ -84,7 +83,6 @@ setDimensions([
         biomeSet: OverworldBiomes,
         noiseMaps: {
             grass: new Noise(550, 0.2, 1),
-            structure: new Noise(500, 1, 10),
             temperature: new Noise(60, 1, 0.5),
             wetness: new Noise(60, 1, 0.5),
             tree: new Noise(50, 10, 5),
@@ -153,7 +151,6 @@ setDimensions([
         alwaysDay: true,
         noiseMaps: {
             grass: new Noise(550, 0.2, 1),
-            structure: new Noise(500, 1, 10),
             temperature: new Noise(60, 1, 0.5),
             wetness: new Noise(60, 1, 0.5),
             tree: new Noise(100, 10, 5),

@@ -19,6 +19,7 @@ const CREATIVE_SCALE = 3.5;
 const CREATIVE_ROW_SIZE = 9;
 const CREATIVE_VISIBLE_ROWS = 5;
 const CREATIVE_SLOT_STEP = 18 * CREATIVE_SCALE;
+const CREATIVE_TAB_STEP = 24;
 
 export class Inventory {
     constructor() {
@@ -778,13 +779,16 @@ export class Inventory {
         const rect = CANVAS.getBoundingClientRect();
         const scaleX = rect.width / CANVAS.width;
         const scaleY = rect.height / CANVAS.height;
+        const scale = CREATIVE_SCALE;
         this.creativeSearchInput.style.left = `${rect.left +
-            (this.inventoryUI.x + 81 * CREATIVE_SCALE) * scaleX}px`;
+            (this.inventoryUI.x + 5 * scale) * scaleX}px`;
         this.creativeSearchInput.style.top = `${rect.top +
-            (this.inventoryUI.y + 5 * CREATIVE_SCALE) * scaleY}px`;
-        this.creativeSearchInput.style.width = `${87 * CREATIVE_SCALE * scaleX}px`;
-        this.creativeSearchInput.style.height = `${Math.max(24,
-            10 * CREATIVE_SCALE * scaleY)}px`;
+            (this.inventoryUI.y + 4 * scale) * scaleY}px`;
+        this.creativeSearchInput.style.width = `${166 * scale * scaleX}px`;
+        this.creativeSearchInput.style.height = `${Math.max(20,
+            10 * scale * scaleY)}px`;
+        this.creativeSearchInput.style.fontSize = `${Math.max(16,
+            10 * scale * scaleX)}px`;
     }
 
     positionPlayerInventorySlots(creative) {
@@ -823,11 +827,10 @@ export class Inventory {
     }
 
     getCreativeTabBounds(index) {
-        const top = index < 6;
         return {
-            x: this.inventoryUI.x + (8 + (top ? index : index - 6) * 29) * CREATIVE_SCALE,
-            y: this.inventoryUI.y + (top ? -28 : 132) * CREATIVE_SCALE,
-            width: 28 * CREATIVE_SCALE,
+            x: this.inventoryUI.x + index * CREATIVE_TAB_STEP * CREATIVE_SCALE,
+            y: this.inventoryUI.y - 28 * CREATIVE_SCALE,
+            width: CREATIVE_TAB_STEP * CREATIVE_SCALE,
             height: 32 * CREATIVE_SCALE,
         };
     }
@@ -946,7 +949,7 @@ export class Inventory {
                 seenWallpapers.add(id);
                 this.creativeItems.push({
                     item: new InventoryItem({ blockId: id, count: 1, props: { wall: true } }),
-                    name: `${block.name} Wallpaper`, category: "wallpaper",
+                    name: `${block.name} Wallpaper`, category: "building",
                 });
             }
         }
@@ -1846,6 +1849,7 @@ export class Inventory {
 
         if (path.startsWith("creative_inventory/")) {
             this.drawCreativeTabs();
+            this.drawCreativeSearchField(ctx);
             this.positionCreativeSearchInput();
             this.drawCreativeScrollbar(ctx);
         }
@@ -1952,19 +1956,18 @@ export class Inventory {
             const tab = CREATIVE_TABS[i];
             const bounds = this.getCreativeTabBounds(i);
             const selected = this.creativeTab === tab.id;
-            const top = i < 6;
             drawImage({
                 url: tabsUrl,
                 x: bounds.x,
                 y: bounds.y,
-                crop: { x: (top ? i : i - 6) * 28,
-                    y: top ? (selected ? 32 : 0) : (selected ? 96 : 64),
+                crop: { x: (i % 6) * 28,
+                    y: selected ? 32 : 0,
                     width: 28, height: 32 },
                 scale: CREATIVE_SCALE,
                 centerX: false,
             });
             const icon = new InventorySlot({
-                position: { x: bounds.x + 25, y: bounds.y + (top ? 28 : 26) },
+                position: { x: bounds.x + 25, y: bounds.y + 28 },
                 item: new InventoryItem({ ...tab.icon, count: 1 }),
             });
             icon.draw();
@@ -1974,6 +1977,23 @@ export class Inventory {
                     size: 22, textAlign: "left" });
             }
         }
+    }
+
+    drawCreativeSearchField(ctx) {
+        if (this.creativeTab !== "search") return;
+
+        const scale = CREATIVE_SCALE;
+        const x = this.inventoryUI.x + 2 * scale;
+        const y = this.inventoryUI.y + 3 * scale;
+        const width = 172 * scale;
+        const height = 12 * scale;
+
+        ctx.fillStyle = "#373737";
+        ctx.fillRect(x, y, width, height);
+        ctx.fillStyle = "#f0f0f0";
+        ctx.fillRect(x + scale, y + scale, width - 2 * scale, height - 2 * scale);
+        ctx.fillStyle = "#8b8b8b";
+        ctx.fillRect(x + 2 * scale, y + 2 * scale, width - 4 * scale, height - 4 * scale);
     }
 
     drawCreativeScrollbar(ctx) {

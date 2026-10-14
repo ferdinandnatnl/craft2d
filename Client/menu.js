@@ -5,11 +5,12 @@ import { deleteFromLdb, getFromLdb, ldb } from "./Assets/utils/indexDB.js";
 import { DEBUG_ACTIONS, DEFAULT_KEY_BINDINGS, GAMEPLAY_ACTIONS, REBINDABLE_ACTIONS, getActionLabel, getKeyDisplayName, loadKeyBindings, saveKeyBindings } from "./Assets/utils/keyBindings.js";
 import { downloadWorldSave } from "./buttonUtils.js";
 import { resolveAssetUrl } from "./Assets/utils/assetBundle.js";
+import { randomMinecraftSeed } from "@2dcraft.com/shared/seed.js";
+import { blockMap } from "@2dcraft.com/shared/blocks.js";
 import {
-    getShaderModeLabel,
-    nextShaderMode,
-    normalizeShaderMode,
-} from "./Assets/utils/shaderModes.js";
+    getFallingLeafProfile,
+    normalizeFallingLeavesSettings,
+} from "./Assets/world/fallingLeafPhysics.js";
 
 export const worldsContainer = document.querySelector(".world-select");
 export const worldContainer = document.querySelector(".world-container");
@@ -63,7 +64,23 @@ export const musicVolumeLabel = document.getElementById("music-volume-label");
 export const sfxVolumeSlider = document.getElementById("sfx-volume-slider");
 export const sfxVolumeLabel = document.getElementById("sfx-volume-label");
 export const lightingToggleButton = document.getElementById("lighting-toggle-btn");
-export const shaderToggleButton = document.getElementById("shader-toggle-btn");
+const fallingLeavesEnabledButton = document.getElementById("falling-leaves-enabled-btn");
+const leafSpawnRateSlider = document.getElementById("leaf-spawn-rate-slider");
+const leafSpawnRateLabel = document.getElementById("leaf-spawn-rate-label");
+const coniferSpawnRateSlider = document.getElementById("conifer-spawn-rate-slider");
+const coniferSpawnRateLabel = document.getElementById("conifer-spawn-rate-label");
+const leafSizeSlider = document.getElementById("leaf-size-slider");
+const leafSizeLabel = document.getElementById("leaf-size-label");
+const leafLifespanSlider = document.getElementById("leaf-lifespan-slider");
+const leafLifespanLabel = document.getElementById("leaf-lifespan-label");
+const leafParticleLimitSlider = document.getElementById("leaf-particle-limit-slider");
+const leafParticleLimitLabel = document.getElementById("leaf-particle-limit-label");
+const leafWindButton = document.getElementById("leaf-wind-btn");
+const leavesOnBreakButton = document.getElementById("leaves-on-break-btn");
+const leafBlockSelect = document.getElementById("leaf-block-select");
+const leafCustomRateButton = document.getElementById("leaf-custom-rate-btn");
+const leafCustomRateSlider = document.getElementById("leaf-custom-rate-slider");
+const leafCustomRateLabel = document.getElementById("leaf-custom-rate-label");
 export const difficultyToggleButton = document.getElementById("difficulty-toggle-btn");
 export const usernameInput = document.querySelector("#username-input");
 export const usernameFooter = document.querySelector("#username-footer");
@@ -83,8 +100,8 @@ export let currentSettings = {
     musicVolume: 100,
     sfxVolume: 100,
     lighting: true,
-    shader: "photon",
     renderer: "voxel",
+    fallingLeaves: normalizeFallingLeavesSettings(),
     username: "",
 };
 
@@ -158,10 +175,130 @@ export function toggleLighting() {
             (selectedDifficulty === "peaceful" ? "Peaceful" : "Easy");
 }
 
-export function cycleShader() {
-    currentSettings.shader = nextShaderMode(currentSettings.shader);
-    shaderToggleButton.textContent =
-        "Shaders - " + getShaderModeLabel(currentSettings.shader);
+function saveFallingLeavesSettings() {
+    currentSettings.fallingLeaves = normalizeFallingLeavesSettings(
+        currentSettings.fallingLeaves,
+    );
+    if (runtime.game?.settings) {
+        runtime.game.settings.fallingLeaves = structuredClone(currentSettings.fallingLeaves);
+    }
+    runtime.world?.fallingLeavesEmitter?.setSettings(currentSettings.fallingLeaves);
+    localStorage.setItem("settings", JSON.stringify(currentSettings));
+    updateFallingLeavesControls();
+}
+
+export function toggleFallingLeaves() {
+    currentSettings.fallingLeaves.enabled = !currentSettings.fallingLeaves.enabled;
+    saveFallingLeavesSettings();
+}
+
+export function toggleFallingLeavesSetting(setting) {
+    if (setting !== "windEnabled" && setting !== "leavesOnBlockHit") return;
+    currentSettings.fallingLeaves[setting] = !currentSettings.fallingLeaves[setting];
+    saveFallingLeavesSettings();
+}
+
+export function updateFallingLeavesSetting(setting, value) {
+    const numericSettings = new Set([
+        "leafSpawnRate",
+        "coniferLeafSpawnRate",
+        "leafSize",
+        "leafLifespan",
+        "maxParticles",
+    ]);
+    if (!numericSettings.has(setting)) return;
+    currentSettings.fallingLeaves[setting] = Number(value);
+    saveFallingLeavesSettings();
+}
+
+export function toggleLeafBlockRate() {
+    if (!leafBlockSelect?.value) return;
+    const blockId = leafBlockSelect.value;
+    const rates = { ...currentSettings.fallingLeaves.leafSpawnRates };
+    if (Object.hasOwn(rates, blockId)) {
+        delete rates[blockId];
+    } else {
+        const definition = blockMap.get(Number(blockId));
+        const profile = getFallingLeafProfile(Number(blockId), definition);
+        rates[blockId] = profile?.kind === "conifer"
+            ? currentSettings.fallingLeaves.coniferLeafSpawnRate
+            : profile?.kind === "large"
+                ? 0
+                : currentSettings.fallingLeaves.leafSpawnRate;
+    }
+    currentSettings.fallingLeaves.leafSpawnRates = rates;
+    saveFallingLeavesSettings();
+}
+
+export function updateLeafBlockRate(value) {
+    if (!leafBlockSelect?.value) return;
+    currentSettings.fallingLeaves.leafSpawnRates = {
+        ...currentSettings.fallingLeaves.leafSpawnRates,
+        [leafBlockSelect.value]: Number(value),
+    };
+    saveFallingLeavesSettings();
+}
+
+function updateLeafBlockRateControls() {
+    if (!leafBlockSelect || !leafCustomRateButton || !leafCustomRateSlider) return;
+    const selectedBlockId = leafBlockSelect.value;
+    const rates = currentSettings.fallingLeaves.leafSpawnRates;
+    const hasOverride = selectedBlockId !== "" &&
+        Object.hasOwn(rates, selectedBlockId);
+    leafCustomRateButton.setAttribute("aria-pressed", String(hasOverride));
+    leafCustomRateButton.textContent = `Custom Rate - ${hasOverride ? "On" : "Off"}`;
+    leafCustomRateSlider.disabled = !hasOverride;
+    const definition = blockMap.get(Number(selectedBlockId));
+    const profile = getFallingLeafProfile(Number(selectedBlockId), definition);
+    const inheritedRate = profile?.kind === "conifer"
+        ? currentSettings.fallingLeaves.coniferLeafSpawnRate
+        : profile?.kind === "large"
+            ? 0
+            : currentSettings.fallingLeaves.leafSpawnRate;
+    leafCustomRateSlider.value = hasOverride ? rates[selectedBlockId] : inheritedRate;
+    if (leafCustomRateLabel) {
+        leafCustomRateLabel.textContent = `Block Spawn Rate - ${leafCustomRateSlider.value}`;
+    }
+}
+
+function updateFallingLeavesControls() {
+    const settings = currentSettings.fallingLeaves;
+    if (fallingLeavesEnabledButton) {
+        fallingLeavesEnabledButton.textContent = `Falling Leaves - ${settings.enabled ? "On" : "Off"}`;
+        fallingLeavesEnabledButton.setAttribute("aria-pressed", String(settings.enabled));
+    }
+    if (leafSpawnRateSlider) leafSpawnRateSlider.value = settings.leafSpawnRate;
+    if (leafSpawnRateLabel) leafSpawnRateLabel.textContent = `Leaf Spawn Rate - ${settings.leafSpawnRate}`;
+    if (coniferSpawnRateSlider) coniferSpawnRateSlider.value = settings.coniferLeafSpawnRate;
+    if (coniferSpawnRateLabel) coniferSpawnRateLabel.textContent = `Conifer Spawn Rate - ${settings.coniferLeafSpawnRate}`;
+    if (leafSizeSlider) leafSizeSlider.value = settings.leafSize;
+    if (leafSizeLabel) leafSizeLabel.textContent = `Leaf Size - ${settings.leafSize}`;
+    if (leafLifespanSlider) leafLifespanSlider.value = settings.leafLifespan;
+    if (leafLifespanLabel) leafLifespanLabel.textContent = `Leaf Lifetime - ${settings.leafLifespan / 20} s`;
+    if (leafParticleLimitSlider) leafParticleLimitSlider.value = settings.maxParticles;
+    if (leafParticleLimitLabel) leafParticleLimitLabel.textContent = `Particle Limit - ${settings.maxParticles}`;
+    if (leafWindButton) {
+        leafWindButton.textContent = `Wind - ${settings.windEnabled ? "On" : "Off"}`;
+        leafWindButton.setAttribute("aria-pressed", String(settings.windEnabled));
+    }
+    if (leavesOnBreakButton) {
+        leavesOnBreakButton.textContent = `Leaves on Block Break - ${settings.leavesOnBlockHit ? "On" : "Off"}`;
+        leavesOnBreakButton.setAttribute("aria-pressed", String(settings.leavesOnBlockHit));
+    }
+    updateLeafBlockRateControls();
+}
+
+function populateLeafBlockOptions() {
+    if (!leafBlockSelect) return;
+    const leafBlocks = [...blockMap.values()]
+        .filter(block => getFallingLeafProfile(block.blockId, block))
+        .sort((left, right) => left.name.localeCompare(right.name));
+    leafBlockSelect.replaceChildren(...leafBlocks.map(block => {
+        const option = document.createElement("option");
+        option.value = String(block.blockId);
+        option.textContent = block.name;
+        return option;
+    }));
 }
 
 export function saveSettings() {
@@ -179,7 +316,7 @@ export function saveSettings() {
 }
 
 export function setUsernameFooter(username) {
-    usernameFooter.textContent = `Current Username: ${username}`;
+    usernameFooter.textContent = `Current Player Name: ${username}`;
 }
 
 export function loadSettings() {
@@ -191,8 +328,8 @@ export function loadSettings() {
             settings.musicVolume ?? (settings.music === false ? 0 : 100);
         currentSettings.sfxVolume =
             settings.sfxVolume ?? (settings.sfx === false ? 0 : 100);
-        currentSettings.shader = normalizeShaderMode(settings.shader);
         currentSettings.renderer = settings.renderer === "canvas" ? "canvas" : "voxel";
+        currentSettings.fallingLeaves = normalizeFallingLeavesSettings(settings.fallingLeaves);
     }
 
     if (musicVolumeSlider) {
@@ -206,12 +343,11 @@ export function loadSettings() {
     }
     lightingToggleButton.textContent =
         "Lighting - " + (currentSettings.lighting ? "On" : "Off");
-    shaderToggleButton.textContent =
-        "Shaders - " + getShaderModeLabel(currentSettings.shader);
+    updateFallingLeavesControls();
 
     setUsernameFooter(currentSettings.username);
 
-    usernameInput.value = "";
+    usernameInput.value = currentSettings.username;
 }
 
 if (musicVolumeSlider) {
@@ -226,6 +362,27 @@ if (sfxVolumeSlider) {
         updateSFXVolume(value);
     });
 }
+
+populateLeafBlockOptions();
+leafBlockSelect?.addEventListener("change", updateLeafBlockRateControls);
+leafSpawnRateSlider?.addEventListener("input", () =>
+    updateFallingLeavesSetting("leafSpawnRate", leafSpawnRateSlider.value),
+);
+coniferSpawnRateSlider?.addEventListener("input", () =>
+    updateFallingLeavesSetting("coniferLeafSpawnRate", coniferSpawnRateSlider.value),
+);
+leafSizeSlider?.addEventListener("input", () =>
+    updateFallingLeavesSetting("leafSize", leafSizeSlider.value),
+);
+leafLifespanSlider?.addEventListener("input", () =>
+    updateFallingLeavesSetting("leafLifespan", leafLifespanSlider.value),
+);
+leafParticleLimitSlider?.addEventListener("input", () =>
+    updateFallingLeavesSetting("maxParticles", leafParticleLimitSlider.value),
+);
+leafCustomRateSlider?.addEventListener("input", () =>
+    updateLeafBlockRate(leafCustomRateSlider.value),
+);
 
 loadSettings();
 // initialize world-create difficulty button label
@@ -1288,7 +1445,10 @@ export function gotoWorldCreate() {
 }
 
 export function createNewWorld() {
-    if (!worldSeed) worldSeed = Math.floor(Math.random() * 100000000);
+    if (!String(worldSeed).trim()) {
+        worldSeed = randomMinecraftSeed();
+        worldSeedInput.value = worldSeed;
+    }
     if (!worldName) worldName = "New World";
 
     localStorage.setItem(
@@ -1461,7 +1621,7 @@ export function selectWorld(id, selectedElement) {
 }
 
 function isLocalNetworkHost(host) {
-    const normalizedHost = host.toLowerCase();
+    const normalizedHost = String(host).trim().toLowerCase();
     if (
         normalizedHost === "localhost" ||
         normalizedHost.endsWith(".localhost") ||
@@ -1471,7 +1631,12 @@ function isLocalNetworkHost(host) {
     }
 
     const octets = normalizedHost.split(".").map(Number);
-    if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    if (
+        octets.length !== 4 ||
+        octets.some(
+            (octet) => !Number.isInteger(octet) || octet < 0 || octet > 255,
+        )
+    ) {
         return false;
     }
 

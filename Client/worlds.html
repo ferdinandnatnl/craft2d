@@ -389,13 +389,47 @@
                         onclick="toggleLighting()"
                         >Lighting - ON</a
                     >
-                    <button
-                        type="button"
-                        class="btn"
-                        id="shader-toggle-btn"
-                        onclick="cycleShader()"
-                        >Shaders - Off</button
-                    >
+                    <details class="options-section" id="falling-leaves-settings">
+                        <summary>Falling Leaves...</summary>
+                        <button
+                            type="button"
+                            class="btn"
+                            id="falling-leaves-enabled-btn"
+                            aria-pressed="true"
+                            onclick="toggleFallingLeaves()"
+                        >Falling Leaves - On</button>
+                        <div class="slider-container">
+                            <label class="slider-label" id="leaf-spawn-rate-label" for="leaf-spawn-rate-slider">Leaf Spawn Rate - 20</label>
+                            <input type="range" class="slider-input" id="leaf-spawn-rate-slider" min="0" max="40" step="1" value="20" />
+                        </div>
+                        <div class="slider-container">
+                            <label class="slider-label" id="conifer-spawn-rate-label" for="conifer-spawn-rate-slider">Conifer Spawn Rate - 0</label>
+                            <input type="range" class="slider-input" id="conifer-spawn-rate-slider" min="0" max="40" step="1" value="0" />
+                        </div>
+                        <div class="slider-container">
+                            <label class="slider-label" id="leaf-size-label" for="leaf-size-slider">Leaf Size - 5</label>
+                            <input type="range" class="slider-input" id="leaf-size-slider" min="1" max="10" step="1" value="5" />
+                        </div>
+                        <div class="slider-container">
+                            <label class="slider-label" id="leaf-lifespan-label" for="leaf-lifespan-slider">Leaf Lifetime - 10 s</label>
+                            <input type="range" class="slider-input" id="leaf-lifespan-slider" min="100" max="600" step="20" value="200" />
+                        </div>
+                        <div class="slider-container">
+                            <label class="slider-label" id="leaf-particle-limit-label" for="leaf-particle-limit-slider">Particle Limit - 80</label>
+                            <input type="range" class="slider-input" id="leaf-particle-limit-slider" min="1" max="256" step="1" value="80" />
+                        </div>
+                        <button type="button" class="btn" id="leaf-wind-btn" aria-pressed="true" onclick="toggleFallingLeavesSetting('windEnabled')">Wind - On</button>
+                        <button type="button" class="btn" id="leaves-on-break-btn" aria-pressed="true" onclick="toggleFallingLeavesSetting('leavesOnBlockHit')">Leaves on Block Break - On</button>
+                        <div class="input-field-container">
+                            <label class="input-field-title" for="leaf-block-select">Leaf Block</label>
+                            <select class="input-field" id="leaf-block-select"></select>
+                        </div>
+                        <button type="button" class="btn" id="leaf-custom-rate-btn" aria-pressed="false" onclick="toggleLeafBlockRate()">Custom Rate - Off</button>
+                        <div class="slider-container">
+                            <label class="slider-label" id="leaf-custom-rate-label" for="leaf-custom-rate-slider">Block Spawn Rate - 0</label>
+                            <input type="range" class="slider-input" id="leaf-custom-rate-slider" min="0" max="40" step="1" value="0" disabled />
+                        </div>
+                    </details>
                     <a class="btn" onclick="showTexturePacks()"
                         >Texture Packs...</a
                     >
@@ -405,7 +439,7 @@
                     <a class="btn" onclick="showSkins()">Skins...</a>
 
                     <div class="input-field-container">
-                        <div class="input-field-title">Username</div>
+                        <div class="input-field-title">Player Name</div>
                         <input
                             class="input-field"
                             type="text"
@@ -415,7 +449,7 @@
                             autocomplete="off"
                         />
                         <div class="input-field-footer" id="username-footer">
-                            Will be used for multiplayer
+                            Shown above your player and used in multiplayer
                         </div>
                     </div>
 

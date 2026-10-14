@@ -63,7 +63,7 @@ export class Biome {
 }
 
 export const BiomeMobs = Object.freeze({
-    CommonMobs: ["Pig", "Cow", "Sheep"],
+    CommonMobs: ["Pig", "Cow", "Sheep", "Chicken"],
     Googlies: ["Zombie", "Zombie", "Skeleton", "Creeper", "Enderman"],
 });
 
@@ -107,7 +107,7 @@ export const OverworldBiomes = Object.freeze({
         maxMount: 0.45,
     }),
     Tundra: new Biome({
-        name: "Tundra",
+        name: "Snowy Taiga",
         heightNoise: NoisePresets.Flat,
         topLayer: Blocks.SnowedGrassBlock,
         secondLayer: Blocks.Dirt,
@@ -137,7 +137,7 @@ export const OverworldBiomes = Object.freeze({
         maxMount: 0.6,
     }),
     Shrubland: new Biome({
-        name: "Shrubland",
+        name: "Windswept Forest",
         heightNoise: NoisePresets.SmallHills,
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,
@@ -148,8 +148,8 @@ export const OverworldBiomes = Object.freeze({
         maxTemp: 0.85,
         minWet: 0.1,
         maxWet: 0.4,
-        minMount: 0,
-        maxMount: 0.45,
+        minMount: 0.55,
+        maxMount: 0.85,
     }),
     Savanna: new Biome({
         name: "Savanna",
@@ -193,7 +193,7 @@ export const OverworldBiomes = Object.freeze({
         maxMount: 0.45,
     }),
     SeasonalForest: new Biome({
-        name: "Seasonal Forest",
+        name: "Flower Forest",
         heightNoise: NoisePresets.SmallHills,
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,
@@ -224,6 +224,7 @@ export const OverworldBiomes = Object.freeze({
     Swamp: new Biome({
         name: "Swamp",
         heightNoise: NoisePresets.Flat,
+        mobs: ["Pig", "Cow", "Sheep", "Chicken", "Crocodile", "Caiman"],
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,
         treeType: [Trees.Oak],
@@ -239,7 +240,7 @@ export const OverworldBiomes = Object.freeze({
         googlies: ["Zombie", "Drowned", "Drowned", "Skeleton", "Creeper"],
     }),
     RainForest: new Biome({
-        name: "Rain Forest",
+        name: "Jungle",
         heightNoise: NoisePresets.LowHills,
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,
@@ -254,7 +255,7 @@ export const OverworldBiomes = Object.freeze({
         maxMount: 0.5,
     }),
     Mountain: new Biome({
-        name: "Mountain",
+        name: "Stony Peaks",
         heightNoise: NoisePresets.Mountains,
         topLayer: Blocks.Stone,
         secondLayer: Blocks.Stone,
@@ -269,7 +270,7 @@ export const OverworldBiomes = Object.freeze({
         maxMount: 1,
     }),
     CherryBlossom: new Biome({
-        name: "Cherry Blossom",
+        name: "Cherry Grove",
         heightNoise: NoisePresets.SmallHills,
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,
@@ -285,8 +286,8 @@ export const OverworldBiomes = Object.freeze({
         maxTemp: 0.5,
         minWet: 0.3,
         maxWet: 0.8,
-        minMount: 0.2,
-        maxMount: 0.45,
+        minMount: 0.55,
+        maxMount: 0.9,
     }),
 });
 
@@ -351,7 +352,15 @@ export const AllBiomes = Object.freeze({
 export function resolveBiome(biomeSet, savedBiome) {
     const name = typeof savedBiome === "string"
         ? savedBiome : savedBiome?.name;
+    const vanillaName = {
+        Tundra: "Snowy Taiga",
+        Shrubland: "Windswept Forest",
+        "Seasonal Forest": "Flower Forest",
+        "Rain Forest": "Jungle",
+        Mountain: "Stony Peaks",
+        "Cherry Blossom": "Cherry Grove",
+    }[name] ?? name;
     return biomeSet[name] ??
-        Object.values(biomeSet).find((biome) => biome.name === name) ??
+        Object.values(biomeSet).find((biome) => biome.name === vanillaName) ??
         null;
 }

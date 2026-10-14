@@ -24,7 +24,11 @@ function crossesTarget(projectile, target, previous) {
 }
 
 export class MutantBoneArrow extends Projectile {
-    constructor(world, { position = new Vector2(), velocity = new Vector2() } = {}) {
+    constructor(world, {
+        position = new Vector2(),
+        velocity = new Vector2(),
+        ownerUUID = null,
+    } = {}) {
         super(world, {
             name: "Mutant Arrow",
             position,
@@ -36,6 +40,7 @@ export class MutantBoneArrow extends Projectile {
             hitbox: new Vector2(BLOCK_SIZE / 5, BLOCK_SIZE / 5),
         });
         this.entityTypeName = "MutantBoneArrow";
+        this.ownerUUID = ownerUUID;
         this.trail = [];
         this.expiresAt = runtime.passedTime + 4;
     }
@@ -47,7 +52,8 @@ export class MutantBoneArrow extends Projectile {
         const hitPlayer = !this.wasColliding && player?.dimension === this.dimension &&
             player.abilities.hasHealth && crossesTarget(this, player, previous);
         if (hitPlayer) {
-            player.hit(this.damage, this.position.x, 2, "Shot by a Mutant Skeleton");
+            const owner = this.world.entities.find(entity => entity.UUID === this.ownerUUID);
+            player.hit(this.damage, this.position.x, 2, "Shot by a Mutant Skeleton", owner);
             this.dieEvent();
         } else if (this.wasColliding || runtime.passedTime >= this.expiresAt) {
             this.dieEvent();

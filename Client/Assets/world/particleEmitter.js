@@ -192,3 +192,54 @@ export function createParticleEmitterAtPlayer(
 
     emitter.emitBurst();
 }
+
+export function createWaterSplash(x, y, impact = 1) {
+    const strength = Math.max(0.45, Math.min(1.8, Number(impact) || 1));
+    const spray = (direction, count) => {
+        const emitter = createParticleEmitter({
+            x,
+            y,
+            radius: 0.23,
+            direction,
+            type: null,
+            maxParticles: count,
+            speed: 72 * strength,
+            gravity: 360,
+            initialVelocity: new Vector2(0, -42 * strength),
+            fadeOutTime: 520,
+            color: "#a9ecf5",
+            randomScale: true,
+            range: 4,
+            lighting: true,
+            scale: 5,
+        });
+        emitter.emitAndDie();
+    };
+
+    // Two narrow sprays keep the burst readable in the side-on world.
+    spray(180, Math.round(4 + strength * 2));
+    spray(270, Math.round(4 + strength * 2));
+
+    const foam = (direction) => {
+        const emitter = createParticleEmitter({
+            x,
+            y: y + 2,
+            radius: 0,
+            direction,
+            type: null,
+            maxParticles: Math.round(3 + strength),
+            speed: 42 * strength,
+            gravity: 0,
+            fadeOutTime: 300,
+            color: "#d5f8fb",
+            randomScale: true,
+            range: 7,
+            lighting: true,
+            scale: 3,
+        });
+        emitter.emitAndDie();
+    };
+
+    foam(0);
+    foam(180);
+}

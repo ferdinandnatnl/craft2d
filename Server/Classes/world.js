@@ -1,9 +1,12 @@
 import { Dimension } from "./dimension.js";
-import { RandomRange } from "./helper.js";
+import { randomMinecraftSeed } from "@2dcraft.com/shared/seed.js";
+import { WeatherCycle } from "@2dcraft.com/shared/weather.js";
 
 export class World {
     constructor() {
-        this.seed = Math.floor(RandomRange(-1000000, 1000000));
+        this.seed = randomMinecraftSeed();
+        this.time = 1;
+        this.weather = new WeatherCycle(this.seed);
         this.dimensions = [
             new Dimension("Overworld"),
             new Dimension("Nether"),
@@ -18,12 +21,21 @@ export class World {
         return this.dimensions[index];
     }
 
+    setSeed(seed) {
+        this.seed = String(seed ?? 0);
+        this.weather.setSeed(this.seed);
+    }
+
     loadWorld(world) {
         if (world == null) {
             return false;
         }
 
-        this.seed = world.seed;
+        this.setSeed(world.seed);
+        this.time = Number.isFinite(world.time)
+            ? Math.max(0, Math.min(8, world.time))
+            : 1;
+        this.weather.loadState(world.weather, this.seed);
         this.dimensions = [];
         for (let i = 0; i < world.dimensions.length; i++) {
             if (world.dimensions[i].name == null) return false;
@@ -60,6 +72,8 @@ export class World {
     saveWorld() {
         let world = {
             seed: this.seed,
+            time: this.time,
+            weather: this.weather.getState(),
             dimensions: [],
         };
         for (let i = 0; i < this.dimensions.length; i++) {

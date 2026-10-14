@@ -21,7 +21,19 @@ import { activeDimension, getDimensionChunks, gotoDimension } from "../world/dim
 import { nearestEndShrineX } from "@2dcraft.com/shared/endProgression.js";
 import { createParticleEmitter } from "../world/particleEmitter.js";
 import { countMobsNearPlayer, MAX_MOBS_NEAR_PLAYER } from "../world/mobLimits.js";
-import { handleMasterStaffAttack, handleMasterStaffInput, toggleMinionMenu } from "./minions/commands.js";
+import {
+    getMeleeAim,
+    getMeleeTargets,
+    getMeleeWeaponKey,
+    getMeleeWeaponProfile,
+    MeleeAttackClock,
+} from "./meleeCombat.js";
+import {
+    closeMinionMenu,
+    handleMasterStaffAttack,
+    handleMasterStaffInput,
+    toggleMinionMenu,
+} from "./minions/commands.js";
 
 export class Player extends Entity {
     constructor(
@@ -127,11 +139,12 @@ export class Player extends Entity {
         this.breakingStage = 0;
         this.breakingTime = 0;
         this.lastBreakSoundTime = 0;
-
         this.breakingTarget = null;
         this.breakingTargetBlockType = null;
         this.breakingTargetIsWall = false;
+        this.meleeAttackClock = new MeleeAttackClock();
         this.shieldBlocking = false;
+
         this.hoverBlock = null;
         this.oldHoverBlock = null;
 
@@ -319,6 +332,9 @@ export class Player extends Entity {
             return;
         }
 
+        const completedMeleeAttack = this.meleeAttackClock.update(runtime.deltaTime);
+        if (completedMeleeAttack) this.resolveMeleeAttack(completedMeleeAttack);
+
         this.interactLogic();
         this.climbingCollisingLogic();
         this.movementLogic();
@@ -348,8 +364,6 @@ export class Player extends Entity {
     }
 
     drawNameTag() {
-        if (!multiplayer) return;
-
         const nameTagOffset = 0.3 * BLOCK_SIZE;
         const nameTagPosition = new Vector2(
             this.position.x + this.hitbox.x / 2 - camera.x,
@@ -434,6 +448,21 @@ export class Player extends Entity {
         if (movementX !== 0) this.direction = Math.sign(movementX);
         this.position = data.position;
 
+        if (Number.isInteger(data.gamemode) && data.gamemode >= 0 && data.gamemode <= 3) {
+            if (!this.isLocal() && data.gamemode !== this.gamemode) {
+                this.setGamemode(data.gamemode);
+            } else {
+                this.gamemode = data.gamemode;
+            }
+        }
+        if (Number.isFinite(data.health)) {
+            this.health = Math.max(0, Math.min(20, data.health));
+            if (!this.isLocal()) this.isDead = this.health <= 0;
+        }
+        if (Number.isFinite(data.food)) {
+            this.foodLevel = Math.max(0, Math.min(20, data.food));
+            this.food = this.foodLevel;
+        }
         this.holdItem = new InventoryItem(data.holdItem);
         this.shieldBlocking = data.shieldBlocking === true;
 
@@ -606,8 +635,27 @@ export class Player extends Entity {
         if (!damage) return;
         if (!this.health) return;
         if (!this.abilities.hasHealth) return;
+        if (multiplayer && !this.isLocal()) {
+            const localPlayer = runtime.world?.player;
+            if (!localPlayer || !runtime.server) return;
+            runtime.server.send({
+                type: "playerHit",
+                sender: localPlayer.UUID,
+                message: {
+                    targetUUID: this.UUID,
+                    damage,
+                    hitfromX,
+                    knockback: kb,
+                    cause: typeof cause === "string" ? cause.slice(0, 80) : null,
+                    ...(attacker?.type === EntityTypes.Mob
+                        ? { sourceMobUUID: attacker.UUID }
+                        : {}),
+                },
+            });
+            return;
+        }
         if (this.hurtCooldown) return;
-        if (this.canBlockDamage(hitfromX, attacker, cause)) {
+        if (this.canBlockDamage(hitfromX, attacker)) {
             this.hurtCooldown = 0.3;
             this.shieldBlocking = true;
             this.holdItem = this.getSelectedSlotItem();
@@ -617,6 +665,7 @@ export class Player extends Entity {
         }
         if (cause) this.deathCause = cause;
         if (!this.damage(damage, attacker)) return;
+        if (multiplayer && this.isLocal()) this.mutliplayerSyncPlayerState();
         if (this.invulnerable) return;
         this.knockBack(hitfromX, kb);
 
@@ -645,16 +694,10 @@ export class Player extends Entity {
         return selectedItem?.itemId === Items.Shield && selectedItem.count > 0;
     }
 
-    canBlockDamage(hitfromX, attacker, cause) {
-        if (!this.isShieldRaised() || attacker === this) return false;
-        if (
-            cause === "Drowned" ||
-            cause === "Burned to death" ||
-            cause === "Fell out of the world" ||
-            cause === "Fell from a high place"
-        ) return false;
+    canBlockDamage(hitfromX, attacker) {
+        if (!this.isShieldRaised() || !attacker || attacker === this) return false;
 
-        const sourceX = Number.isFinite(attacker?.position?.x)
+        const sourceX = Number.isFinite(attacker.position?.x)
             ? attacker.position.x + (attacker.hitbox?.x ?? 0) / 2
             : Number.isFinite(hitfromX) && hitfromX !== 0
               ? hitfromX
@@ -746,6 +789,11 @@ export class Player extends Entity {
             return;
         }
 
+        if (item.itemId === Items.BoneMeal) {
+            this.useBoneMeal();
+            return;
+        }
+
         if (item.foodValue > 0) {
             this.eatFoodInHand();
             return;
@@ -829,6 +877,9 @@ export class Player extends Entity {
                 myChunkX: chunk.x,
                 dimension: activeDimension,
                 ...(entityTypeName === "Catfish" ? { catfishSize } : {}),
+                ...(entityTypeName === "Chicken"
+                    ? { layEggTimer: randomRange(6_000, 12_000) }
+                    : {}),
             },
             multiplayer,
         );
@@ -1102,6 +1153,13 @@ export class Player extends Entity {
         this.reduceDurability();
 
         this.world.setBlockType(this.hoverBlock, Blocks.Farmland);
+    }
+
+    useBoneMeal() {
+        if (!this.hoverBlock?.applyBoneMeal?.()) return;
+        this.playerSwing();
+        if (!this.abilities.instaBuild) this.removeFromCurrentSlot();
+        this.inventory.syncInventoryMultiplayer();
     }
 
     throwProjectile(item) {
@@ -1389,6 +1447,13 @@ export class Player extends Entity {
         }
 
         runtime.game.chat.message("Player has died.");
+
+        if (this.windowOpen && runtime.GAMERULES.keepInventory) {
+            this.closeInventory();
+        }
+        if (this.minionMenuOpen) closeMinionMenu(this);
+        if (runtime.game.chat.inChat) runtime.game.chat.closeChat();
+        if (runtime.game.pauseMenu?.getActive()) runtime.game.pauseMenu.close();
 
         playRandomSoundFromArray({
             array: Sounds.Player_Hurt,
@@ -1747,9 +1812,63 @@ export class Player extends Entity {
             return;
         }
 
-        if (input.isActionPressed("attack")) {
-            this.playerSwing();
-            this.tryHit();
+        const heldItem = this.holdItem?.itemId != null
+            ? getItem(this.holdItem.itemId)
+            : null;
+        const swordSelected = heldItem?.toolType === ToolType.Sword ||
+            this.inventory.selectedItem?.toolType === ToolType.Sword;
+        const attackPressed = input.isActionPressed("attack");
+        const attackDown = input.isActionDown("attack");
+        let meleeTargetInRange = false;
+        if (attackPressed || attackDown) {
+            const profile = getMeleeWeaponProfile(heldItem);
+            const weaponKey = getMeleeWeaponKey(this.holdItem);
+            const origin = new Vector2(
+                this.position.x + this.hitbox.x / 2,
+                this.position.y + this.hitbox.y / 2,
+            );
+            const aim = getMeleeAim(
+                origin,
+                input.getMouseWorldPosition(),
+                this.direction,
+            );
+            const nextAttack = this.meleeAttackClock.peek(profile, weaponKey);
+            const inRangeTargets = getMeleeTargets({
+                attacker: this,
+                entities: this.entities,
+                origin,
+                aim,
+                profile,
+                attack: nextAttack,
+                blockSize: BLOCK_SIZE,
+                dimension: this.dimension,
+            });
+            meleeTargetInRange = inRangeTargets.length > 0;
+            if (
+                this.meleeAttackClock.canStart() &&
+                (meleeTargetInRange || !this.hoverBlock || swordSelected)
+            ) {
+                const damage = this.calculateDamage() *
+                    (nextAttack.damageMultiplier || 1);
+                if (this.meleeAttackClock.start(
+                    profile,
+                    weaponKey,
+                    aim,
+                    damage,
+                    this.holdItem,
+                )) {
+                    this.playerSwing();
+                    if (swordSelected) {
+                        this.body.swordSwing = {
+                            weaponId: this.holdItem?.itemId,
+                            startedAt: runtime.passedTime,
+                            duration: 1 / Math.max(0.1, profile.attackSpeed),
+                            aim: { ...aim },
+                            facing: this.direction,
+                        };
+                    }
+                }
+            }
         }
 
         if (!this.hoverBlock) {
@@ -1757,7 +1876,13 @@ export class Player extends Entity {
             return;
         }
 
-        if (input.isActionDown("attack")) {
+        const cursorEntity = this.checkForEntityOnMouse();
+        const attackingEntityAtCursor = cursorEntity &&
+            cursorEntity !== this && cursorEntity.health > 0;
+        if (
+            attackDown && !swordSelected && !attackingEntityAtCursor &&
+            !meleeTargetInRange
+        ) {
             if (
                 this.inventory.selectedItem &&
                 this.inventory.selectedItem.toolType === ToolType.Hammer
@@ -1789,51 +1914,48 @@ export class Player extends Entity {
         );
     }
 
-    tryHit() {
-        const entity = this.checkForEntityOnMouse();
-        runtime.cursorInRange = entity
-            ? this.isEntityInInteractionRange(entity)
-            : this.isBlockInInteractionRange(this.hoverBlock);
-        if (!runtime.cursorInRange) return;
+    resolveMeleeAttack(attack) {
+        const origin = new Vector2(
+            this.position.x + this.hitbox.x / 2,
+            this.position.y + this.hitbox.y / 2,
+        );
+        if (getItem(attack.weaponItem?.itemId)?.toolType === ToolType.Sword) {
+            this.world?.addSwordSlashEffect?.(origin, attack.aim, this.dimension);
+        }
+        const targets = getMeleeTargets({
+            attacker: this,
+            entities: this.entities,
+            origin,
+            aim: attack.aim,
+            profile: { attackRange: attack.attackRange },
+            attack,
+            blockSize: BLOCK_SIZE,
+            dimension: this.dimension,
+        });
 
-        this.hitEntity(entity);
-    }
-
-    hitEntity(entity) {
-        if (!entity) return;
-
-        // console.log(entity);
-        if (entity === this) return;
-        if (!this.isEntityInInteractionRange(entity)) return;
-
-        const previousHealth = entity.health;
-        entity.hit(this.calculateDamage(), this.position.x, 4);
-        if (previousHealth > 0 && entity.health <= 0) this.gainExperienceLevel(1);
-
-        if (entity.health) {
-            let reduceDurabilityBy = 1;
-
-            switch (getItem(this.holdItem.itemId)?.toolType) {
-                case ToolType.Axe:
-                    reduceDurabilityBy = 2;
-                    break;
-                case ToolType.Pickaxe:
-                    reduceDurabilityBy = 2;
-                    break;
-                case ToolType.Shovel:
-                    reduceDurabilityBy = 2;
-                    break;
-                case ToolType.Hoe:
-                    reduceDurabilityBy = 2;
-                    break;
-                case ToolType.Hammer:
-                    reduceDurabilityBy = 2;
-                    break;
-                case ToolType.Shears:
-                    reduceDurabilityBy = 0;
-                    break;
+        for (const entity of targets) {
+            if (
+                multiplayer && !this.world?.isWorldAuthority &&
+                entity.type === EntityTypes.Mob && !entity.isMinion
+            ) {
+                runtime.server?.send({
+                    type: "mobHit",
+                    sender: this.UUID,
+                    message: {
+                        targetUUID: entity.UUID,
+                        damage: attack.damage,
+                        hitfromX: origin.x,
+                        knockback: 4,
+                    },
+                });
+                continue;
             }
+            const previousHealth = entity.health;
+            entity.hit(attack.damage, origin.x, 4, undefined, this);
+            if (previousHealth > 0 && entity.health <= 0) this.gainExperienceLevel(1);
+        }
 
+        if (targets.length > 0 && attack.weaponItem === this.holdItem) {
             this.reduceDurability();
         }
     }
@@ -1848,7 +1970,7 @@ export class Player extends Entity {
         let damage = 1;
 
         if (this.holdItem.itemId) {
-            damage += getItem(this.holdItem.itemId).baseDamage;
+            damage += getItem(this.holdItem.itemId)?.baseDamage || 0;
         }
 
         return damage;
@@ -2137,8 +2259,6 @@ export class Player extends Entity {
             }
         }
 
-        const isAdjacentToBlock = runtime.world.checkAdjacentBlocks(mousePos);
-
         const blockBeneath = runtime.world.getBlockAtWorldPosition(
             this.hoverBlock.transform.position.x,
             this.hoverBlock.transform.position.y + BLOCK_SIZE,
@@ -2207,7 +2327,7 @@ export class Player extends Entity {
                 return false;
         }
 
-        return (isAir || isFluid) && !collidingWithEntity && isAdjacentToBlock;
+        return (isAir || isFluid) && !collidingWithEntity;
     }
 
     dropLogic() {
@@ -2273,6 +2393,17 @@ export class Player extends Entity {
 
     breakingLogic(hover, wall = false) {
         if (!hover) {
+            this.resetBreaking();
+            return;
+        }
+
+        const heldItem = this.holdItem?.itemId != null
+            ? getItem(this.holdItem.itemId)
+            : null;
+        if (
+            this.inventory.selectedItem?.toolType === ToolType.Sword ||
+            heldItem?.toolType === ToolType.Sword
+        ) {
             this.resetBreaking();
             return;
         }

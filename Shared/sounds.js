@@ -74,23 +74,6 @@ export const Sounds = Object.freeze({
         "mobs/fish/hurt3",
         "mobs/fish/hurt4",
     ],
-    Centipede_Walk: [
-        "alexsmobs/centipede_walk_0",
-        "alexsmobs/centipede_walk_1",
-        "alexsmobs/centipede_walk_2",
-        "alexsmobs/centipede_walk_3",
-        "alexsmobs/centipede_walk_4",
-    ],
-    Centipede_Hurt: [
-        "alexsmobs/centipede_hurt_0",
-        "alexsmobs/centipede_hurt_1",
-        "alexsmobs/centipede_hurt_2",
-    ],
-    Centipede_Attack: [
-        "alexsmobs/centipede_attack_0",
-        "alexsmobs/centipede_attack_1",
-    ],
-
     // Mobs
     Pig_Say: ["mobs/pig/say1", "mobs/pig/say2", "mobs/pig/say3"],
     Pig_Step: [

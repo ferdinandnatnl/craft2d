@@ -2,7 +2,7 @@ import { BlockCategory, SpecialType } from "@2dcraft.com/shared/blockType.js";
 import { InventoryItem } from "@2dcraft.com/shared/inventoryItem.js";
 import { getBlock } from "../../world/block.js";
 import { Items } from "@2dcraft.com/shared/items.js";
-import { BLOCK_SIZE, CHUNK_WIDTH, multiplayer } from "../../utils/globals.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, multiplayer } from "../../utils/globals.js";
 import { Vector2 } from "../../utils/classes.js";
 import { runtime } from "../../utils/runtime.js";
 import { input } from "../../utils/input.js";
@@ -16,6 +16,8 @@ import { getMinionConfig } from "./config.js";
 const MAX_MINIONS = getMinionConfig().minionsPerPlayer;
 const EVIL_DEEDS_TO_UNLOCK = 4;
 const CHARGE_MILLISECONDS = 1000;
+const MAX_BLUEPRINT_SIDE = 32;
+const MAX_BLUEPRINT_BLOCKS = MAX_BLUEPRINT_SIDE * MAX_BLUEPRINT_SIDE * 2;
 const activeCharges = new WeakMap();
 let activeMenu = null;
 
@@ -143,7 +145,7 @@ function commandWorkers(player, task) {
         message("Summon a minion first.", Colors.Red);
         return false;
     }
-    if (["woodcut", "excavate", "mineshaft", "stripmine"].includes(task.type) &&
+    if (["woodcut", "excavate", "mineshaft", "stripmine", "build"].includes(task.type) &&
         !payBigOrderCost(player)) return false;
     const moveTargets = task.type === "move"
         ? getMoveFormationTargets(workers, task.target)
@@ -201,11 +203,17 @@ function getMoveFormationTargets(workers, target) {
 function setPending(player, order) {
     player.pendingMinionOrder = order;
     closeMinionMenu(player);
-    message(order.type === "excavate"
-        ? "Right click the first corner of the excavation area."
-        : order.type === "destination"
-            ? "Right click a chest or other storage block."
-            : `Right click the location for ${order.type}.`, Colors.Yellow);
+    const prompts = {
+        excavate: "Right-click the first corner of the area, then the opposite corner.",
+        destination: "Right-click a chest or other storage block.",
+        mineshaft: "Right-click the entrance. Minions dig a 3-block-high stairway; carried logs add overhead braces and torches light the tunnel.",
+        stripmine: "Right-click where the tunnel should start.",
+        move: "Right-click where the minions should gather.",
+        woodcut: "Right-click a log in the tree you want harvested.",
+        "mine-vein": "Right-click an ore block. Minions mine the nearest reachable blocks in its vein.",
+        build: "Right-click two opposite corners of a build, then the top-left point where it should be copied. Minions need matching blocks in their packs.",
+    };
+    message(prompts[order.type] || `Right-click the location for ${order.type}.`, Colors.Yellow);
 }
 
 function startAreaSelection(player, tile) {
@@ -266,6 +274,139 @@ function isPlayerNearTile(player, tile) {
     return Math.abs(x - tile.x) <= 1 && tile.y >= footY - 1 && tile.y <= footY + 1;
 }
 
+function isBlueprintBlock(block) {
+    const definition = getBlock(block?.blockType);
+    return Boolean(definition && !definition.air && !definition.fluid &&
+        definition.collision && !definition.specialType &&
+        !definition.extendedBlock && !block?.metaData?.storage);
+}
+
+function captureBlueprint(bounds, dimension) {
+    const blueprint = [];
+    for (let y = bounds.minY; y <= bounds.maxY; y++) {
+        for (let x = bounds.minX; x <= bounds.maxX; x++) {
+            for (const wall of [false, true]) {
+                const block = runtime.world.getBlockAtWorldPosition(
+                    x * BLOCK_SIZE,
+                    y * BLOCK_SIZE,
+                    wall,
+                    dimension,
+                );
+                if (!block) return { error: "Load every chunk in the template first." };
+                const definition = getBlock(block.blockType);
+                if (definition?.air) continue;
+                if (!isBlueprintBlock(block)) {
+                    return { error: "Templates can use solid blocks only. Remove fluids, containers, doors, and plants first." };
+                }
+                blueprint.push({
+                    x: x - bounds.minX,
+                    y: y - bounds.minY,
+                    blockType: block.blockType,
+                    wall,
+                });
+                if (blueprint.length > MAX_BLUEPRINT_BLOCKS) {
+                    return { error: "That template is too large. Select an area no bigger than 32 by 32." };
+                }
+            }
+        }
+    }
+    return blueprint.length
+        ? { blueprint, width: bounds.maxX - bounds.minX + 1, height: bounds.maxY - bounds.minY + 1 }
+        : { error: "The selected area has no solid blocks to copy." };
+}
+
+function startBlueprintOrder(player, tile) {
+    const pending = player.pendingMinionOrder;
+    if (!pending.firstCorner) {
+        pending.firstCorner = tile;
+        message("Right-click the opposite corner of the build to copy.", Colors.Yellow);
+        return true;
+    }
+
+    if (!pending.blueprint) {
+        const bounds = {
+            minX: Math.min(pending.firstCorner.x, tile.x),
+            maxX: Math.max(pending.firstCorner.x, tile.x),
+            minY: Math.min(pending.firstCorner.y, tile.y),
+            maxY: Math.max(pending.firstCorner.y, tile.y),
+        };
+        if (bounds.maxX - bounds.minX + 1 > MAX_BLUEPRINT_SIDE ||
+            bounds.maxY - bounds.minY + 1 > MAX_BLUEPRINT_SIDE) {
+            pending.firstCorner = null;
+            message("Build templates must fit inside 32 by 32 blocks. Choose the first corner again.", Colors.Red);
+            return false;
+        }
+        const result = captureBlueprint(bounds, player.dimension ?? activeDimension);
+        if (result.error) {
+            pending.firstCorner = null;
+            message(result.error, Colors.Red);
+            return false;
+        }
+        Object.assign(pending, result, { sourceBounds: bounds });
+        message(`Build copied (${result.width} by ${result.height}). Right-click its top-left build point. Minions need matching blocks in their packs.`, Colors.Yellow);
+        return true;
+    }
+
+    const workers = ownerMinions(player);
+    if (!workers.length) {
+        message("Summon a minion first.", Colors.Red);
+        return false;
+    }
+    const dimension = player.dimension ?? activeDimension;
+    const required = new Map();
+    for (const entry of pending.blueprint) {
+        const target = { x: tile.x + entry.x, y: tile.y + entry.y };
+        if (Math.abs(target.x) > 1_000_000 || target.y < 0 || target.y >= CHUNK_HEIGHT) {
+            message("That build would go outside the world.", Colors.Red);
+            return false;
+        }
+        const block = runtime.world.getBlockAtWorldPosition(
+            target.x * BLOCK_SIZE,
+            target.y * BLOCK_SIZE,
+            entry.wall,
+            dimension,
+        );
+        const existing = getBlock(block?.blockType);
+        if (!block || !existing ||
+            (!existing.air && !existing.replaceable && block.blockType !== entry.blockType)) {
+            message("Clear the build area first. Minions will not replace existing blocks.", Colors.Red);
+            return false;
+        }
+        if (block.blockType !== entry.blockType) {
+            required.set(entry.blockType, (required.get(entry.blockType) || 0) + 1);
+        }
+    }
+
+    const available = new Map();
+    for (const worker of workers) {
+        for (const item of worker.inventory) {
+            if (item.blockId === null || item.count <= 0) continue;
+            available.set(item.blockId, (available.get(item.blockId) || 0) + item.count);
+        }
+    }
+    const shortage = [...required].find(([blockType, count]) =>
+        (available.get(blockType) || 0) < count,
+    );
+    if (shortage) {
+        const [blockType, count] = shortage;
+        const name = getBlock(blockType)?.name || "blocks";
+        const have = available.get(blockType) || 0;
+        message(`Need ${count} ${name}; minions carry ${have}. Drop more blocks near them, then right-click the build point again.`, Colors.Red);
+        return false;
+    }
+
+    const assigned = commandWorkers(player, {
+        type: "build",
+        target: tile,
+        blueprint: pending.blueprint,
+    });
+    if (assigned) {
+        player.pendingMinionOrder = null;
+        message("Minions are building the copied structure.", Colors.Green);
+    }
+    return assigned;
+}
+
 function orderCarry(player, target) {
     const workers = ownerMinions(player);
     if (!workers.length) return message("Summon a minion first.", Colors.Red);
@@ -284,7 +425,26 @@ function handleContextOrder(player, point = null) {
     const { tile, block } = readClickTarget(player, point);
     const pending = player.pendingMinionOrder;
     if (pending?.type === "excavate") return startAreaSelection(player, tile);
+    if (pending?.type === "build") return startBlueprintOrder(player, tile);
     if (pending?.type === "destination") return setDeliveryDestination(player, tile, block);
+    if (pending?.type === "woodcut" || pending?.type === "mine-vein") {
+        const isValidTarget = pending.type === "woodcut" ? isWood(block) : isOre(block);
+        if (!isValidTarget) {
+            message(pending.type === "woodcut"
+                ? "Choose a log from the tree to harvest."
+                : "Choose an ore block to mine its vein.", Colors.Red);
+            return false;
+        }
+        player.pendingMinionOrder = null;
+        const task = pending.type === "woodcut"
+            ? { type: "woodcut", target: tile }
+            : { type: "mine-vein", target: tile, blockType: block.blockType };
+        const assigned = commandWorkers(player, task);
+        if (assigned) message(pending.type === "woodcut"
+            ? "Minions are harvesting the selected tree."
+            : "Minions are mining the connected ore vein.", Colors.Green);
+        return assigned;
+    }
     if (pending?.type === "mineshaft" || pending?.type === "stripmine") {
         const type = pending.type;
         player.pendingMinionOrder = null;
@@ -463,11 +623,12 @@ export function toggleMinionMenu(player) {
             }
         }
     } else {
+        const workers = ownerMinions(player);
         const count = document.createElement("p");
-        count.textContent = `Minions ${ownerMinions(player).length}/${MAX_MINIONS}`;
+        count.textContent = `Minions ${workers.length}/${MAX_MINIONS}`;
         panel.append(count);
         addButton(panel, "Summon a minion", () => spawnMinion(player),
-            ownerMinions(player).length >= MAX_MINIONS);
+            workers.length >= MAX_MINIONS);
         addButton(panel, "Follow me", () => {
             commandWorkers(player, { type: "follow" });
             closeMinionMenu(player);
@@ -477,7 +638,8 @@ export function toggleMinionMenu(player) {
             closeMinionMenu(player);
         });
         addButton(panel, "Set delivery chest", () => setPending(player, { type: "destination" }));
-        addButton(panel, "Dig a mineshaft", () => setPending(player, { type: "mineshaft" }));
+        addButton(panel, "Build a structure", () => setPending(player, { type: "build" }));
+        addButton(panel, "Build a mineshaft", () => setPending(player, { type: "mineshaft" }));
         addButton(panel, "Strip mine", () => setPending(player, { type: "stripmine" }));
         addButton(panel, "Excavate an area", () => setPending(player, { type: "excavate" }));
         addButton(panel, "Move to a location", () => setPending(player, { type: "move" }));
@@ -516,7 +678,7 @@ export function toggleMinionMenu(player) {
         escapeHandler,
         returnFocus: document.activeElement,
     };
-    panel.querySelector("button")?.focus();
+    panel.querySelector("button:not(:disabled)")?.focus();
 }
 
 function addButton(panel, label, action, disabled = false) {

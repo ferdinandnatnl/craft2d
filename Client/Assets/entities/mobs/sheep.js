@@ -7,6 +7,13 @@ import { Sounds, playPositionalSound, playRandomSoundFromArray } from "../../gam
 import { Vector2, randomRange } from "../../utils/classes.js";
 import { BLOCK_SIZE } from "../../utils/globals.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
+import {
+    initializeBreedableAnimal,
+    interactWithBreedableAnimal,
+    tickBreedableAnimal,
+} from "./animalBehavior.js";
+
+const BREEDING_FOOD = new Set([Items.Wheat]);
 
 export class Sheep extends Mob {
     static spawnSize = Object.freeze({ width: 0.9, height: 1 });
@@ -19,6 +26,11 @@ export class Sheep extends Mob {
             position = new Vector2(),
             invulnerable = false,
             myChunkX = 0,
+            babyAgeTicks = 0,
+            loveTicks = 0,
+            breedingCooldown = 0,
+            hasWool = true,
+            woolTimer = 0,
             body = createSheepBody(),
         } = {}
     ) {
@@ -45,8 +57,16 @@ export class Sheep extends Mob {
             ]),
         });
 
-        this.hasWool = true;
-        this.woolTimer = 0;
+        initializeBreedableAnimal(this, {
+            babyAgeTicks,
+            loveTicks,
+            breedingCooldown,
+            adultWidth: Sheep.spawnSize.width * BLOCK_SIZE,
+            adultHeight: Sheep.spawnSize.height * BLOCK_SIZE,
+            foodItems: BREEDING_FOOD,
+        });
+        this.hasWool = Boolean(hasWool);
+        this.woolTimer = Math.max(0, Math.floor(woolTimer));
     }
 
     update() {
@@ -58,6 +78,7 @@ export class Sheep extends Mob {
         this.entityTickUpdate();
 
         this.woolLogic();
+        tickBreedableAnimal(this, Sheep);
     }
 
     woolLogic() {
@@ -116,8 +137,10 @@ export class Sheep extends Mob {
     }
 
     interact(player, item) {
-        if (item.itemId !== Items.Shears) return;
-        if (!this.hasWool) return;
+        if (item?.itemId !== Items.Shears) {
+            return interactWithBreedableAnimal(this, player, item, BREEDING_FOOD);
+        }
+        if (!this.hasWool) return true;
 
         this.world.summonEntity(
             Drop,
@@ -136,7 +159,7 @@ export class Sheep extends Mob {
     }
 
     dieEvent() {
-        this.dropLoot();
+        if (!this.isBaby) this.dropLoot();
         playRandomSoundFromArray({
             array: Sounds.Sheep_Say,
             positional: true,

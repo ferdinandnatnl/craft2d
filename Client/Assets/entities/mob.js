@@ -4,6 +4,10 @@ import { Entity, EntityTypes } from "../game/entity.js";
 import { playRandomSoundFromArray } from "../game/sounds.js";
 import { Vector2, caculateDirection, randomRange } from "../utils/classes.js";
 import { BLOCK_SIZE } from "../utils/globals.js";
+import {
+    applyBreedableAnimalState,
+    followAnimalFood,
+} from "./mobs/animalBehavior.js";
 
 export class Mob extends Entity {
     constructor(
@@ -88,18 +92,28 @@ export class Mob extends Entity {
         this.isHostile = isHostile;
     }
 
+    get isBaby() {
+        return (this.babyAgeTicks ?? 0) > 0;
+    }
+
+    syncBreedableAnimalState(state) {
+        applyBreedableAnimalState(this, state);
+    }
+
     aiUpdate() {
         if (this.isHostile && this.world.difficulty === "peaceful") {
             this.world.removeEntity(this);
             return;
         }
 
-        switch (this.state) {
-            case aiState.Wander:
-                this.passiveWander();
-                break;
-            case aiState.Agression:
-                this.agressionWalk();
+        if (!followAnimalFood(this)) {
+            switch (this.state) {
+                case aiState.Wander:
+                    this.passiveWander();
+                    break;
+                case aiState.Agression:
+                    this.agressionWalk();
+            }
         }
 
         if (this.burnInSunlight) {
@@ -138,7 +152,7 @@ export class Mob extends Entity {
     }
 
     agressionBehaviour() {
-        if (this.getRetaliationTarget()) {
+        if (this.getAgressionTarget()) {
             this.state = aiState.Agression;
             return;
         }
@@ -162,7 +176,7 @@ export class Mob extends Entity {
     }
 
     agressionWalk() {
-        const target = this.getRetaliationTarget() ?? this.world.player;
+        const target = this.getAgressionTarget() ?? this.world.player;
         if (!target || (target.type === EntityTypes.Player &&
             !target.abilities.hasHealth)) return;
 
@@ -187,6 +201,10 @@ export class Mob extends Entity {
 
         this.targetVelocity.x =
             (this.direction < 0 ? -this.speed : this.speed) * BLOCK_SIZE;
+    }
+
+    getAgressionTarget() {
+        return this.getRetaliationTarget();
     }
 
     getRetaliationTarget() {
@@ -224,7 +242,7 @@ export class Mob extends Entity {
 
     attackRetaliationTarget() {
         if (!this.isHostile || this.noAi || this.attackCooldown > 0) return;
-        const target = this.getRetaliationTarget();
+        const target = this.getAgressionTarget();
         if (!target) return;
 
         const overlaps =
@@ -313,7 +331,7 @@ export class Mob extends Entity {
     jump() {
         if (!this.grounded) return;
 
-        this.velocity.y = -9 * BLOCK_SIZE;
+        this.velocity.y = -8 * BLOCK_SIZE;
     }
 
     resetMoveTime() {

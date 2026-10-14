@@ -5,7 +5,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import tooloud from "@2dcraft.com/shared/tooloud.js";
-import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, TERRAIN_HEIGHT, RENDER_DISTANCE } from "../utils/globals.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, TERRAIN_HEIGHT, WATER_LEVEL } from "../utils/globals.js";
 import { getBlock, SpecialType } from "../world/block.js";
 import { getDimension, getDimensionChunks, Dimensions } from "../world/dimension.js";
 import { VolumetricSky } from "./volumetricSky.js";
@@ -13,6 +13,11 @@ import { VoxelMaterials, FaceBatch } from "./materials.js";
 import { VoxelEntities } from "./entities.js";
 import { syncSliceCamera } from "./projection.js";
 import { terrainColumnFaces, terrainSkyExposure, scenerySeed } from "./heightfield.js";
+import {
+    getDistantLodDepth,
+    getDistantLodStep,
+    sampleDistantLodCell,
+} from "./distantTerrainLod.js";
 import { renderLightTint } from "./renderLight.js";
 import { daylightFactor } from "../utils/daylight.js";
 
@@ -23,6 +28,9 @@ const DAY_AMBIENT = new THREE.Color(0xc2d7f2);
 const DAY_FOG = new THREE.Color(0xb9cbd6);
 const DUSK_FOG = new THREE.Color(0x947b83);
 const NIGHT_FOG = new THREE.Color(0x233954);
+const SCENERY_DEPTH = 160;
+const PLAY_PLANE_Z = 0.5;
+const DISTANT_LOD_PLANE_Z = -1.3;
 const noise = (x, z) => tooloud.Perlin.noise(x * 0.035, z * 0.035, 311);
 const random = (x, z) => {
     const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
@@ -54,8 +62,12 @@ export class VoxelRenderer {
         this.sceneryChunks = new Map();
         this.foregroundWater = [];
         this.backgroundWater = [];
+        this.sceneryWaterDirty = true;
         this.waterSources = null;
         this.waterHasContent = false;
+        this.renderWidth = 0;
+        this.renderHeight = 0;
+        this.renderPixelRatio = 0;
         canvas?.addEventListener("webglcontextlost", (event) => {
             event.preventDefault(); this.supported = false;
         });
@@ -64,20 +76,27 @@ export class VoxelRenderer {
         });
     }
 
+    getDevicePixelRatio() {
+        return Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+    }
+
     initialize() {
         if (this.initialized || this.failed || !this.canvas) return this.supported;
         try {
             this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
-            this.renderer.setPixelRatio(1);
+            this.renderPixelRatio = this.getDevicePixelRatio();
+            this.renderer.setPixelRatio(this.renderPixelRatio);
             this.renderer.setSize(1920, 1080, false);
+            this.renderWidth = 1920;
+            this.renderHeight = 1080;
             this.renderer.outputColorSpace = THREE.SRGBColorSpace;
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
             this.renderer.toneMappingExposure = 1.15;
             this.renderer.shadowMap.enabled = true;
             this.renderer.shadowMap.type = THREE.PCFShadowMap;
             this.scene = new THREE.Scene();
-            this.camera = new THREE.PerspectiveCamera(72, 16 / 9, 0.1, 190);
-            this.scene.fog = new THREE.Fog(0xb8cbd7, 46, 150);
+            this.camera = new THREE.PerspectiveCamera(72, 16 / 9, 0.1, 300);
+            this.scene.fog = new THREE.Fog(0xb8cbd7, 100, 520);
             this.materials = new VoxelMaterials();
             this.entities = new VoxelEntities(this.scene);
             this.terrain = new THREE.Group();
@@ -86,7 +105,14 @@ export class VoxelRenderer {
             this.sun = new THREE.DirectionalLight(0xffefd5, 3);
             this.sun.castShadow = true;
             this.sun.shadow.mapSize.set(2048, 2048);
-            Object.assign(this.sun.shadow.camera, { left: -27, right: 27, top: 27, bottom: -27, near: 1, far: 130 });
+            Object.assign(this.sun.shadow.camera, {
+                left: -27,
+                right: 27,
+                top: 27,
+                bottom: -27,
+                near: 1,
+                far: 130,
+            });
             this.sun.shadow.normalBias = 0.035;
             this.sun.shadow.bias = -0.00015;
             this.sun.shadow.radius = 2;
@@ -106,16 +132,21 @@ export class VoxelRenderer {
             try {
                 this.composer = new EffectComposer(this.renderer);
                 this.composer.addPass(new RenderPass(this.scene, this.camera));
-                const effectWidth = Math.ceil(this.canvas.width / 2);
-                const effectHeight = Math.ceil(this.canvas.height / 2);
-                // Bloom only the brightest scene light. The HUD is drawn on a
-                // separate canvas and stays crisp.
                 this.bloomPass = new UnrealBloomPass(
-                    new THREE.Vector2(effectWidth, effectHeight), 0.3, 0.35, 1.1,
+                    new THREE.Vector2(
+                        Math.ceil(this.canvas.width / 2),
+                        Math.ceil(this.canvas.height / 2),
+                    ),
+                    0.3,
+                    0.35,
+                    1.1,
                 );
                 this.composer.addPass(this.bloomPass);
                 this.composer.addPass(new OutputPass());
-                this.bloomPass.setSize(effectWidth, effectHeight);
+                this.bloomPass.setSize(
+                    Math.ceil(this.canvas.width / 2),
+                    Math.ceil(this.canvas.height / 2),
+                );
             } catch (error) {
                 console.warn("Cinematic effects are unavailable; keeping 3D rendering.", error);
                 this.disposePostprocessing();
@@ -130,7 +161,7 @@ export class VoxelRenderer {
     }
 
     disposePostprocessing() {
-        this.composer?.passes.forEach(pass => pass.dispose());
+        this.composer?.passes.forEach((pass) => pass.dispose());
         this.composer?.dispose();
         this.composer = null;
         this.bloomPass = null;
@@ -138,10 +169,15 @@ export class VoxelRenderer {
 
     updateCamera(camera, width, height) {
         syncSliceCamera(this.camera, camera, width, height, BLOCK_SIZE);
-        if (this.canvas.width !== width || this.canvas.height !== height) {
+        const pixelRatio = this.getDevicePixelRatio();
+        if (this.renderWidth !== width || this.renderHeight !== height ||
+            this.renderPixelRatio !== pixelRatio) {
+            this.renderWidth = width;
+            this.renderHeight = height;
+            this.renderPixelRatio = pixelRatio;
+            this.renderer.setPixelRatio(pixelRatio);
             this.renderer.setSize(width, height, false);
             this.composer?.setSize(width, height);
-            // Sample bloom below scene resolution.
             this.bloomPass?.setSize(Math.ceil(width / 2), Math.ceil(height / 2));
         }
     }
@@ -207,7 +243,8 @@ export class VoxelRenderer {
             if (def.specialType === SpecialType.Door) {
                 const frontZ = z + 1.01;
                 const isOpen = Boolean(block.metaData?.open);
-                const doorWidth = isOpen ? 0.09 : 1;
+                // Match the Classic renderer so open doors remain visible edge-on.
+                const doorWidth = isOpen ? 0.12 : 1;
                 const hingeX = block.metaData?.hinge === "left"
                     ? x
                     : x + 1 - doorWidth;
@@ -258,16 +295,16 @@ export class VoxelRenderer {
                     bottom: !neighbor(0,1), back: false }, def.faceSprites || {});
             if (frame && sprite === "endframe_eye") addEndFrameEye(batch, x + ox, -y - 1 - oy, z, shade);
         }
-        // Block face lighting avoids coarse shadow-map artifacts on flat terrain.
-        batch.build(this.terrain, { castShadow: false, receiveShadow: false });
+        batch.build(this.terrain, { castShadow: true, receiveShadow: true });
         this.foregroundWater = water;
     }
 
-    updateScenery(world, dimension) {
+    updateScenery(world, dimension, lighting) {
         if (dimension !== Dimensions.Overworld || world.generator.specialWorldProps.void) {
-            this.clearScenery();
+            if (this.sceneryChunks.size || this.backgroundWater.length || this.backgroundWaterSurface) {
+                this.clearScenery();
+            }
             this.scenery.visible = false;
-            if (this.backgroundWater.length) this.backgroundWater = [];
             return;
         }
         this.scenery.visible = true;
@@ -278,32 +315,116 @@ export class VoxelRenderer {
             this.sceneryKey = key;
         }
         const center = Math.floor(this.camera.position.x / CHUNK_WIDTH);
-        // Cover the full perspective frustum at the back of the scenery, with
-        // an extra chunk for tree canopies. New geometry enters off screen.
-        const halfWidth = (this.camera.position.z + 98) * Math.tan(this.camera.fov * Math.PI / 360) * this.camera.aspect;
-        const radius = Math.max(7, Math.ceil(halfWidth / CHUNK_WIDTH) + 1);
-        const range = `${center}:${radius}`;
-        if (range === this.sceneryRange) return;
+        // Extend procedural scenery to the horizon while retaining explored
+        // LOD panels that can still fall inside the camera's far plane.
+        const halfWidth = (this.camera.position.z + SCENERY_DEPTH) *
+            Math.tan(this.camera.fov * Math.PI / 360) * this.camera.aspect;
+        const sceneryRadius = Math.ceil(halfWidth / CHUNK_WIDTH) + 1;
+        // LOD panels are projected onto the play plane, so only nearby
+        // chunk columns can be visible there. The scenery carries the horizon.
+        const lodHalfWidth = (this.camera.position.z - PLAY_PLANE_Z) *
+            Math.tan(this.camera.fov * Math.PI / 360) * this.camera.aspect;
+        const lodRadius = Math.ceil(lodHalfWidth / CHUNK_WIDTH) + 1;
+        const radius = Math.max(sceneryRadius, lodRadius);
+        const chunks = getDimensionChunks(dimension);
         for (const [index, chunk] of this.sceneryChunks) {
             if (index < center - radius || index > center + radius) {
                 chunk.group.traverse(child => child.geometry?.dispose());
                 this.scenery.remove(chunk.group);
                 this.sceneryChunks.delete(index);
+                this.sceneryWaterDirty = true;
             }
+        }
+        // Keep cached panels aligned with the play plane as the camera moves.
+        for (const chunk of this.sceneryChunks.values()) {
+            if (chunk.lodGroup) this.positionDistantLod(chunk.lodGroup);
         }
         let built = 0;
         for (let offset = 0; offset <= radius && built < 2; offset++) {
             for (const index of offset ? [center - offset, center + offset] : [center]) {
                 if (built >= 2) break;
-                if (this.sceneryChunks.has(index)) continue;
-                const chunk = this.buildSceneryChunk(world, dimension, index);
+                const distanceChunks = Math.abs(index - center);
+                const sourceChunk = chunks.get(index * CHUNK_WIDTH * BLOCK_SIZE) || null;
+                const includeScenery = dimension === Dimensions.Overworld &&
+                    distanceChunks <= sceneryRadius;
+                const includeLod = sourceChunk && distanceChunks > RENDER_DISTANCE &&
+                    distanceChunks <= lodRadius;
+                const kind = includeScenery && includeLod
+                    ? "scenery+lod"
+                    : includeScenery ? "scenery" : includeLod ? "lod" : null;
+                const cachedSource = includeLod ? sourceChunk : null;
+                const lodStep = includeLod
+                    ? getDistantLodStep(distanceChunks, RENDER_DISTANCE)
+                    : 1;
+                const lodLighting = includeLod ? lighting : null;
+                const sourceRevision = cachedSource?.revision;
+                const existing = this.sceneryChunks.get(index);
+                const sameSource = existing?.sourceChunk === cachedSource &&
+                    existing?.sourceRevision === sourceRevision &&
+                    existing?.kind === kind && existing?.lodStep === lodStep &&
+                    existing?.lodLighting === lodLighting;
+
+                if (sameSource) {
+                    continue;
+                }
+
+                if (kind === null) {
+                    if (existing) {
+                        existing.group.traverse(child => child.geometry?.dispose());
+                        this.scenery.remove(existing.group);
+                        this.sceneryChunks.delete(index);
+                        this.sceneryWaterDirty = true;
+                    }
+                    continue;
+                }
+
+                if (existing) {
+                    existing.group.traverse(child => child.geometry?.dispose());
+                    this.scenery.remove(existing.group);
+                    this.sceneryChunks.delete(index);
+                    this.sceneryWaterDirty = true;
+                }
+
+                const chunk = includeScenery
+                    ? this.buildSceneryChunk(world, dimension, index)
+                    : { group: new THREE.Group(), water: [] };
+                if (includeLod) {
+                    const lod = this.buildDistantChunkLod(
+                        sourceChunk,
+                        lodStep,
+                        distanceChunks,
+                        lighting,
+                    );
+                    chunk.lodGroup = lod.group;
+                    this.positionDistantLod(lod.group);
+                    chunk.group.add(lod.group);
+                }
+                chunk.sourceChunk = cachedSource;
+                chunk.sourceRevision = sourceRevision;
+                chunk.kind = kind;
+                chunk.lodStep = lodStep;
+                chunk.lodLighting = lodLighting;
                 this.sceneryChunks.set(index, chunk);
                 this.scenery.add(chunk.group);
+                this.sceneryWaterDirty = true;
                 built++;
             }
         }
-        this.backgroundWater = [...this.sceneryChunks.values()].flatMap(chunk => chunk.water);
-        if (this.sceneryChunks.size === radius * 2 + 1) this.sceneryRange = range;
+        if (this.sceneryWaterDirty) {
+            this.backgroundWater = [...this.sceneryChunks.values()].flatMap(chunk => chunk.water);
+            this.sceneryWaterDirty = false;
+        }
+        this.backgroundWaterSurface = dimension === Dimensions.Overworld &&
+            !world.generator.specialWorldProps.flat
+            ? {
+                left: (center - sceneryRadius) * CHUNK_WIDTH,
+                right: (center + sceneryRadius + 1) * CHUNK_WIDTH,
+                nearZ: -1.5,
+                farZ: -(SCENERY_DEPTH - 0.5),
+                y: TERRAIN_HEIGHT + WATER_LEVEL - CHUNK_HEIGHT + 0.9,
+            }
+            : null;
+        this.sceneryRange = `${center}:${radius}`;
     }
 
     clearScenery() {
@@ -312,7 +433,72 @@ export class VoxelRenderer {
             this.scenery.remove(group);
         }
         this.sceneryChunks.clear();
+        if (this.backgroundWater.length) this.backgroundWater = [];
+        this.sceneryWaterDirty = true;
+        this.backgroundWaterSurface = null;
         this.sceneryRange = null;
+    }
+
+    positionDistantLod(group) {
+        const camera = this.camera.position;
+        const scale = (camera.z - DISTANT_LOD_PLANE_Z) /
+            (camera.z - PLAY_PLANE_Z);
+        group.scale.set(scale, scale, 1);
+        group.position.set(
+            camera.x * (1 - scale),
+            camera.y * (1 - scale),
+            DISTANT_LOD_PLANE_Z - PLAY_PLANE_Z,
+        );
+    }
+
+    buildDistantChunkLod(chunk, step, distanceChunks, lighting) {
+        const group = new THREE.Group();
+        const batch = new FaceBatch(this.materials);
+        const frontZ = PLAY_PLANE_Z;
+        const fade = clamp(0.82 - getDistantLodDepth(distanceChunks) / 900, 0.55, 0.82);
+
+        for (let y = 0; y < chunk.height; y += step) {
+            for (let x = 0; x < chunk.width; x += step) {
+                const sample = sampleDistantLodCell(
+                    chunk.blocks,
+                    x,
+                    y,
+                    step,
+                    block => getBlock(block.blockType).air,
+                ) || sampleDistantLodCell(
+                    chunk.walls,
+                    x,
+                    y,
+                    step,
+                    block => getBlock(block.blockType).air,
+                );
+                if (!sample) continue;
+
+                const block = sample.block;
+                const definition = getBlock(block.blockType);
+                const sprite = block.spriteName || definition.sprite;
+                if (!sprite || definition.air) continue;
+
+                const x0 = chunk.x / BLOCK_SIZE + x;
+                const x1 = x0 + sample.width;
+                const y0 = y, y1 = y + sample.height;
+                const skyExposure = block.sunLight === true ? 1 : 0;
+                const light = renderLightTint(block.lightLevel, skyExposure, lighting) * fade;
+                batch.quad(sprite, {
+                    plant: !definition.fluid && definition.transparent && !definition.collision,
+                    fluid: definition.fluid,
+                    emissive: !!block.lightSourceLevel,
+                }, [
+                    [x0, -y1, frontZ],
+                    [x1, -y1, frontZ],
+                    [x1, -y0, frontZ],
+                    [x0, -y0, frontZ],
+                ], [0, 0, 1], light);
+            }
+        }
+
+        batch.build(group, { castShadow: false, receiveShadow: true });
+        return { group, water: [] };
     }
 
     buildSceneryChunk(world, dimension, index) {
@@ -326,20 +512,20 @@ export class VoxelRenderer {
             columns.set(x, result); return result;
         };
         const firstX = index * CHUNK_WIDTH, lastX = firstX + CHUNK_WIDTH;
-        const firstDepth = 2, lastDepth = 98, floor = -CHUNK_HEIGHT;
+        const firstDepth = 2, lastDepth = SCENERY_DEPTH, floor = -CHUNK_HEIGHT;
         const seed = scenerySeed(world.seed);
         const heights = new Map();
         const heightAt = (x, depth) => {
             // Sample across mesh boundaries as well, including roots of trees
             // whose canopy overlaps the next chunk. Never cap a horizontal edge.
             if (depth < firstDepth || depth >= lastDepth) return floor;
-            const index = (x - firstX) * 100 + depth;
-            if (heights.has(index)) return heights.get(index);
+            const heightKey = (x - firstX) * SCENERY_DEPTH + depth;
+            if (heights.has(heightKey)) return heights.get(heightKey);
             const base = column(x).ground;
             const variation = world.generator.specialWorldProps.flat ? 0 :
                 (noise(x, depth) - noise(x, 0)) * 12 * Math.min(1, depth / 10);
             const result = Math.floor(clamp(base + variation, floor + 1, -1));
-            heights.set(index, result);
+            heights.set(heightKey, result);
             return result;
         };
         const water = [];
@@ -350,18 +536,23 @@ export class VoxelRenderer {
                 const waterY = world.generator.specialWorldProps.flat ? floor :
                     TERRAIN_HEIGHT + biome.waterLevel - CHUNK_HEIGHT + 0.9;
                 const submerged = y < waterY;
-                const surface = getBlock(submerged ? biome.waterSandType : biome.topLayer).sprite;
+                const surfaceBlock = getBlock(submerged ? biome.waterSandType : biome.topLayer);
+                const surface = surfaceBlock.faceSprites?.top || surfaceBlock.sprite;
+                const surfaceSide = surfaceBlock.faceSprites?.side || surfaceBlock.sprite;
                 const earth = getBlock(biome.secondLayer).sprite;
                 const skyExposure = world.generator.specialWorldProps.flat
                     ? 1 : terrainSkyExposure(x, depth, heightAt);
                 for (const face of terrainColumnFaces(x, depth, heightAt, floor)) {
-                    const material = face.top ? surface : face.corners[0][1] < y - 3 ? getBlock(biome.baseBlock).sprite : earth;
+                    const surfaceEdge = !face.top && face.corners[0][1] >= y - 1;
+                    const material = face.top ? surface : surfaceEdge ? surfaceSide :
+                        face.corners[0][1] < y - 3 ? getBlock(biome.baseBlock).sprite : earth;
                     const light = face.top ? skyExposure : Math.max(0.6,
                         skyExposure * 0.88 - (y - face.corners[0][1]) * 0.015);
-                    batch.quad(material, { top: face.top }, face.corners, face.normal, light);
+                    batch.quad(material, {
+                        top: face.top && !surfaceBlock.faceSprites?.top,
+                    }, face.corners, face.normal, light);
                 }
                 if (submerged) {
-                    water.push({ x, y: waterY, z });
                     batch.quad(getBlock(biome.fluidType).sprite, { fluid: true },
                         [[x,waterY,z+1],[x+1,waterY,z+1],[x+1,waterY,z],[x,waterY,z]], [0,1,0]);
                 }
@@ -408,32 +599,59 @@ export class VoxelRenderer {
         return { group, water };
     }
 
-    updateWater(foregroundCells, backgroundCells) {
-        // Terrain rebuilds replace these arrays, so identity is a cheap cache key.
+    updateWater(foregroundCells, backgroundCells, backgroundSurface = null) {
+        const surfaceKey = backgroundSurface
+            ? `${backgroundSurface.left},${backgroundSurface.right},${backgroundSurface.y}`
+            : "";
+        // Terrain and scenery rebuilds replace these arrays, making identity an O(1) cache key.
         const sameSources = this.waterSources?.foregroundCells === foregroundCells &&
-            this.waterSources?.backgroundCells === backgroundCells;
+            this.waterSources?.backgroundCells === backgroundCells &&
+            this.waterSources?.surfaceKey === surfaceKey;
         if (sameSources) {
             if (this.water) this.water.visible = this.waterHasContent;
             return;
         }
-        this.waterSources = { foregroundCells, backgroundCells };
-        const cells = [...foregroundCells, ...backgroundCells];
-        if (!cells.length) {
+        this.waterSources = { foregroundCells, backgroundCells, surfaceKey };
+
+        if (!foregroundCells.length && !backgroundCells.length && !backgroundSurface) {
             this.waterHasContent = false;
             if (this.water) this.water.visible = false;
             return;
         }
+        const cells = [...foregroundCells, ...backgroundCells];
         const levels = new Map();
         for (const cell of cells) {
             const key = cell.y.toFixed(2);
             if (!levels.has(key)) levels.set(key, []);
             levels.get(key).push(cell);
         }
-        const dominant = [...levels.values()].sort((a,b) => b.length - a.length)[0];
+        const referenceLevel = backgroundSurface?.y ??
+            [...levels.values()].sort((a,b) => b.length - a.length)[0][0].y;
         const positions = [], normals = [], uvs = [];
-        for (const { x, z } of dominant) {
+        for (const { x, y, z } of cells) {
             for (const [u,v] of [[0,0],[1,0],[1,1],[0,0],[1,1],[0,1]]) {
-                positions.push(x + u, -z - 1 + v, 0); normals.push(0,0,1); uvs.push(u,v);
+                // Store each surface's height in local Z. Water rotates this
+                // plane onto world XZ, so biome waterlines no longer leave gaps.
+                positions.push(x + u, -z - 1 + v, y - referenceLevel);
+                normals.push(0,0,1);
+                uvs.push(u,v);
+            }
+        }
+        if (backgroundSurface) {
+            const x0 = backgroundSurface.left;
+            const x1 = backgroundSurface.right;
+            const y0 = -backgroundSurface.nearZ;
+            const y1 = -backgroundSurface.farZ;
+            const triangles = [
+                [[x0, y0], [x1, y0], [x1, y1]],
+                [[x0, y0], [x1, y1], [x0, y1]],
+            ];
+            for (const triangle of triangles) {
+                for (const [x, depth] of triangle) {
+                    positions.push(x, depth, 0);
+                    normals.push(0, 0, 1);
+                    uvs.push((x - x0) / (x1 - x0), (depth - y0) / (y1 - y0));
+                }
             }
         }
         const geometry = new THREE.BufferGeometry();
@@ -441,39 +659,61 @@ export class VoxelRenderer {
         geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
         geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
         if (!this.water) {
-            const size = 128, data = new Uint8Array(size * size * 4);
-            for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-                const u = x * Math.PI * 2 / size, v = y * Math.PI * 2 / size;
-                // Several crossing, seamless ripples avoid repeating stripes.
-                const nx = Math.sin(u * 2 + v * 3) * 0.14 + Math.sin(u * 5 - v * 4 + 0.7) * 0.06
-                    + Math.sin(u * 11 + v * 7) * 0.025;
-                const ny = Math.cos(v * 3 - u) * 0.12 + Math.sin(u * 4 + v * 7) * 0.055
-                    + Math.cos(u * 9 - v * 5) * 0.025;
-                const length = Math.hypot(nx, ny, 1), i = (y * size + x) * 4;
-                data[i] = (nx / length * 0.5 + 0.5) * 255;
-                data[i+1] = (ny / length * 0.5 + 0.5) * 255;
-                data[i+2] = (1 / length * 0.5 + 0.5) * 255; data[i+3] = 255;
+            const size = 128;
+            const data = new Uint8Array(size * size * 4);
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const u = x * Math.PI * 2 / size;
+                    const v = y * Math.PI * 2 / size;
+                    const nx = Math.sin(u * 2 + v * 3) * 0.08 +
+                        Math.sin(u * 5 - v * 4 + 0.7) * 0.035 +
+                        Math.sin(u * 11 + v * 7) * 0.012;
+                    const ny = Math.cos(v * 3 - u) * 0.07 +
+                        Math.sin(u * 4 + v * 7) * 0.032 +
+                        Math.cos(u * 9 - v * 5) * 0.012;
+                    const length = Math.hypot(nx, ny, 1);
+                    const index = (y * size + x) * 4;
+                    data[index] = (nx / length * 0.5 + 0.5) * 255;
+                    data[index + 1] = (ny / length * 0.5 + 0.5) * 255;
+                    data[index + 2] = (1 / length * 0.5 + 0.5) * 255;
+                    data[index + 3] = 255;
+                }
             }
-            this.waterNormals = new THREE.DataTexture(data,size,size);
-            this.waterNormals.wrapS=this.waterNormals.wrapT=THREE.RepeatWrapping;
-            this.waterNormals.minFilter=this.waterNormals.magFilter=THREE.LinearFilter;
-            this.waterNormals.needsUpdate=true;
-            this.water = new Water(geometry, { textureWidth: 512, textureHeight: 512,
-                waterNormals: this.waterNormals, waterColor: 0x087c9e, sunColor: 0xfff2d9,
-                distortionScale: 0.55, alpha: 1, fog: true });
-            this.water.material.uniforms.size.value = 16;
+            this.waterNormals = new THREE.DataTexture(data, size, size);
+            this.waterNormals.wrapS = this.waterNormals.wrapT = THREE.RepeatWrapping;
+            this.waterNormals.minFilter = this.waterNormals.magFilter = THREE.LinearFilter;
+            this.waterNormals.needsUpdate = true;
+            this.water = new Water(geometry, {
+                textureWidth: 512,
+                textureHeight: 512,
+                waterNormals: this.waterNormals,
+                waterColor: 0x087c9e,
+                sunColor: 0xfff2d9,
+                distortionScale: 0.32,
+                alpha: 1,
+                fog: true,
+            });
+            this.water.material.uniforms.size.value = 8;
             this.water.material.uniforms.waterLighting = { value: 1 };
-            // Retain the water's blue absorption at the grazing side-view angle.
             this.water.material.fragmentShader = this.water.material.fragmentShader
-                .replace("uniform vec3 waterColor;", "uniform vec3 waterColor;\nuniform float waterLighting;")
-                .replace("vec3 outgoingLight = albedo;",
-                    "vec3 outgoingLight = mix(albedo, waterColor * waterLighting, 0.38);");
+                .replace(
+                    "uniform vec3 waterColor;",
+                    "uniform vec3 waterColor;\nuniform float waterLighting;",
+                )
+                .replace(
+                    "float reflectance = rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 );",
+                    "float reflectance = min( rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 ), 0.28 );",
+                )
+                .replace(
+                    "vec3 outgoingLight = albedo;",
+                    "vec3 outgoingLight = mix(albedo, waterColor * waterLighting, 0.38);",
+                );
             this.water.rotation.x = -Math.PI / 2;
             this.scene.add(this.water);
         } else {
             this.water.geometry.dispose(); this.water.geometry=geometry;
         }
-        this.water.position.y = dominant[0].y + 0.015;
+        this.water.position.y = referenceLevel + 0.015;
         this.water.visible=true;
         this.waterHasContent = true;
     }
@@ -481,7 +721,7 @@ export class VoxelRenderer {
     updateLighting(time, seconds, dimension, lighting, effects) {
         let day = daylightFactor(time);
         if (dimension !== Dimensions.Overworld || getDimension(dimension).alwaysDay || !lighting) day=1;
-        this.renderer.toneMappingExposure = 1.15 + (1 - day) * 1.0;
+        this.renderer.toneMappingExposure = 1.15 + (1 - day);
         const x=this.camera.position.x, y=this.camera.position.y;
         const elevation=Math.max(0.2, Math.abs(Math.sin(time)));
         const dusk = 4 * day * (1 - day);
@@ -489,7 +729,7 @@ export class VoxelRenderer {
         this.sun.target.position.set(x,y,-8);
         this.sun.color.set(0x90b3ed).lerp(DAY_SUN, day).lerp(DUSK_SUN, dusk * 0.55);
         this.sun.intensity = 0.55 + day * 2.41;
-        this.sun.castShadow=effects;
+        this.sun.castShadow = effects;
         this.ambient.intensity=0.9+day*0.63;
         if (dimension === Dimensions.End) {
             this.sun.intensity=0.35; this.sun.color.set(0xaaa1c7);
@@ -513,13 +753,18 @@ export class VoxelRenderer {
             light.color.set(source.def.sprite?.includes("redstone")?0xff4422:0xffa246);
             light.intensity=(source.block.lightSourceLevel/16)*14*(0.97+Math.sin(seconds*7+source.x)*0.03);
             light.distance=Math.min(12,source.block.lightSourceLevel*0.65);
-            light.castShadow=effects;
+            light.castShadow = effects;
         });
         if (this.water) {
-            this.water.material.uniforms.time.value=seconds*0.4;
-            this.water.material.uniforms.sunDirection.value.copy(this.sun.position).sub(this.sun.target.position).normalize();
-            this.water.material.uniforms.sunColor.value.copy(this.sun.color).multiplyScalar(0.15+day*0.85);
-            this.water.material.uniforms.waterLighting.value=0.06+day*0.94;
+            this.water.material.uniforms.time.value = seconds * 0.4;
+            this.water.material.uniforms.sunDirection.value
+                .copy(this.sun.position)
+                .sub(this.sun.target.position)
+                .normalize();
+            this.water.material.uniforms.sunColor.value
+                .copy(this.sun.color)
+                .multiplyScalar(0.15 + day * 0.85);
+            this.water.material.uniforms.waterLighting.value = 0.06 + day * 0.94;
         }
     }
 
@@ -528,14 +773,26 @@ export class VoxelRenderer {
         try {
             this.updateCamera(camera,width,height);
             this.updateTerrain(world,camera,width,height,dimension,lighting);
-            this.updateScenery(world,dimension);
-            this.updateWater(this.foregroundWater, this.backgroundWater);
-            this.materials.update(seconds,effects);
+            this.updateScenery(world,dimension,lighting);
+            this.updateWater(
+                this.foregroundWater || [],
+                this.backgroundWater || [],
+                this.backgroundWaterSurface,
+            );
+            this.materials.update(seconds, effects);
             this.updateLighting(time,seconds,dimension,lighting,effects);
             this.entities.update(world.entities,dimension,this.camera,seconds,lighting);
             if (dimension === Dimensions.Overworld) {
-                this.scene.background=this.sky.draw(this.renderer,{width,height,time,seconds,cameraX:camera.x,
-                    cameraY:camera.y,surfaceY:(CHUNK_HEIGHT-TERRAIN_HEIGHT)*BLOCK_SIZE,fov:this.camera.fov});
+                this.scene.background = this.sky.draw(this.renderer, {
+                    width,
+                    height,
+                    time,
+                    seconds,
+                    cameraX: camera.x,
+                    cameraY: camera.y,
+                    surfaceY: (CHUNK_HEIGHT - TERRAIN_HEIGHT) * BLOCK_SIZE,
+                    fov: this.camera.fov,
+                });
             } else this.scene.background=new THREE.Color(
                 dimension === Dimensions.End ? 0x15101f : 0x24151a);
             if (effects && this.composer) {

@@ -1,10 +1,11 @@
-import { uuidv4, Vector2, RandomRange } from "./Classes/helper.js";
+import { uuidv4, Vector2 } from "./Classes/helper.js";
 import { Player } from "./Classes/player.js";
 import { WebSocketServer } from "ws";
 import { World } from "./Classes/world.js";
 import { createInterface } from "readline";
 import fs from "fs";
-import { BLOCK_SIZE, CHUNK_HEIGHT } from "@2dcraft.com/shared/constants.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, TICK_SPEED } from "@2dcraft.com/shared/constants.js";
+import { randomMinecraftSeed } from "@2dcraft.com/shared/seed.js";
 
 const propertiesFile = "server.properties";
 const lanMode = process.argv.includes("--lan");
@@ -22,6 +23,18 @@ let userCache = [];
 let bannedIPs = [];
 let players = [];
 const minionOwners = new Map();
+let worldAuthorityUUID = null;
+let lastWorldSnapshot = null;
+
+const syncedMobFields = new Set([
+    "babyAgeTicks", "loveTicks", "breedingCooldown", "breedingOwnerUUID",
+    "hasWool", "woolTimer", "layEggTimer", "catfishSize", "swimPhase",
+    "tamed", "ownerUUID", "sitting", "command", "hasEgg", "variant",
+    "attackPoseKind", "attackPoseDuration", "attackPoseUntil", "powered",
+    "fuseTimer", "chargeTicks", "state", "moving", "attackCooldown",
+    "attackCooldownMax", "flightTime", "fire", "air", "poisonTicks", "poisonAmplifier",
+    "poisonDamageTicks",
+]);
 
 const properties = {};
 
@@ -71,15 +84,13 @@ function loadProperties() {
     properties.maxPlayers = parseInt(properties.maxPlayers);
     properties.levelSeed = properties.levelSeed.trim();
     if (properties.levelSeed === "") {
-        properties.levelSeed = Math.floor(
-            RandomRange(-100000000, 100000000)
-        ).toString();
+        properties.levelSeed = randomMinecraftSeed();
     }
 
     properties.motd = parseMotd(properties.motd);
     properties.serverIp = lanMode ? "" : properties.serverIp.trim();
 
-    world.seed = properties.levelSeed;
+    world.setSeed(properties.levelSeed);
 
     serverIcon = loadServerIcon();
 }
@@ -205,6 +216,14 @@ const wss = new WebSocketServer({
     host: properties.serverIp || "0.0.0.0",
     port: properties.serverPort,
 });
+
+setInterval(() => {
+    if (players.length === 0) return;
+    const result = world.weather.tick();
+    if (result.flagsChanged) {
+        broadcast({ type: "weatherState", message: result.state });
+    }
+}, 1000 / TICK_SPEED);
 
 wss.on("connection", (ws) => {
     const connectionTimeout = setTimeout(() => {
@@ -399,7 +418,6 @@ function normalizeSavedMinion(data, ownerUUID, previousOwnerUUID = null) {
     };
 }
 
-
 function savePlayerData(player, ip) {
     if (!player || !ip || !player.position) {
         serverLog(`Cannot save player data: Invalid player object or IP`);
@@ -566,6 +584,69 @@ function sendToPlayer(UUID, data) {
     }
 }
 
+function publishWorldAuthority() {
+    worldAuthorityUUID = players[0]?.UUID ?? null;
+    broadcast({
+        type: "worldAuthority",
+        message: { UUID: worldAuthorityUUID },
+    });
+}
+
+function normalizeWorldSnapshot(snapshot) {
+    if (
+        !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) ||
+        !Number.isFinite(snapshot.time) || snapshot.time < 0 || snapshot.time > 8 ||
+        !Array.isArray(snapshot.mobs) || snapshot.mobs.length > 512
+    ) return null;
+
+    const mobs = [];
+    const seen = new Set();
+    for (const mob of snapshot.mobs) {
+        if (
+            !mob || typeof mob !== "object" || Array.isArray(mob) ||
+            typeof mob.UUID !== "string" || mob.UUID.length === 0 || mob.UUID.length > 64 ||
+            seen.has(mob.UUID) || typeof mob.entity !== "string" ||
+            !/^[A-Za-z]{1,40}$/.test(mob.entity) ||
+            !Number.isFinite(mob.position?.x) || !Number.isFinite(mob.position?.y) ||
+            Math.abs(mob.position.x) > 1_000_000_000 ||
+            Math.abs(mob.position.y) > 1_000_000_000 ||
+            !Number.isInteger(mob.dimension) || mob.dimension < 0 || mob.dimension > 2 ||
+            !Number.isFinite(mob.health) || mob.health <= 0 || mob.health > 10_000 ||
+            ![-1, 1].includes(mob.direction) ||
+            !Number.isFinite(mob.velocity?.x) || !Number.isFinite(mob.velocity?.y) ||
+            Math.abs(mob.velocity.x) > 100_000 || Math.abs(mob.velocity.y) > 100_000 ||
+            !Number.isFinite(mob.myChunkX) ||
+            (mob.fields !== undefined &&
+                (!mob.fields || typeof mob.fields !== "object" || Array.isArray(mob.fields)))
+        ) return null;
+
+        const fields = {};
+        for (const [key, value] of Object.entries(mob.fields || {})) {
+            if (!syncedMobFields.has(key)) continue;
+            if (typeof value === "boolean" ||
+                (typeof value === "number" && Number.isFinite(value)) ||
+                (typeof value === "string" && value.length <= 64)) {
+                fields[key] = value;
+            }
+        }
+
+        seen.add(mob.UUID);
+        mobs.push({
+            UUID: mob.UUID,
+            entity: mob.entity,
+            position: { x: mob.position.x, y: mob.position.y },
+            dimension: mob.dimension,
+            health: mob.health,
+            direction: mob.direction,
+            velocity: { x: mob.velocity.x, y: mob.velocity.y },
+            myChunkX: mob.myChunkX,
+            fields,
+        });
+    }
+
+    return { time: snapshot.time, mobs };
+}
+
 function playerJoined(ws, playerData) {
     const ip = getPlayerIpFromSocket(ws);
     if (bannedIPs.includes(ip)) {
@@ -589,6 +670,7 @@ function playerJoined(ws, playerData) {
     });
 
     players.push(newPlayer);
+    publishWorldAuthority();
 
     // Load player data (position, inventory, gamemode)
     loadPlayerData(newPlayer, ip);
@@ -625,6 +707,24 @@ function playerJoined(ws, playerData) {
         message: world.seed,
     });
 
+    sendToPlayer(newPlayer.UUID, {
+        type: "weatherState",
+        message: world.weather.getState(),
+    });
+
+    sendToPlayer(newPlayer.UUID, {
+        type: "worldTime",
+        message: { time: world.time },
+    });
+
+    if (lastWorldSnapshot) {
+        sendToPlayer(newPlayer.UUID, {
+            type: "worldSnapshot",
+            sender: worldAuthorityUUID,
+            message: lastWorldSnapshot,
+        });
+    }
+
     broadcast(
         {
             type: "playerJoined",
@@ -650,6 +750,7 @@ function playerLeft(player) {
         type: "playerLeft",
         message: player.UUID,
     });
+    publishWorldAuthority();
 }
 
 function loadServerIcon() {
@@ -701,11 +802,14 @@ function processMessage(message, ws) {
             {
                 const player = getPlayerByUUID(data.sender);
                 const message = data.message || {};
+                if (!player || player.ws !== ws) break;
                 if (player) {
                     if (
                         message.position &&
-                        typeof message.position.x === "number" &&
-                        typeof message.position.y === "number"
+                        Number.isFinite(message.position.x) &&
+                        Number.isFinite(message.position.y) &&
+                        Math.abs(message.position.x) <= 1_000_000_000 &&
+                        Math.abs(message.position.y) <= 1_000_000_000
                     ) {
                         player.position = {
                             x: message.position.x,
@@ -713,16 +817,17 @@ function processMessage(message, ws) {
                         };
                     }
 
-                    if (typeof message.gamemode === "number") {
+                    if (Number.isInteger(message.gamemode) &&
+                        message.gamemode >= 0 && message.gamemode <= 3) {
                         player.gamemode = message.gamemode;
                     }
 
-                    if (typeof message.health === "number") {
-                        player.health = message.health;
+                    if (Number.isFinite(message.health)) {
+                        player.health = Math.max(0, Math.min(20, message.health));
                     }
 
-                    if (typeof message.food === "number") {
-                        player.food = message.food;
+                    if (Number.isFinite(message.food)) {
+                        player.food = Math.max(0, Math.min(20, message.food));
                     }
                     if (Number.isFinite(message.xpLevel)) {
                         player.xpLevel = Math.max(0,
@@ -740,6 +845,131 @@ function processMessage(message, ws) {
             }
             broadcast(data, [data.sender]);
             break;
+
+        case "worldSnapshot": {
+            const sender = getPlayerByUUID(data.sender);
+            const snapshot = normalizeWorldSnapshot(data.message);
+            if (
+                sender?.ws === ws && data.sender === worldAuthorityUUID && snapshot
+            ) {
+                lastWorldSnapshot = snapshot;
+                world.time = snapshot.time;
+                broadcast({
+                    type: "worldSnapshot",
+                    sender: data.sender,
+                    message: snapshot,
+                }, [data.sender]);
+            }
+            break;
+        }
+
+        case "playerHit": {
+            const attacker = getPlayerByUUID(data.sender);
+            const targetUUID = data.message?.targetUUID;
+            const target = getPlayerByUUID(targetUUID);
+            const hit = data.message || {};
+            if (
+                attacker?.ws !== ws || !target || target === attacker ||
+                attacker.health <= 0 || target.health <= 0 ||
+                attacker.gamemode === 3 || target.gamemode === 3 ||
+                attacker.dimension !== target.dimension ||
+                !Number.isFinite(hit.damage) || hit.damage <= 0 || hit.damage > 100 ||
+                !Number.isFinite(hit.hitfromX) || Math.abs(hit.hitfromX) > 1_000_000_000 ||
+                !Number.isFinite(hit.knockback) || hit.knockback < 0 || hit.knockback > 20 ||
+                !Number.isFinite(attacker.position?.x) ||
+                !Number.isFinite(attacker.position?.y) ||
+                !Number.isFinite(target.position?.x) ||
+                !Number.isFinite(target.position?.y)
+            ) break;
+
+            const sourceMob = typeof hit.sourceMobUUID === "string"
+                ? lastWorldSnapshot?.mobs?.find((entry) =>
+                    entry.UUID === hit.sourceMobUUID)
+                : null;
+            if (hit.sourceMobUUID !== undefined && (
+                attacker.UUID !== worldAuthorityUUID || !sourceMob ||
+                sourceMob.dimension !== target.dimension
+            )) break;
+
+            const hitSource = sourceMob || attacker;
+            const distance = Math.hypot(
+                hitSource.position.x - target.position.x,
+                hitSource.position.y - target.position.y,
+            );
+            if (distance > 5 * BLOCK_SIZE) break;
+
+            sendToPlayer(target.UUID, {
+                type: "playerHit",
+                sender: attacker.UUID,
+                message: {
+                    targetUUID: target.UUID,
+                    damage: hit.damage,
+                    hitfromX: hit.hitfromX,
+                    knockback: hit.knockback,
+                    cause: typeof hit.cause === "string" ? hit.cause.slice(0, 80) : null,
+                    ...(sourceMob ? { sourceMobUUID: sourceMob.UUID } : {}),
+                },
+            });
+            break;
+        }
+
+        case "mobHit": {
+            const attacker = getPlayerByUUID(data.sender);
+            const hit = data.message || {};
+            const mob = lastWorldSnapshot?.mobs?.find(
+                (entry) => entry.UUID === hit.targetUUID,
+            );
+            if (
+                attacker?.ws !== ws || !worldAuthorityUUID || !mob ||
+                attacker.health <= 0 || attacker.gamemode === 3 ||
+                attacker.dimension !== mob.dimension ||
+                !Number.isFinite(hit.damage) || hit.damage <= 0 || hit.damage > 100 ||
+                !Number.isFinite(hit.hitfromX) || Math.abs(hit.hitfromX) > 1_000_000_000 ||
+                !Number.isFinite(hit.knockback) || hit.knockback < 0 || hit.knockback > 20 ||
+                !Number.isFinite(attacker.position?.x) ||
+                !Number.isFinite(attacker.position?.y)
+            ) break;
+
+            const distance = Math.hypot(
+                attacker.position.x - mob.position.x,
+                attacker.position.y - mob.position.y,
+            );
+            if (distance > 5 * BLOCK_SIZE) break;
+
+            sendToPlayer(worldAuthorityUUID, {
+                type: "mobHit",
+                sender: attacker.UUID,
+                message: {
+                    targetUUID: mob.UUID,
+                    damage: hit.damage,
+                    hitfromX: hit.hitfromX,
+                    knockback: hit.knockback,
+                },
+            });
+            break;
+        }
+
+        case "mobHitResult": {
+            const sender = getPlayerByUUID(data.sender);
+            const targetUUID = data.message?.attackerUUID;
+            if (
+                sender?.ws === ws && data.sender === worldAuthorityUUID &&
+                typeof targetUUID === "string" && getPlayerByUUID(targetUUID) &&
+                typeof data.message?.targetUUID === "string" &&
+                typeof data.message?.killed === "boolean"
+            ) {
+                sendToPlayer(targetUUID, {
+                    type: "mobHitResult",
+                    sender: data.sender,
+                    message: {
+                        attackerUUID: targetUUID,
+                        targetUUID: data.message.targetUUID,
+                        killed: data.message.killed,
+                    },
+                });
+            }
+            break;
+        }
 
         case "playerData": {
             const player = getPlayerByUUID(data.message.UUID);
@@ -836,7 +1066,6 @@ function processMessage(message, ws) {
                 if (!minions.some((entry) => !entry)) player.minions = minions;
             }
 
-
             savePlayerData(player, getPlayerIpFromSocket(ws));
 
             break;
@@ -924,11 +1153,17 @@ function processMessage(message, ws) {
 
         case "removeEntity": {
             const UUID = data.message?.UUID;
+            const sender = getPlayerByUUID(data.sender);
+            if (sender?.ws !== ws || typeof UUID !== "string") break;
+            if (
+                lastWorldSnapshot?.mobs?.some((mob) => mob.UUID === UUID) &&
+                data.sender !== worldAuthorityUUID
+            ) break;
             if (minionOwners.has(UUID)) {
                 if (minionOwners.get(UUID) !== data.sender) break;
                 minionOwners.delete(UUID);
             }
-            broadcast(data, [data.sender]);
+            broadcast(data, [sender.UUID]);
             break;
         }
 
@@ -941,6 +1176,10 @@ function processMessage(message, ws) {
                     "Minion",
                     "IronGolem",
                     "SnowGolem",
+                    "Chicken",
+                    "Cow",
+                    "Pig",
+                    "Sheep",
                 ]);
                 const validPosition =
                     Number.isFinite(summon.position?.x) &&
@@ -950,29 +1189,47 @@ function processMessage(message, ws) {
                     summon.UUID.length > 0 &&
                     summon.UUID.length <= 64;
                 const props = summon.props ?? {};
-                const validMinionProps =
-                    summon.entity === "Minion" &&
+                const animalEntities = new Set(["Chicken", "Cow", "Pig", "Sheep"]);
+                const validAnimalProps =
+                    animalEntities.has(summon.entity) &&
+                    props !== null &&
+                    typeof props === "object" &&
+                    !Array.isArray(props) &&
                     Object.keys(props).every((key) =>
-                        ["ownerUUID", "myChunkX", "dimension", "direction"].includes(key),
-                    ) && props.ownerUUID === data.sender &&
-                    Number.isFinite(props.myChunkX) &&
-                    Number.isInteger(props.dimension) &&
-                    props.dimension >= 0 && props.dimension <= 2 &&
-                    [-1, 1].includes(props.direction);
+                        ["myChunkX", "babyAgeTicks", "dimension", "layEggTimer"].includes(key),
+                    ) &&
+                    (props.myChunkX === undefined || Number.isFinite(props.myChunkX)) &&
+                    (props.babyAgeTicks === undefined ||
+                        (Number.isInteger(props.babyAgeTicks) &&
+                            props.babyAgeTicks >= 0 && props.babyAgeTicks <= 24_000)) &&
+                    (props.dimension === undefined ||
+                        (Number.isInteger(props.dimension) &&
+                            props.dimension >= 0 && props.dimension <= 2)) &&
+                    (props.layEggTimer === undefined ||
+                        (summon.entity === "Chicken" &&
+                            Number.isInteger(props.layEggTimer) &&
+                            props.layEggTimer >= 0 && props.layEggTimer <= 12_000));
                 const validProps =
                     props !== null &&
                     typeof props === "object" &&
                     !Array.isArray(props) &&
-                    (summon.entity === "Boat"
+                    (animalEntities.has(summon.entity)
+                        ? validAnimalProps
+                        : summon.entity === "Boat"
                         ? Object.keys(props).every((key) =>
                               ["surfaceY", "dimension"].includes(key),
                           ) && Number.isFinite(props.surfaceY) &&
                           Number.isInteger(props.dimension)
                         : summon.entity === "Minion"
-                            ? validMinionProps
-                            : Object.keys(props).every((key) => key === "myChunkX") &&
-                              (props.myChunkX === undefined ||
-                                  Number.isFinite(props.myChunkX)));
+                        ? Object.keys(props).every((key) =>
+                              ["ownerUUID", "myChunkX", "dimension", "direction"].includes(key),
+                          ) && props.ownerUUID === data.sender &&
+                          Number.isFinite(props.myChunkX) &&
+                          Number.isInteger(props.dimension) &&
+                          props.dimension >= 0 && props.dimension <= 2 &&
+                          [-1, 1].includes(props.direction)
+                        : Object.keys(props).every((key) => key === "myChunkX") &&
+                          (props.myChunkX === undefined || Number.isFinite(props.myChunkX)));
 
                 if (
                     sender?.ws === ws &&
@@ -1053,10 +1310,14 @@ function processMessage(message, ws) {
         }
 
         case "playerDimension": {
-            const player = getPlayerByUUID(data.message.player);
-            if (player) {
+            const player = getPlayerByUUID(data.message?.player);
+            if (
+                player?.ws === ws &&
+                Number.isInteger(data.message.dimension) &&
+                data.message.dimension >= 0 && data.message.dimension <= 2
+            ) {
                 player.dimension = data.message.dimension;
-                broadcast(data, [data.sender]);
+                broadcast(data, [player.UUID]);
             }
             break;
         }

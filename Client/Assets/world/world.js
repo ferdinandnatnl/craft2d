@@ -12,21 +12,39 @@ import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { Dimensions, activeDimension, dimensions } from "./dimension.js";
 import { WorldGenerator } from "./generator.js";
 import { removeParticleEmitter } from "./particleEmitter.js";
+import { FallingLeavesEmitter } from "./fallingLeaves.js";
+import { WeatherPrecipitationEmitter } from "./weatherPrecipitation.js";
+import { WeatherCycle } from "@2dcraft.com/shared/weather.js";
+import { AmbientSoundscape } from "../game/ambientSoundscape.js";
 import { loadChunk, saveChunk } from "./saving.js";
+import { buildWorldSnapshot } from "../multiplayer/worldSync.js";
 
 export class World {
     constructor() {
         this.name = "New World";
         this.seed = 0;
+        this.worldgenVersion = 2;
         this.entities = [];
         this.damageIndicators = [];
+        this.swordSlashEffects = [];
         this.particleEmitters = [];
+        this.weather = new WeatherCycle(this.seed);
+        this.fallingLeavesEmitter = new FallingLeavesEmitter(this, {
+            settings: runtime.game?.settings?.fallingLeaves,
+        });
+        this.particleEmitters.push(this.fallingLeavesEmitter);
+        this.weatherPrecipitationEmitter = new WeatherPrecipitationEmitter(this);
+        this.particleEmitters.push(this.weatherPrecipitationEmitter);
         this.chunks_in_render_distance = new Map();
         this.player = null;
         this.blocksToUpdate = [];
         this.worldTickInterval = null;
+        this.multiplayerAuthorityUUID = null;
+        this.isWorldAuthority = !multiplayer;
+        this.multiplayerWorldSyncTicks = 0;
 
         this.generator = new WorldGenerator(this);
+        this.ambientSoundscape = new AmbientSoundscape(this);
 
         this.difficulty = "easy";
 
@@ -41,6 +59,22 @@ export class World {
             x: entity.position.x + entity.hitbox.x / 2,
             y: entity.position.y - 8,
             dimension: entity.dimension,
+            createdAt: runtime.passedTime,
+        });
+    }
+
+    addSwordSlashEffect(origin, aim, dimension) {
+        if (!Number.isFinite(origin?.x) || !Number.isFinite(origin?.y) ||
+            !Number.isFinite(aim?.x) || !Number.isFinite(aim?.y)) return;
+
+        const length = Math.hypot(aim.x, aim.y);
+        if (length <= Number.EPSILON) return;
+
+        this.swordSlashEffects.push({
+            x: origin.x,
+            y: origin.y,
+            aim: { x: aim.x / length, y: aim.y / length },
+            dimension,
             createdAt: runtime.passedTime,
         });
     }
@@ -64,10 +98,15 @@ export class World {
 
     tick() {
         if(runtime.world.generator.loadingWorld) return;
+        if (runtime.game?.isPlayerNameOnboardingOpen) return;
 
         this.updateBlocks();
         runtime.game.animateFrame();
         updatePositionalAudioVolumes();
+        this.weather.tick({
+            advanceCycle: !multiplayer && runtime.GAMERULES.doWeatherCycle !== false,
+        });
+        this.ambientSoundscape.update(1 / TICK_SPEED);
         this.updateEntities(true);
         this.chunks_in_render_distance.forEach((chunk) => {
             chunk.updateChunk();
@@ -78,9 +117,14 @@ export class World {
         }
         this.globalRecalculateRedstone();
         this.dayNightCycle();
+        this.syncMultiplayerWorld();
     }
 
     dayNightCycle() {
+        if (multiplayer && !this.isWorldAuthority) {
+            runtime.day = !(runtime.time > 3.5 && runtime.time < 6.5);
+            return;
+        }
         if (runtime.time > 7.5) {
             runtime.time = 1;
         }
@@ -88,6 +132,31 @@ export class World {
         else runtime.day = true;
         if (!runtime.GAMERULES.doDaylightCycle) return;
         runtime.time += runtime.day ? dayNightSpeed / 2 : dayNightSpeed;
+    }
+
+    setMultiplayerAuthority(UUID) {
+        this.multiplayerAuthorityUUID = typeof UUID === "string" ? UUID : null;
+        this.isWorldAuthority = !multiplayer ||
+            this.player?.UUID === this.multiplayerAuthorityUUID;
+
+        for (const entity of this.entities) {
+            if (entity.type !== EntityTypes.Mob || entity.isMinion) continue;
+            entity.multiplayerWorldEntity = true;
+            entity.isMultiplayerRemoteMob = !this.isWorldAuthority;
+        }
+    }
+
+    syncMultiplayerWorld() {
+        if (!multiplayer || !this.isWorldAuthority || !this.player) return;
+        this.multiplayerWorldSyncTicks++;
+        if (this.multiplayerWorldSyncTicks < 3) return;
+        this.multiplayerWorldSyncTicks = 0;
+
+        runtime.server?.send({
+            type: "worldSnapshot",
+            sender: this.player.UUID,
+            message: buildWorldSnapshot(this),
+        });
     }
 
     updateEntities(tick = false) {
@@ -102,6 +171,7 @@ export class World {
                 else entity.update();
                 return;
             }
+            if (entity.isMultiplayerRemoteMob) return;
             if (entity.dimension !== activeDimension) return;
             if (
                 entity.position.x >= cameraFarX &&
@@ -110,6 +180,8 @@ export class World {
                 if (typeof entity.tickUpdate === "function" && tick)
                     entity.tickUpdate();
                 else entity.update();
+            } else if (!tick && entity.dyingTime > 0) {
+                entity.update();
             } else if (!tick && entity.isMinion) {
                 // Worker jobs continue in loaded chunks when the camera moves away.
                 entity.update();
@@ -119,27 +191,35 @@ export class World {
                     Math.abs(worker.position.x - entity.position.x) <= 16 * BLOCK_SIZE)) {
                 // Drops from tree canopies still fall to nearby workers off camera.
                 entity.update();
-            } else if (!tick && entity.dyingTime > 0) {
-                entity.update();
             }
         });
     }
 
     spawnPlayer(
-        position = new Vector2(0, (CHUNK_HEIGHT / 2) * BLOCK_SIZE),
+        position = null,
         setOnGround = true,
         UUID = null,
         name = null,
         local = true,
     ) {
+        if (!position) {
+            const spawnBlockX = this.generator.findSpawnBlockX();
+            position = new Vector2(
+                spawnBlockX * BLOCK_SIZE,
+                (CHUNK_HEIGHT / 2) * BLOCK_SIZE,
+            );
+        }
         const newPlayer = new Player(runtime.world, {
             position: position,
             entities: runtime.world.entities,
             UUID: UUID ? UUID : uuidv4(),
-            name: name ? name : "Player",
+            name: name || (local ? runtime.game?.settings?.username : null) || "Player",
         });
         if (local) {
             runtime.world.player = newPlayer;
+            runtime.world.setMultiplayerAuthority(
+                runtime.world.multiplayerAuthorityUUID,
+            );
         }
         if (setOnGround) {
             const trySetOnGround = () => {
@@ -194,7 +274,10 @@ export class World {
     }
 
     setBlockType(block, type, updateAdjacent = true) {
-        const chunk = this.getDimensionChunks(activeDimension).get(
+        const dimensionIndex = Number.isInteger(block?.dimensionIndex)
+            ? block.dimensionIndex
+            : activeDimension;
+        const chunk = this.getDimensionChunks(dimensionIndex).get(
             block.chunkX,
         );
         if (!chunk) return;
@@ -764,9 +847,15 @@ export class World {
         console.log(`Uploaded chunk ${chunkX} to server`);
     }
 
-    spawnDrop(position, props) {
+    spawnDrop(position, props, dimensionIndex = activeDimension) {
         const uuid = uuidv4();
-        const drop = this.summonEntity(Drop, position, props, false, uuid);
+        const drop = this.summonEntity(
+            Drop,
+            position,
+            { ...props, dimension: dimensionIndex },
+            false,
+            uuid,
+        );
         if (multiplayer) {
             runtime.server.send({
                 type: "summonDrop",
@@ -784,15 +873,20 @@ export class World {
 
     summonEntity(entity, position, props, sync = false, uuid = null) {
         const UUID = uuid ? uuid : uuidv4();
+        const dimension = Number.isInteger(props?.dimension)
+            ? props.dimension
+            : activeDimension;
 
         const newEntity = new entity(this, {
             UUID: UUID,
             position: position,
             ...props,
         });
-        newEntity.dimension = Number.isInteger(props?.dimension)
-            ? props.dimension
-            : activeDimension;
+        newEntity.dimension = dimension;
+        if (multiplayer && newEntity.type === EntityTypes.Mob && !newEntity.isMinion) {
+            newEntity.multiplayerWorldEntity = true;
+            newEntity.isMultiplayerRemoteMob = !this.isWorldAuthority;
+        }
 
         this.entities.push(newEntity);
 
@@ -832,6 +926,7 @@ export class World {
             runtime.server.send({
                 type: "removeEntity",
                 message: { UUID: entity.UUID },
+                sender: this.player?.UUID,
             });
         }
     }

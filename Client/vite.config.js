@@ -29,6 +29,17 @@ function copyMedia() {
             if (existsSync(photonLicense)) {
                 cpSync(photonLicense, join(dist, "PHOTON-LICENSE.txt"));
             }
+
+            const thirdPartyNotice = resolve(__dirname, "../docs/third-party-assets.md");
+            const alexsMobsLicense = resolve(__dirname, "../docs/licenses/LGPL-3.0.txt");
+            if (existsSync(thirdPartyNotice)) {
+                cpSync(thirdPartyNotice, join(dist, "THIRD-PARTY-NOTICES.md"));
+            }
+            if (existsSync(alexsMobsLicense)) {
+                const licenses = join(dist, "licenses");
+                mkdirSync(licenses, { recursive: true });
+                cpSync(alexsMobsLicense, join(licenses, "LGPL-3.0.txt"));
+            }
         },
     };
 }

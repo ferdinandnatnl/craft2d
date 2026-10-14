@@ -63,7 +63,7 @@ export class EnderDragon extends Entity {
         if (diving && !this.attackCooldown) {
             const touching = this.entityCollision(EntityTypes.Player);
             if (touching) {
-                touching.hit(8, this.position.x, 5, "Killed by Ender Dragon");
+                touching.hit(8, this.position.x, 5, "Killed by Ender Dragon", this);
                 this.attackCooldown = 1.5;
             }
         }

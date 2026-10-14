@@ -1,4 +1,15 @@
 /** Mutable cross-module session state (replaces ambient globals). */
+export const DEFAULT_GAME_RULES = Object.freeze({
+    keepInventory: false,
+    doDaylightCycle: true,
+    doWeatherCycle: true,
+    doMobSpawning: true,
+    doMobLoot: true,
+    doTileDrops: true,
+    doFireTick: true,
+    doMobGriefing: true,
+});
+
 export const runtime = {
     deltaTime: undefined,
     isTexturePackLoaded: false,
@@ -6,15 +17,7 @@ export const runtime = {
     time: 1,
     day: true,
     globalFrame: 0,
-    GAMERULES: {
-        keepInventory: false,
-        doDaylightCycle: true,
-        doMobSpawning: true,
-        doMobLoot: true,
-        doTileDrops: true,
-        doFireTick: true,
-        doMobGriefing: true,
-    },
+    GAMERULES: { ...DEFAULT_GAME_RULES },
     server: null,
     game: null,
     world: null,

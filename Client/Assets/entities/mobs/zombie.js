@@ -73,6 +73,40 @@ export class Zombie extends Mob {
         }
     }
 
+    getAgressionTarget() {
+        const retaliationTarget = super.getAgressionTarget();
+        if (retaliationTarget || this.noAi) return retaliationTarget;
+
+        const detectionRange = this.ai?.agressionArea ?? 0;
+        const ownCenterX = this.position.x + this.hitbox.x / 2;
+        const ownCenterY = this.position.y + this.hitbox.y / 2;
+        let target = null;
+        let nearestDistance = detectionRange;
+
+        for (const entity of this.world.entities) {
+            if (
+                entity === this ||
+                entity.type !== EntityTypes.Mob ||
+                entity.entityTypeName !== "IronGolem" ||
+                entity.dimension !== this.dimension ||
+                entity.health <= 0
+            ) continue;
+
+            const offsetX = entity.position.x + entity.hitbox.x / 2 - ownCenterX;
+            const offsetY = entity.position.y + entity.hitbox.y / 2 - ownCenterY;
+            const distance = Math.hypot(
+                offsetX,
+                offsetY,
+            );
+            if (distance > nearestDistance) continue;
+
+            target = entity;
+            nearestDistance = distance;
+        }
+
+        return target;
+    }
+
     hitPlayerLogic() {
         if (this.attackCooldown) return;
 
@@ -80,7 +114,7 @@ export class Zombie extends Mob {
 
         if (!touchingPlayer) return;
 
-        touchingPlayer.hit(4, this.position.x, 3, `Killed by ${this.name}`);
+        touchingPlayer.hit(4, this.position.x, 3, `Killed by ${this.name}`, this);
 
         this.attackPoseUntil = runtime.passedTime + 0.4;
         this.attackCooldown = 1;

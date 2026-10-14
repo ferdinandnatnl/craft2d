@@ -2,8 +2,7 @@ import { runtime } from "../utils/runtime.js";
 import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { InventoryItem } from "../game/inventoryItem.js";
 import { LootTable } from "@2dcraft.com/shared/lootTable.js";
-import { randomRange } from "../utils/classes.js";
-import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, WATER_LEVEL, multiplayer } from "../utils/globals.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, TERRAIN_HEIGHT, WATER_LEVEL, multiplayer } from "../utils/globals.js";
 import { camera } from "../utils/renderer.js";
 import { AllBiomes, OverworldBiomes } from "@2dcraft.com/shared/biome.js";
 import { getBlock, Metadata } from "./block.js";
@@ -14,30 +13,79 @@ import { loadChunk } from "./saving.js";
 import { Structures } from "@2dcraft.com/shared/structures.js";
 import { terrainHeightAt } from "@2dcraft.com/shared/terrainHeight.js";
 import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
-import { isRuinedPortalChunk } from "@2dcraft.com/shared/ruinedPortal.js";
 import { isVillageChunk } from "@2dcraft.com/shared/village.js";
+import { createSeededRandom, perlinSeed, randomInt, randomMinecraftSeed, seedHash } from "@2dcraft.com/shared/seed.js";
+import { isRandomSpreadChunk } from "@2dcraft.com/shared/randomSpread.js";
 import { Entities } from "../entities/entities.js";
 import { Vector2 } from "../utils/classes.js";
 
 function pumpkinPatchColumn(seed, chunkIndex) {
-    let hash = 2166136261;
-    for (const character of `pumpkin:${seed}:${chunkIndex}`) {
-        hash ^= character.charCodeAt(0);
-        hash = Math.imul(hash, 16777619);
-    }
-    const value = hash >>> 0;
+    const value = seedHash(seed, `pumpkin:${chunkIndex}`);
     return value % 29 === 0 ? (value >>> 8) % CHUNK_WIDTH : -1;
 }
+
+// Vanilla Java randomized-spread placements projected onto this 2D world.
+const STRUCTURE_PLACEMENTS = [
+    {
+        name: "RuinedPortal",
+        dimension: Dimensions.Overworld,
+        spacing: 40,
+        separation: 15,
+        salt: 34222645,
+    },
+    {
+        name: "DesertTemple",
+        dimension: Dimensions.Overworld,
+        biome: OverworldBiomes.Desert,
+        drySurface: true,
+        spacing: 32,
+        separation: 8,
+        salt: 14357617,
+    },
+    {
+        name: "Iglo",
+        dimension: Dimensions.Overworld,
+        biome: OverworldBiomes.Tundra,
+        drySurface: true,
+        spacing: 32,
+        separation: 8,
+        salt: 14357618,
+    },
+    {
+        name: "WitchHut",
+        dimension: Dimensions.Overworld,
+        biome: OverworldBiomes.Swamp,
+        spacing: 32,
+        separation: 8,
+        salt: 14357620,
+    },
+    {
+        name: "NetherFortress",
+        dimension: Dimensions.Nether,
+        spacing: 27,
+        separation: 4,
+        salt: 30084232,
+    },
+];
 
 export class WorldGenerator {
     constructor(world) {
         this.world = world;
         this.specialWorldProps = {};
         this.multiplayerSeedLoaded = !multiplayer;
+        this.worldgenVersion = world.worldgenVersion ?? 2;
+        this.world.worldgenVersion = this.worldgenVersion;
         this.forceToBiome = null;
         this.loadingWorld = true;
 
-        tooloud.Perlin.setSeed(this.world.seed);
+        this.setNoiseSeed();
+    }
+
+    setNoiseSeed() {
+        const seed = this.worldgenVersion < 2
+            ? this.world.seed
+            : perlinSeed(this.world.seed);
+        tooloud.Perlin.setSeed(seed);
     }
 
     printNoiseOutput(noise, count = 100) {
@@ -97,10 +145,7 @@ export class WorldGenerator {
                     chunkIndex,
                     Dimensions.Overworld,
                 );
-                if (
-                    biome !== OverworldBiomes.Plains &&
-                    biome !== OverworldBiomes.Savanna
-                ) continue;
+                if (biome !== OverworldBiomes.Plains) continue;
 
                 const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
                     this.getTerrainHeight(
@@ -110,7 +155,7 @@ export class WorldGenerator {
                 );
                 const floorY = Math.max(...levels);
                 if (
-                    floorY <= WATER_LEVEL + 1 ||
+                    floorY <= TERRAIN_HEIGHT + biome.waterLevel + 1 ||
                     floorY - Math.min(...levels) > 4
                 ) continue;
 
@@ -129,12 +174,17 @@ export class WorldGenerator {
         this.specialWorldProps = {};
         this.forceToBiome = null;
 
-        seedInput = seedInput.toString().toLowerCase();
+        seedInput = String(seedInput ?? "").trim();
+        const seedPreset = seedInput.toLowerCase();
 
         this.world.seed = seedInput;
-        tooloud.Perlin.setSeed(this.world.seed);
+        this.world.weather?.setSeed(seedInput);
+        this.world.weather?.reset();
+        this.world.weatherPrecipitationEmitter?.setSeed(seedInput);
+        this.world.weatherPrecipitationEmitter?.clear();
+        this.setNoiseSeed();
 
-        switch (seedInput) {
+        switch (seedPreset) {
             case "flat":
                 this.specialWorldProps.flat = true;
                 break;
@@ -155,43 +205,29 @@ export class WorldGenerator {
                 this.specialWorldProps.noStructures = true;
                 break;
 
-            case "desert":
-                this.forceToBiome = OverworldBiomes.Desert;
-                break;
-            case "mountain":
-                this.forceToBiome = OverworldBiomes.Mountain;
-                break;
-            case "forest":
-                this.forceToBiome = OverworldBiomes.Forest;
-                break;
-            case "plains":
-                this.forceToBiome = OverworldBiomes.Plains;
-                break;
-            case "swamp":
-                this.forceToBiome = OverworldBiomes.Swamp;
-                break;
-            case "jungle":
-            case "rainforest":
-                this.forceToBiome = OverworldBiomes.RainForest;
-                break;
-            case "savanna":
-                this.forceToBiome = OverworldBiomes.Savanna;
-                break;
-            case "taiga":
-                this.forceToBiome = OverworldBiomes.Taiga;
-                break;
-            case "tundra":
-                this.forceToBiome = OverworldBiomes.Tundra;
-                break;
-            case "seasonalforest":
-            case "seasonal":
-            case "seasonal forest":
-                this.forceToBiome = OverworldBiomes.SeasonalForest;
-                break;
-            case "cherry":
-            case "cherry blossom":
-                this.forceToBiome = OverworldBiomes.CherryBlossom;
-                break;
+            // Preserve the old keyword-biome saves. In new worlds these are
+            // ordinary text seeds that follow Minecraft Java seed conversion.
+            default:
+                if (this.worldgenVersion < 2) {
+                    const legacyBiomes = {
+                        desert: OverworldBiomes.Desert,
+                        mountain: OverworldBiomes.Mountain,
+                        forest: OverworldBiomes.Forest,
+                        plains: OverworldBiomes.Plains,
+                        swamp: OverworldBiomes.Swamp,
+                        jungle: OverworldBiomes.RainForest,
+                        rainforest: OverworldBiomes.RainForest,
+                        savanna: OverworldBiomes.Savanna,
+                        taiga: OverworldBiomes.Taiga,
+                        tundra: OverworldBiomes.Tundra,
+                        seasonalforest: OverworldBiomes.SeasonalForest,
+                        seasonal: OverworldBiomes.SeasonalForest,
+                        "seasonal forest": OverworldBiomes.SeasonalForest,
+                        cherry: OverworldBiomes.CherryBlossom,
+                        "cherry blossom": OverworldBiomes.CherryBlossom,
+                    };
+                    this.forceToBiome = legacyBiomes[seedPreset] ?? null;
+                }
         }
     }
 
@@ -306,8 +342,9 @@ export class WorldGenerator {
     }
 
     regenerateWorld() {
-        const newSeed = Math.floor(Math.random() * 10000);
-        tooloud.Perlin.setSeed(newSeed);
+        const newSeed = randomMinecraftSeed();
+        this.world.seed = newSeed;
+        this.setNoiseSeed();
 
         this.world.entities = [];
         this.world.entities.push(this.world.player);
@@ -383,13 +420,17 @@ export class WorldGenerator {
                 }
             }
 
-            if (!this.specialWorldProps.noStructures) {
+            const chunk = this.world.getChunkForX(chunkX, dimensionIndex);
+            // Structure generation only needs to inspect the world while a
+            // nearby chunk is still unprocessed. generateWorld runs every
+            // animation frame, so scanning every loaded chunk here stalls
+            // larger saved worlds once generation has finished.
+            if (!this.specialWorldProps.noStructures &&
+                chunk && !chunk.generated) {
                 this.generateStructures(dimensionIndex);
             }
 
-            this.postProcessChunk(
-                this.world.getChunkForX(chunkX, dimensionIndex),
-            );
+            this.postProcessChunk(chunk);
 
             if (willUploadChunk) {
                 this.world.uploadChunkToServer(chunkX, dimensionIndex);
@@ -397,7 +438,13 @@ export class WorldGenerator {
         }
     }
 
-    generateStructure(structure, x, y, dimensionIndex = activeDimension) {
+    generateStructure(
+        structure,
+        x,
+        y,
+        dimensionIndex = activeDimension,
+        random = Math.random,
+    ) {
         const structureData = Structures[structure];
         if (!structureData) return;
 
@@ -416,7 +463,7 @@ export class WorldGenerator {
             }
         }
 
-        const flip = Math.random() < 0.5;
+        const flip = random() < 0.5;
 
         let chunk = null;
 
@@ -442,13 +489,14 @@ export class WorldGenerator {
                         blockX,
                         blockY,
                         chunk,
+                        random,
                     );
                 } else if (blockType !== Blocks.Air) {
                     chunk.setBlockTypeAtPosition(blockX, blockY, blockType);
                 }
 
                 if (wallType instanceof LootTable) {
-                    this.generateChestWithLoot(wallType, blockX, blockY, chunk);
+                    this.generateChestWithLoot(wallType, blockX, blockY, chunk, random);
                 } else if (wallType !== Blocks.Air) {
                     chunk.setBlockTypeAtPosition(
                         blockX,
@@ -462,8 +510,8 @@ export class WorldGenerator {
         }
     }
 
-    generateChestWithLoot(lootTable, x, y, chunk) {
-        const loot = lootTable.getRandomLoot();
+    generateChestWithLoot(lootTable, x, y, chunk, random = Math.random) {
+        const loot = lootTable.getRandomLoot(random);
 
         let storage = [[]];
 
@@ -474,7 +522,7 @@ export class WorldGenerator {
             }
         }
 
-        const newStorage = this.populateStorageWithLoot(loot, storage);
+        const newStorage = this.populateStorageWithLoot(loot, storage, random);
 
         chunk.setBlockTypeAtPosition(
             x,
@@ -484,13 +532,13 @@ export class WorldGenerator {
         );
     }
 
-    populateStorageWithLoot(loot, storage) {
+    populateStorageWithLoot(loot, storage, random = Math.random) {
         for (const item of loot) {
             let placed = false;
             let attempts = 10;
             while (!placed && attempts > 0) {
-                const randomSlotX = randomRange(0, storage[0].length);
-                const randomSlotY = randomRange(0, storage.length);
+                const randomSlotX = randomInt(random, 0, storage[0].length);
+                const randomSlotY = randomInt(random, 0, storage.length);
                 if (storage[randomSlotY][randomSlotX].count === 0) {
                     storage[randomSlotY][randomSlotX] = item;
                     placed = true;
@@ -514,7 +562,39 @@ export class WorldGenerator {
     getTerrainHeight(worldX, dimensionIndex = activeDimension) {
         return terrainHeightAt(worldX,
             (index) => this.calculateChunkBiome(index, dimensionIndex),
-            dimensions[dimensionIndex].noiseMaps, this.specialWorldProps.flat);
+            dimensions[dimensionIndex].noiseMaps,
+            this.specialWorldProps.flat,
+            this.worldgenVersion,
+        );
+    }
+
+    findSpawnBlockX() {
+        if (this.specialWorldProps.flat || this.specialWorldProps.void) return 0;
+
+        const maxRadius = CHUNK_WIDTH * 16;
+        let steepFallback = null;
+
+        for (let radius = 0; radius <= maxRadius; radius++) {
+            const candidates = radius === 0 ? [0] : [radius, -radius];
+            for (const worldX of candidates) {
+                const height = this.getTerrainHeight(worldX, Dimensions.Overworld);
+                const biome = this.calculateChunkBiome(
+                    Math.floor(worldX / CHUNK_WIDTH),
+                    Dimensions.Overworld,
+                );
+                const waterline = TERRAIN_HEIGHT + (biome?.waterLevel ?? WATER_LEVEL);
+                if (height <= waterline + 2) continue;
+
+                if (steepFallback === null) steepFallback = worldX;
+                const slope = Math.max(
+                    Math.abs(height - this.getTerrainHeight(worldX - 2, Dimensions.Overworld)),
+                    Math.abs(height - this.getTerrainHeight(worldX + 2, Dimensions.Overworld)),
+                );
+                if (slope <= 4) return worldX;
+            }
+        }
+
+        return steepFallback ?? 0;
     }
 
     calculateChunkBiome(chunkIndex, dimensionIndex = activeDimension) {
@@ -684,64 +764,45 @@ export class WorldGenerator {
             }
 
             const chunkIndex = chunkX / (CHUNK_WIDTH * BLOCK_SIZE);
-            const structureNoiseValue = dimension.noiseMaps.structure.getNoise(
-                chunkIndex,
-                0,
-            );
-            const ruinedPortal = dimensionIndex === Dimensions.Overworld &&
-                isRuinedPortalChunk(this.world.seed, chunkIndex);
-
-            if (!ruinedPortal && dimensionIndex === Dimensions.Overworld &&
-                (chunk.biome === OverworldBiomes.Plains ||
-                    chunk.biome === OverworldBiomes.Savanna) &&
+            if (dimensionIndex === Dimensions.Overworld &&
+                chunk.biome === OverworldBiomes.Plains &&
                 isVillageChunk(this.world.seed, chunkIndex) &&
-                this.generateVillage(chunk, dimensionIndex)) {
+                this.generateVillage(
+                    chunk,
+                    dimensionIndex,
+                    createSeededRandom(this.world.seed, `structure:village:${chunkIndex}`),
+                )) {
                 return;
             }
 
-            if (structureNoiseValue > 10 || ruinedPortal) {
-                const allStructureNames = Object.keys(Structures);
-                const candidates = allStructureNames.filter((name) => {
-                    const structure = Structures[name];
-                    return (
-                        structure.biome === null ||
-                        structure.biome === chunk.biome
-                    );
-                });
+            for (const placement of STRUCTURE_PLACEMENTS) {
+                if (placement.dimension !== dimensionIndex ||
+                    !isRandomSpreadChunk(this.world.seed, chunkIndex, placement)) continue;
+                if (placement.biome && chunk.biome !== placement.biome) continue;
 
-                const underground = ruinedPortal ? false : Math.random() < 0.5;
-                const filteredCandidates = candidates.filter((name) => {
-                    if (name === "RuinedPortal") return ruinedPortal;
-                    if (name === "Village") return false;
-                    const structure = Structures[name];
-                    const correctDimension =
-                        dimensionIndex === structure.dimension;
-                    return (
-                        structure.underground === underground &&
-                        correctDimension
-                    );
-                });
-
-                if (filteredCandidates.length === 0) return;
-
-                const randomName = ruinedPortal ? "RuinedPortal" :
-                    filteredCandidates[randomRange(0, filteredCandidates.length)];
-                const structure = Structures[randomName];
-
-                const structureX =
-                    chunk.x + randomRange(0, CHUNK_WIDTH) * BLOCK_SIZE;
-
-                let structureY;
+                const structure = Structures[placement.name];
+                const random = createSeededRandom(
+                    this.world.seed,
+                    `structure:${dimensionIndex}:${chunkIndex}:${placement.name}`,
+                );
+                const structureX = chunk.x +
+                    randomInt(random, 0, CHUNK_WIDTH) * BLOCK_SIZE;
                 const localX = chunk.getLocalX(structureX);
                 const surfaceAirY = chunk.findGroundLevel(localX, false, true);
+                if (
+                    placement.drySurface &&
+                    surfaceAirY <= TERRAIN_HEIGHT + chunk.biome.waterLevel + 1
+                ) continue;
                 const surfaceGroundY = surfaceAirY - 1;
+                let structureY;
 
                 if (structure.underground) {
                     const structureHeight = structure.blocks.length;
                     const shiftY = structure.shift?.y ?? 1;
-                    const undergroundOffset = randomRange(
+                    const undergroundOffset = randomInt(
+                        random,
                         8,
-                        CHUNK_HEIGHT / 2.5,
+                        Math.ceil(CHUNK_HEIGHT / 2.5),
                     );
                     const maxOriginY =
                         surfaceGroundY - 2 - (structureHeight - 1);
@@ -754,16 +815,26 @@ export class WorldGenerator {
                     structureY = surfaceAirY * BLOCK_SIZE;
                 }
 
-                this.generateStructure(randomName, structureX, structureY, dimensionIndex);
+                this.generateStructure(
+                    placement.name,
+                    structureX,
+                    structureY,
+                    dimensionIndex,
+                    random,
+                );
+                return;
             }
         });
     }
 
-    generateVillage(chunk, dimensionIndex) {
+    generateVillage(chunk, dimensionIndex, random = Math.random) {
         const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
             chunk.findGroundLevel(x, false, true));
         const floorY = Math.max(...levels);
-        if (floorY <= WATER_LEVEL + 1 || floorY - Math.min(...levels) > 4) {
+        if (
+            floorY <= TERRAIN_HEIGHT + chunk.biome.waterLevel + 1 ||
+            floorY - Math.min(...levels) > 4
+        ) {
             return false;
         }
 
@@ -773,7 +844,13 @@ export class WorldGenerator {
                 chunk.setBlockType(x, y, Blocks.Cobblestone);
             }
         });
-        this.generateStructure("Village", chunk.x, floorY * BLOCK_SIZE, dimensionIndex);
+        this.generateStructure(
+            "Village",
+            chunk.x,
+            floorY * BLOCK_SIZE,
+            dimensionIndex,
+            random,
+        );
         chunk.hasVillage = true;
 
         if (!this.specialWorldProps.noMobs && runtime.GAMERULES.doMobSpawning) {

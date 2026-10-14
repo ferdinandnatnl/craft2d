@@ -9,8 +9,9 @@ import {
     blendSwimming,
     getBoatPartPitch,
     getSwimPartPitch,
+    getSwordSwingPose,
 } from "../rendering/entityPose.js";
-import { mutantPartPitch } from "../rendering/mutantPose.js";
+import { mutantAttackAmount, mutantPartParent, mutantPartPitch, mutantWalkBob } from "../rendering/mutantPose.js";
 
 export class Body {
     constructor({
@@ -174,6 +175,7 @@ export class Body {
 
         ctx.save();
         ctx.globalAlpha = this.opacity;
+        if (this.drawOffsetY) ctx.translate(0, this.drawOffsetY);
         if (this.renderScale !== 1) {
             ctx.translate(this.position.x, this.position.y);
             ctx.scale(this.renderScale, this.renderScale);
@@ -187,13 +189,58 @@ export class Body {
             ctx.translate(-centerX, -centerY);
         }
         const bendPose = this.bendPose;
+        const swordSwing = getSwordSwingPose(
+            this.swordSwing,
+            holdItem,
+            runtime.passedTime,
+        );
         const attackRemaining = (this.mutantAttackPoseUntil || 0) - runtime.passedTime;
-        const attackProgress = attackRemaining > 0
-            ? 1 - attackRemaining / (this.mutantAttackPoseDuration || 0.4)
-            : 0;
-        const mutantAttack = attackProgress > 0
-            ? Math.sin(Math.min(1, attackProgress) * Math.PI)
-            : 0;
+        const mutantAttack = mutantAttackAmount(
+            this.mutantModelType, attackRemaining,
+            this.mutantAttackPoseDuration || 0.4,
+        );
+        const mutantWalk = (this.mutantWalkAmount || 0) * (1 - mutantAttack);
+        if (this.mutantModelType) {
+            ctx.translate(0, -mutantWalkBob(
+                this.mutantModelType, this.mutantWalkPhase || 0,
+                mutantWalk,
+            ) * BLOCK_SIZE / this.renderScale);
+        }
+        const basePosition = part => ({
+            x: this.position.x +
+                (direction < 0 ? this.flipCorrection * (BLOCK_SIZE / 64) : 0) +
+                BLOCK_SIZE * (part.offset.x / 64),
+            y: this.position.y + BLOCK_SIZE * (part.offset.y / 64),
+        });
+        const canvasJoints = (mutantWalk > 0 || mutantAttack > 0) &&
+            this.mutantModelType &&
+            this.mutantModelType !== "MutantCreeper"
+            ? new Map(Object.values(this.parts).map(part => {
+                const center = basePosition(part);
+                const sourceWidth = part.loadSprite(this.image)?.width ||
+                    this.image.width || 128;
+                const shouldFlip = part.eyes
+                    ? !part.skipLookFlip &&
+                        (lookDirection < -90 || lookDirection > 90)
+                    : direction < 0;
+                const willFlip = shouldFlip && (part.eyes || part.flip);
+                const rotationSign = !willFlip && part.zIndex < 0 ? -1 : 1;
+                return [part.id, {
+                    pivot: {
+                        x: center.x,
+                        y: center.y + (part.id === "head" ? 1 : -1) *
+                            part.spriteCrop.height * BLOCK_SIZE /
+                            (2 * sourceWidth),
+                    },
+                    angle: direction * mutantPartPitch(
+                        this.mutantModelType, part.id, this.mutantWalkPhase || 0,
+                        mutantWalk,
+                        mutantAttack, runtime.passedTime,
+                        this.mutantAttackPoseKind,
+                    ),
+                    rotationSign,
+                }];
+            })) : null;
         if (bendPose?.lean) {
             const hipX = this.position.x + BLOCK_SIZE * 0.2;
             const hipY = this.position.y + BLOCK_SIZE * 1.1;
@@ -203,15 +250,7 @@ export class Body {
         }
 
         for (const part of sortedParts) {
-            part.position = {
-                x:
-                    this.position.x +
-                    (direction < 0
-                        ? this.flipCorrection * (BLOCK_SIZE / 64)
-                        : 0) +
-                    BLOCK_SIZE * (part.offset.x / 64),
-                y: this.position.y + BLOCK_SIZE * (part.offset.y / 64),
-            };
+            part.position = basePosition(part);
             let rotation = part.rotation;
             if (this.swimAmount > 0 && !part.isSwinging) {
                 const side = part.zIndex < 0 ? -1 : 1;
@@ -225,17 +264,40 @@ export class Body {
                 rotation += (boatRotation - rotation) * this.boatAmount;
             }
             const side = part.zIndex < 0 ? -1 : 1;
-            if (this.mutantModelType) {
+            if (canvasJoints) {
+                let current = part.id;
+                let center = part.position;
+                let totalAngle = 0;
+                while (current) {
+                    const joint = canvasJoints.get(current);
+                    if (!joint) break;
+                    const angle = joint.angle;
+                    const dx = center.x - joint.pivot.x;
+                    const dy = center.y - joint.pivot.y;
+                    center = {
+                        x: joint.pivot.x + dx * Math.cos(angle) - dy * Math.sin(angle),
+                        y: joint.pivot.y + dx * Math.sin(angle) + dy * Math.cos(angle),
+                    };
+                    totalAngle += joint.angle;
+                    current = mutantPartParent(current);
+                }
+                part.position = center;
+                rotation = totalAngle * canvasJoints.get(part.id).rotationSign *
+                    180 / Math.PI;
+            } else if (this.mutantModelType) {
                 rotation = mutantPartPitch(
                     this.mutantModelType, part.id, this.mutantWalkPhase || 0,
-                    (this.mutantWalkAmount || 0) * (1 - mutantAttack),
-                    mutantAttack, runtime.passedTime,
+                    mutantWalk,
+                    mutantAttack, runtime.passedTime, this.mutantAttackPoseKind,
                 ) * 180 / Math.PI * direction;
             }
             if (bendPose?.pitch[part.id] != null) {
                 rotation = bendPose.pitch[part.id] * 180 / Math.PI * direction * side;
             }
-            part.shieldBlocking = shieldBlocking;
+            if (swordSwing && part.mainArm) {
+                rotation = -swordSwing.armAngle * swordSwing.direction *
+                    180 / Math.PI;
+            }
             part.draw(
                 ctx,
                 lookDirection,
@@ -246,6 +308,10 @@ export class Body {
                 direction,
                 rotation,
                 bendPose?.bend[part.id] * direction * side || 0,
+                swordSwing && part.mainArm
+                    ? swordSwing.weaponAngle * swordSwing.direction * 180 / Math.PI
+                    : 0,
+                shieldBlocking,
             );
         }
 
@@ -326,7 +392,7 @@ export class BodyPart {
 
         this.isSwinging = false;
         this.swingProgress = 0;
-        this.swingSpeed = 10;
+        this.swingSpeed = 6.5;
         this.swingAmplitude = 50;
 
         this._cropCanvas = null;
@@ -397,6 +463,8 @@ export class BodyPart {
         direction,
         rotation = this.rotation,
         bendRotation = 0,
+        heldItemRotation = 0,
+        shieldBlocking = false,
     ) {
         const img = this.loadSprite(image);
 
@@ -433,7 +501,13 @@ export class BodyPart {
         ctx.translate(-this.rotationOrigin.x, -this.rotationOrigin.y);
 
         // Render held item and sprite
-        this.renderHeldItem(ctx, holdItem, this.direction);
+        this.renderHeldItem(
+            ctx,
+            holdItem,
+            this.direction,
+            heldItemRotation,
+            shieldBlocking,
+        );
 
         const spriteSize = getSpriteSize(
             this.ownSpriteMap ? `entity/${this.ownSpriteMap}` : this.sprite,
@@ -580,7 +654,13 @@ export class BodyPart {
         ctx.translate(this.rotationOrigin.x, this.rotationOrigin.y); // Use precomputed origin
     }
 
-    renderHeldItem(ctx, holdItem, direction) {
+    renderHeldItem(
+        ctx,
+        holdItem,
+        direction,
+        heldItemRotation = 0,
+        shieldBlocking = false,
+    ) {
         if (!this.mainArm || !holdItem) return;
 
         const spritePath = this.getHeldItemSpritePath(holdItem);
@@ -593,7 +673,7 @@ export class BodyPart {
 
         const isTool = this.isTool(holdItem);
         const isShield = holdItem.itemId === Items.Shield;
-        const blockingShield = isShield && this.shieldBlocking;
+        const blockingShield = isShield && shieldBlocking;
 
         if (!sprite) return;
 
@@ -609,8 +689,10 @@ export class BodyPart {
             ctx.translate(!isTool ? 10 : -20, 0);
         }
 
-        const rotationAngle = Math.PI / (isTool ? -1.35 : 2);
-        ctx.rotate(blockingShield ? 0 : rotationAngle);
+        const rotationAngle = blockingShield
+            ? 0
+            : Math.PI / (isTool ? -1.35 : 2);
+        ctx.rotate(blockingShield ? 0 : rotationAngle + heldItemRotation);
 
         const scale = blockingShield
             ? 1

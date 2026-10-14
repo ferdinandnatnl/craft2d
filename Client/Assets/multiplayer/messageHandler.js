@@ -7,6 +7,8 @@ import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, multiplayer } from "../utils/glo
 import { getDimensionChunks, gotoDimension } from "../world/dimension.js";
 import { loadChunk } from "../world/saving.js";
 import { Minion, normalizeMinionSaveData } from "../entities/mobs/minion.js";
+import { EntityTypes } from "../game/entity.js";
+import { applyWorldSnapshot } from "./worldSync.js";
 
 // This object will store callbacks keyed by requestId
 export const callbacks = {};
@@ -81,11 +83,13 @@ export function applyPlayerDataFromFile(message) {
         typeof message.food === "number" ? message.food : 20;
     playerFromFile.food = typeof message.food === "number" ? message.food : 20;
     playerFromFile.xpLevel = Number.isFinite(message.xpLevel)
-        ? Math.max(0, Math.min(9999, Math.floor(message.xpLevel))) : 0;
+        ? Math.max(0, Math.min(9999, Math.floor(message.xpLevel)))
+        : 0;
     if (message.minionProgress && typeof message.minionProgress === "object") {
         playerFromFile.minionProgress = {
             evilDeeds: Number.isFinite(message.minionProgress.evilDeeds)
-                ? Math.max(0, Math.min(4, Math.floor(message.minionProgress.evilDeeds))) : 0,
+                ? Math.max(0, Math.min(4, Math.floor(message.minionProgress.evilDeeds)))
+                : 0,
             unlocked: message.minionProgress.unlocked === true,
         };
     }
@@ -161,7 +165,6 @@ export async function restoreMinionsForOwner(owner, savedMinions) {
     }
 }
 
-
 export function processMessage(data) {
     const message = data.message;
     const type = data.type;
@@ -184,6 +187,7 @@ export function processMessage(data) {
                 message.player.name,
                 false,
             );
+            newPlayer.setGamemode(message.player.gamemode ?? 0);
             newPlayer.setSkin(
                 message.player.skin || "player/steve",
                 message.player.model,
@@ -201,7 +205,7 @@ export function processMessage(data) {
             updatePlayerState(data);
             break;
         case "entityRPC":
-            handleEntityRPC(message);
+            handleEntityRPC(data);
             break;
         case "uploadChunk":
             console.log("Received chunk:", message);
@@ -213,6 +217,83 @@ export function processMessage(data) {
             console.log("Received seed:", message);
             runtime.world.generator.loadCustomSeed(message);
             runtime.world.generator.multiplayerSeedLoaded = true;
+            break;
+        case "weatherState":
+            runtime.world?.weather?.loadState(message, runtime.world.seed);
+            break;
+        case "worldAuthority":
+            runtime.world?.setMultiplayerAuthority(message?.UUID);
+            break;
+        case "worldTime":
+            if (Number.isFinite(message?.time)) {
+                runtime.time = Math.max(0, Math.min(8, message.time));
+            }
+            break;
+        case "worldSnapshot":
+            if (data.sender === runtime.world?.multiplayerAuthorityUUID) {
+                applyWorldSnapshot(message);
+            }
+            break;
+        case "playerHit": {
+            const player = runtime.world?.player;
+            const attacker =
+                runtime.world?.getEntityByUUID(message?.sourceMobUUID) ||
+                runtime.world?.getEntityByUUID(data.sender);
+            if (
+                player && message?.targetUUID === player.UUID && attacker &&
+                attacker.UUID !== player.UUID && Number.isFinite(message.damage) &&
+                Number.isFinite(message.hitfromX) && Number.isFinite(message.knockback) &&
+                attacker.dimension === player.dimension
+            ) {
+                player.hit(
+                    message.damage,
+                    message.hitfromX,
+                    message.knockback,
+                    typeof message.cause === "string" ? message.cause : null,
+                    attacker,
+                );
+            }
+            break;
+        }
+        case "mobHit": {
+            const world = runtime.world;
+            const mob = world?.getEntityByUUID(message?.targetUUID);
+            const attacker = world?.getEntityByUUID(data.sender);
+            if (
+                !world?.isWorldAuthority || !mob || mob.type !== EntityTypes.Mob ||
+                mob.isMinion || mob.health <= 0 || !attacker ||
+                attacker.type !== EntityTypes.Player || attacker.dimension !== mob.dimension ||
+                !Number.isFinite(message.damage) || message.damage <= 0 ||
+                !Number.isFinite(message.hitfromX) || !Number.isFinite(message.knockback)
+            ) break;
+            const distance = Math.hypot(
+                attacker.position.x + attacker.hitbox.x / 2 -
+                    (mob.position.x + mob.hitbox.x / 2),
+                attacker.position.y + attacker.hitbox.y / 2 -
+                    (mob.position.y + mob.hitbox.y / 2),
+            );
+            if (distance > 5 * BLOCK_SIZE) break;
+
+            const previousHealth = mob.health;
+            mob.hit(message.damage, message.hitfromX, message.knockback, "Player attack", attacker);
+            runtime.server?.send({
+                type: "mobHitResult",
+                sender: runtime.world.player?.UUID,
+                message: {
+                    attackerUUID: data.sender,
+                    targetUUID: mob.UUID,
+                    killed: previousHealth > 0 && mob.health <= 0,
+                },
+            });
+            break;
+        }
+        case "mobHitResult":
+            if (
+                message?.attackerUUID === runtime.world?.player?.UUID &&
+                message.killed === true
+            ) {
+                runtime.world.player.gainExperienceLevel(1);
+            }
             break;
         case "removeEntity":
             console.log("Removing entity:", message);
@@ -462,6 +543,8 @@ export async function iJoined(player, existingPlayers, gamemode = 0) {
                 p.name,
                 false,
             );
+
+            newPlayer.setGamemode(p.gamemode ?? 0);
 
             newPlayer.dimension = p.dimension;
 

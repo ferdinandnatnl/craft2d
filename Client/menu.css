@@ -45,6 +45,41 @@ body {
     align-items: center;
 }
 
+.options-section {
+    width: 100%;
+    max-width: 32rem;
+    box-sizing: border-box;
+    color: white;
+}
+
+.options-section > summary {
+    cursor: pointer;
+    padding: 0.5rem;
+    text-align: center;
+    touch-action: manipulation;
+}
+
+.options-section[open] {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.options-section .input-field-container,
+.options-section .slider-container,
+.options-section > .btn {
+    width: 100%;
+}
+
+.options-section summary:focus-visible,
+.options-section button:focus-visible,
+.options-section select:focus-visible,
+.options-section input:focus-visible {
+    outline: 2px solid white;
+    outline-offset: 2px;
+}
+
 /* Controls panel: constrain height so content can scroll */
 #controls-panel {
     width: 100%;

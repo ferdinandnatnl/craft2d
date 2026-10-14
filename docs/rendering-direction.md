@@ -16,11 +16,10 @@ Reference source inspected at `amvern/Two-Dimensional-Reloaded` commit
 
 ## Current state and problem
 
-Our game draws flat tiles and body-part sprites into Canvas 2D. The current
-Photon setting adapts color grading and bloom; it is not the full Minecraft
-shader pipeline. Oblique decorative faces, flat scenery, and radial light
-overlays cannot reproduce perspective, geometric occlusion, or real shadows.
-A replacement color texture alone cannot correct that.
+The voxel view uses a volumetric sky pass, rasterized sunlight and local
+lights, shadow maps, and restrained bloom. It does not provide hardware
+path-traced ray tracing or load Minecraft Iris shader packs. The Canvas
+renderer remains available as a fallback without these 3D effects.
 
 ## Implemented direction
 
@@ -31,8 +30,9 @@ renders the world while the existing simulation remains authoritative.
 2. Use actual cube faces and a perspective camera facing the play plane.
 3. Render distant terrain as geometry with depth and fog.
 4. Render the player and mobs as articulated cuboids using their current skins.
-5. Use directional sunlight, bounded local lights, shadow maps, and material
-   roughness/bump response. Retain pixel texture filtering.
+5. Use directional sunlight, bounded local lights, shadow maps, and restrained
+   bloom. Keep pixel texture filtering and render at up to 2x display pixel
+   ratio.
 6. Project pointer positions back onto the play plane so targeting matches
    the visible blocks. Keep inventory and menus in screen space.
 7. Preserve the Canvas renderer as a selectable fallback during the change.
@@ -42,8 +42,9 @@ renders the world while the existing simulation remains authoritative.
 This follows the reference's rendering principle and uses an established
 renderer instead of growing a custom pseudo-3D engine. It adds a dependency,
 GPU work, resource lifecycle management, and browser compatibility checks.
-It does not promise exact Photon parity: Iris shader packs cannot be loaded
-directly into this browser engine.
+The volumetric sky uses a bounded ray-march shader; scene lighting and shadows
+remain rasterized. Minecraft Iris shader packs cannot be loaded directly into
+this browser engine.
 
 ## Migration and rollback
 
@@ -55,8 +56,9 @@ the renderer behind an explicit mode so rollback selects the Canvas path.
 
 Compare the same world in daylight, torch-lit night, caves, and water.
 Verify break/place targeting, foreground and background layers, entity
-animation, save/reload, texture-pack selection, shader fallback, viewport
-changes, and frame time. Do not present a static scene as a finished game.
+animation, volumetric sky, shadow quality, water, save/reload, texture-pack
+selection, viewport changes, and frame time. Do not present a static scene as
+a finished game.
 
 ## Texture draft
 
@@ -74,13 +76,13 @@ It was generated with the built-in imagegen tool using
 - Numeric and text seeds give stable scenery choices. Flat worlds have flat
   scenery, and newly generated flat chunks no longer use hill noise to place water.
 - Water continues across the wall lane. A dense blue back face hides distant
-  scenery while the front tint preserves visibility of swimming entities.
-  The surface uses Three.js planar reflections with animated normals.
-- Cinematic 3D rendering adds restrained bloom to bright scene light. Distant
-  terrain and trees cast and receive sunlight shadows. Terrain sky exposure is
-  computed from nearby heights. Day, dusk, and night light and fog now blend
-  smoothly, and distant lighting no longer depends on whether the player is
-  standing under cover. This uses rasterized lighting and occlusion rather
-  than hardware ray tracing.
+  scenery while the translucent front surface preserves visibility of swimming
+  entities.
+- The voxel renderer uses a bounded volumetric sky shader, shadow-mapped
+  sunlight, up to three local shadow lights, and half-resolution bloom. Water
+  uses animated normals and sky reflections. Terrain sky exposure is computed
+  from nearby heights. Day, dusk, and night light and fog blend smoothly, and
+  distant lighting does not depend on whether the player is standing under
+  cover.
 
 No existing saved blocks are regenerated or removed by these rendering fixes.

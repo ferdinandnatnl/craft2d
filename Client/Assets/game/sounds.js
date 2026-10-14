@@ -120,6 +120,20 @@ export function playSound(sound, volume = 1, pitch = 1, loop = false) {
     return audio;
 }
 
+export function playAmbientSound(sound, volume = 0) {
+    const sfxMultiplier = (runtime.game?.settings?.sfxVolume ?? 100) / 100;
+    const url = resolveAssetUrl(`Assets/audio/ambient/${sound}`);
+    const audio = getSoundTemplate(url).cloneNode(true);
+    audio.volume = Math.max(0, Math.min(1, volume * sfxMultiplier));
+    audio.preservesPitch = false;
+    audio.webkitPreservesPitch = false;
+    audio.mozPreservesPitch = false;
+    audio.loop = true;
+    audio.onerror = () => console.error(`Error loading ambient sound: ${url}`);
+    audio.play().catch(() => {});
+    return audio;
+}
+
 // Play a positional sound with Web Audio API
 export function playPositionalSound(
     origin,

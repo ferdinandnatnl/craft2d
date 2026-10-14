@@ -15,6 +15,7 @@ import { entityRegistry } from "../entities/entityRegistry.js";
 import { inventoryRegistry } from "@2dcraft.com/shared/inventoryRegistry.js";
 import { updateBendPose } from "../rendering/entityPose.js";
 import { classicLightTint } from "../rendering/renderLight.js";
+import { createWaterSplash } from "../world/particleEmitter.js";
 
 export const EntityTypes = Object.freeze({
     Drop: 0,
@@ -129,6 +130,7 @@ export class Entity {
         this.offset = offset;
         this.lookDirection = 0;
         this.swimming = false;
+        this.wasInWater = false;
         this.originDate = Date.now();
         this.stepCounter = 0;
         this.stepSize = stepSize;
@@ -409,6 +411,19 @@ export class Entity {
             attacker?.type === EntityTypes.Mob &&
             attacker !== this &&
             attacker.health > 0
+        ) {
+            this.retaliationTarget = attacker;
+            this.retaliationUntil = runtime.passedTime + 8;
+        }
+        if (
+            this.type === EntityTypes.Player &&
+            this.health > 0 &&
+            !this.invulnerable &&
+            Number.isFinite(damage) &&
+            damage > 0 &&
+            attacker?.type === EntityTypes.Mob &&
+            attacker.health > 0 &&
+            attacker.dimension === this.dimension
         ) {
             this.retaliationTarget = attacker;
             this.retaliationUntil = runtime.passedTime + 8;
@@ -837,6 +852,22 @@ export class Entity {
             return;
         }
         if (this.carriedByMinionUUID) this.carriedByMinionUUID = null;
+        const carrier = this.crocodileGrabbedByUUID
+            ? this.world?.entities?.find(entity =>
+                entity.UUID === this.crocodileGrabbedByUUID &&
+                entity.entityTypeName === "Crocodile" &&
+                entity.grabbedTargetUUID === this.UUID,
+            )
+            : null;
+        if (carrier) {
+            this.position = carrier.getGrabPosition(this);
+            this.velocity.x = 0;
+            this.velocity.y = 0;
+            this.targetVelocity.x = 0;
+            this.targetVelocity.y = 0;
+            return;
+        }
+        if (this.crocodileGrabbedByUUID) this.crocodileGrabbedByUUID = null;
         if (!this.getCurrentChunk()?.generated) return;
 
         const maxStepDeltaTime = 1 / 30;
@@ -858,7 +889,7 @@ export class Entity {
     }
 
     separateFromMobOverlaps(delta = 1 / 60) {
-        if (![EntityTypes.Player, EntityTypes.Mob].includes(this.type) || this.noCollision ||
+        if (this.type !== EntityTypes.Player || this.noCollision ||
             !Array.isArray(this.world?.entities)) return;
 
         const maxNudge = BLOCK_SIZE * 0.035 * Math.min(2, Math.max(0, delta * 60));
@@ -1112,20 +1143,39 @@ export class Entity {
     }
 
     fluidLogic(collidingBlocks, deltaTime) {
+        const wasSwimming = this.swimming;
+        const wasInWater = this.wasInWater;
         this.swimming = false;
         const isCollidingWithFluid =
             this.filterBlocksByProperty(collidingBlocks, "fluid").length > 0;
+        const water = collidingBlocks.find((block) =>
+            getBlock(block.blockType)?.extinguishEntity,
+        );
+        if (water && !wasInWater) {
+            const surfaceY = water.transform.position.y +
+                (water.cutoff || 0) * BLOCK_SIZE;
+            const impact = Math.max(0.45, Math.min(1.8,
+                Math.abs(this.velocity.y) / (BLOCK_SIZE * 5)));
+            createWaterSplash(
+                this.position.x + this.hitbox.x / 2,
+                surfaceY,
+                impact,
+            );
+        }
         if (isCollidingWithFluid && this.canSwim) {
             this.grounded = false;
-            if (!this.swimming) {
-                this.enterFluid();
-            }
-            if (this.float) this.floatLogic();
+            this.swimming = true;
+            if (!wasSwimming) this.enterFluid();
+            if (this.float) this.floatLogic(deltaTime);
         }
+        this.wasInWater = Boolean(water);
     }
 
-    floatLogic() {
-        this.velocity.y += -GRAVITY * 2 * runtime.deltaTime;
+    floatLogic(deltaTime) {
+        this.velocity.y = Math.max(
+            this.velocity.y - GRAVITY * 2 * deltaTime,
+            -3 * BLOCK_SIZE,
+        );
     }
 
     playFootstepSounds() {

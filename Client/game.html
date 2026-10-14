@@ -21,8 +21,38 @@
         <div class="chromium-issue-1092080-workaround__wrapper">
             <canvas id="voxel-canvas" aria-hidden="true"></canvas>
             <canvas id="canvas"></canvas>
-            <canvas id="shader-canvas" aria-hidden="true"></canvas>
             <div id="loading">Loading...</div>
+
+            <dialog
+                id="player-name-onboarding"
+                class="player-name-onboarding"
+                aria-modal="true"
+                aria-labelledby="player-name-title"
+                aria-describedby="player-name-copy"
+            >
+                <form id="player-name-form" class="player-name-panel">
+                    <h1 id="player-name-title" class="input-field-title player-name-title">
+                        Welcome to craft2d.com
+                    </h1>
+                    <p id="player-name-copy" class="player-name-copy">What should we call you?</p>
+                    <label class="input-field-container" for="player-name-input">
+                        <span class="input-field-title">Your name</span>
+                        <input
+                            class="input-field"
+                            id="player-name-input"
+                            name="playerName"
+                            type="text"
+                            maxlength="15"
+                            autocomplete="nickname"
+                            autocapitalize="words"
+                            aria-describedby="player-name-error"
+                            required
+                        />
+                    </label>
+                    <p id="player-name-error" class="player-name-error" aria-live="polite"></p>
+                    <button class="btn" type="submit">Start Playing</button>
+                </form>
+            </dialog>
 
             <div id="touch-controls" aria-label="Touch game controls">
                 <div class="touch-top">
@@ -64,9 +94,6 @@
                     </button>
                     <button class="btn" id="pause-difficulty-btn" onclick="togglePauseDifficulty()">
                         Difficulty: Easy
-                    </button>
-                    <button class="btn" id="pause-shader-btn" onclick="game.cycleShader()">
-                        Shaders - Off
                     </button>
                     <button class="btn" id="pause-renderer-btn" onclick="game.cycleRenderer()">
                         Renderer - 3D

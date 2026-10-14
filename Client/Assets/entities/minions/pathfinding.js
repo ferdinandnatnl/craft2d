@@ -1,9 +1,10 @@
 import { BLOCK_SIZE, CHUNK_HEIGHT } from "../../utils/globals.js";
+import { EntityTypes } from "../../game/entity.js";
 import { getBlock, hasBlockCollision } from "../../world/block.js";
 import { findAStarPath } from "./astar.js";
 export { findAStarPath } from "./astar.js";
 
-export function findMinionPath(world, dimension, start, goal, maxVisited = 2500) {
+export function findMinionPath(world, dimension, start, goal, maxVisited = 2500, mover = null) {
     const blockAt = (x, y) => world.getBlockAtWorldPosition(
         x * BLOCK_SIZE,
         y * BLOCK_SIZE,
@@ -11,6 +12,21 @@ export function findMinionPath(world, dimension, start, goal, maxVisited = 2500)
         dimension,
     );
     const canStandAt = (node) => getMinionStandability(world, dimension, node);
+    const occupiedNodes = new Set();
+    for (const entity of world.entities || []) {
+        if (entity === mover ||
+            entity.type !== EntityTypes.Player ||
+            entity.dimension !== dimension || entity.health <= 0 ||
+            !entity.hitbox || !Number.isFinite(entity.position?.x) ||
+            !Number.isFinite(entity.position?.y)) continue;
+        const centerX = Math.floor((entity.position.x + entity.hitbox.x / 2) / BLOCK_SIZE);
+        const footY = Math.round((entity.position.y + entity.hitbox.y) / BLOCK_SIZE);
+        for (let x = centerX - 1; x <= centerX + 1; x++) {
+            for (let y = footY - 1; y <= footY + 1; y++) {
+                occupiedNodes.add(`${x},${y}`);
+            }
+        }
+    }
     const neighbors = (node) => {
         const adjacent = [];
         for (const dx of [-1, 1]) {
@@ -20,7 +36,8 @@ export function findMinionPath(world, dimension, start, goal, maxVisited = 2500)
                 if (clearanceCost === false) continue;
                 adjacent.push({
                     node: next,
-                    cost: 1 + (dy < 0 ? 1.5 : dy > 0 ? 1.15 : 0) + clearanceCost,
+                    cost: 1 + (dy < 0 ? 1.5 : dy > 0 ? 1.15 : 0) +
+                        clearanceCost + (occupiedNodes.has(`${next.x},${next.y}`) ? 20 : 0),
                 });
             }
         }
@@ -48,7 +65,7 @@ export function getMinionStandability(world, dimension, node) {
         !hasBlockCollision(floor)) return false;
 
     let clearanceCost = 0;
-    for (const bodyY of [node.y - 1, node.y - 2]) {
+    for (const bodyY of [node.y - 1]) {
         const bodyBlock = blockAt(node.x, bodyY);
         if (!bodyBlock) return false;
         const def = getBlock(bodyBlock.blockType);

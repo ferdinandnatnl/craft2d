@@ -5,15 +5,11 @@ import { Vector2 } from "../utils/classes.js";
 import { BLOCK_SIZE, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
 import { updateTouchControls } from "../utils/touchControls.js";
-import { draw, setShaderMode, setRendererMode } from "../utils/renderer.js";
-import {
-    getShaderModeLabel,
-    nextShaderMode,
-    normalizeShaderMode,
-} from "../utils/shaderModes.js";
+import { draw, setRendererMode } from "../utils/renderer.js";
 import { activeDimension, getDimensionChunks } from "../world/dimension.js";
 import { loadWorldFromLocalStorage } from "../world/saving.js";
 import { World } from "../world/world.js";
+import { normalizeFallingLeavesSettings } from "../world/fallingLeafPhysics.js";
 import { handleDebugInput, updateDebug } from "../../debug.js";
 
 export class Game {
@@ -24,12 +20,26 @@ export class Game {
             musicVolume: 100,
             sfxVolume: 100,
             lighting: true,
-            shader: "photon",
             renderer: "voxel",
+            fallingLeaves: normalizeFallingLeavesSettings(),
             username: "Player",
         };
         this.chat = new Chat();
         this.pauseMenu = new PauseMenu();
+        this.playerNameOnboarding = document.getElementById("player-name-onboarding");
+        this.playerNameForm = document.getElementById("player-name-form");
+        this.playerNameInput = document.getElementById("player-name-input");
+        this.playerNameError = document.getElementById("player-name-error");
+        this.isPlayerNameOnboardingOpen = false;
+        this.playerNameOnboarding?.addEventListener("cancel", (event) =>
+            event.preventDefault(),
+        );
+        this.playerNameForm?.addEventListener("submit", (event) =>
+            this.completePlayerNameOnboarding(event),
+        );
+        this.playerNameInput?.addEventListener("input", () => {
+            if (this.playerNameError) this.playerNameError.textContent = "";
+        });
         this.loadSettings();
     }
 
@@ -60,52 +70,84 @@ export class Game {
         }
 
         this.settings.lighting = loaded.lighting !== false;
-        this.settings.username = loaded.username || "Player";
+        const savedUsername =
+            typeof loaded.username === "string"
+                ? loaded.username.trim().slice(0, 15)
+                : "";
+        this.settings.username = savedUsername || "Player";
         this.settings.musicVolume =
             loaded.musicVolume ?? (loaded.music === false ? 0 : 100);
         this.settings.sfxVolume =
             loaded.sfxVolume ?? (loaded.sfx === false ? 0 : 100);
-        this.settings.shader = normalizeShaderMode(loaded.shader);
         this.settings.renderer = setRendererMode(loaded.renderer);
-        setShaderMode(this.settings.shader);
-        this.updateShaderButtonLabel();
+        this.settings.fallingLeaves = normalizeFallingLeavesSettings(loaded.fallingLeaves);
+        this.updateRendererButtonLabel();
+
+        if (!savedUsername) this.showPlayerNameOnboarding();
     }
 
-    cycleShader() {
-        this.settings.shader = nextShaderMode(this.settings.shader);
-        setShaderMode(this.settings.shader);
-        this.updateShaderButtonLabel();
+    showPlayerNameOnboarding() {
+        const onboarding = this.playerNameOnboarding;
+        if (!onboarding || !this.playerNameForm || !this.playerNameInput) return;
+
+        this.isPlayerNameOnboardingOpen = true;
+        onboarding.showModal();
+        requestAnimationFrame(() => this.playerNameInput.focus());
+    }
+
+    completePlayerNameOnboarding(event) {
+        event.preventDefault();
+
+        const username = this.playerNameInput?.value.trim().slice(0, 15) || "";
+        if (!username) {
+            if (this.playerNameError) this.playerNameError.textContent = "Enter a name to continue.";
+            this.playerNameInput?.focus();
+            return;
+        }
 
         try {
-            const parsedSettings = JSON.parse(
-                localStorage.getItem("settings") || "{}",
-            );
-            const savedSettings =
-                parsedSettings && typeof parsedSettings === "object"
-                    ? parsedSettings
-                    : {};
+            const savedSettings = JSON.parse(localStorage.getItem("settings") || "{}");
             localStorage.setItem(
                 "settings",
-                JSON.stringify({ ...savedSettings, shader: this.settings.shader }),
+                JSON.stringify({ ...savedSettings, ...this.settings, username }),
             );
         } catch (error) {
-            console.warn("Could not save the shader setting.", error);
+            console.warn("Could not save the player name.", error);
+            if (this.playerNameError) this.playerNameError.textContent = "Could not save your name. Please try again.";
+            return;
         }
+
+        this.settings.username = username;
+        this.isPlayerNameOnboardingOpen = false;
+        this.playerNameOnboarding?.close();
+
+        const player = runtime.world?.player;
+        if (player) {
+            player.name = username;
+            if (multiplayer && runtime.server) {
+                runtime.server.send({
+                    type: "playerData",
+                    sender: player.UUID,
+                    message: {
+                        UUID: player.UUID,
+                        skin: player.body.sprite ?? "player/steve",
+                        model: player.skinModel || "steve",
+                        name: username,
+                    },
+                });
+            }
+        }
+
     }
 
-    updateShaderButtonLabel() {
+    updateRendererButtonLabel() {
         const rendererButton = document.getElementById("pause-renderer-btn");
         if (rendererButton) rendererButton.textContent = "Renderer - " + (this.settings.renderer === "canvas" ? "Classic" : "3D");
-        const button = document.getElementById("pause-shader-btn");
-        if (button) {
-            button.textContent =
-                "Shaders - " + getShaderModeLabel(this.settings.shader);
-        }
     }
 
     cycleRenderer() {
         this.settings.renderer = setRendererMode(this.settings.renderer === "voxel" ? "canvas" : "voxel");
-        this.updateShaderButtonLabel();
+        this.updateRendererButtonLabel();
         try {
             const saved = JSON.parse(localStorage.getItem("settings") || "{}");
             localStorage.setItem("settings", JSON.stringify({ ...saved, renderer: this.settings.renderer }));
@@ -150,6 +192,8 @@ export class Game {
     }
 
     updateGame() {
+        if (this.isPlayerNameOnboardingOpen) return;
+
         updateTouchControls();
         if (!runtime.world) return;
 

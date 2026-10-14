@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="8" height="11" viewBox="0 0 8 11" shape-rendering="crispEdges">
+  <!-- Blocky side view: raised head, square body, wing, bill, and wattle. -->
+  <rect x="1" y="5" width="6" height="4" fill="#d8d5cc"/>
+  <rect x="0" y="6" width="7" height="3" fill="#f0eee6"/>
+  <rect x="1" y="5" width="5" height="3" fill="#f5f3ec"/>
+  <rect x="1" y="7" width="4" height="2" fill="#e2dfd7"/>
+  <rect x="2" y="6" width="3" height="1" fill="#faf8f1"/>
+
+  <rect x="4" y="1" width="2" height="1" fill="#e0ddd4"/>
+  <rect x="3" y="2" width="4" height="3" fill="#f5f3ec"/>
+  <rect x="4" y="1" width="2" height="1" fill="#fbf9f2"/>
+  <rect x="4" y="4" width="2" height="2" fill="#eeeae1"/>
+  <rect x="6" y="3" width="2" height="1" fill="#e5a72b"/>
+  <rect x="7" y="4" width="1" height="1" fill="#cc8b1f"/>
+  <rect x="5" y="4" width="1" height="2" fill="#bd3435"/>
+  <rect x="6" y="2" width="1" height="1" fill="#171717"/>
+
+  <rect x="2" y="8" width="1" height="2" fill="#dfa128"/>
+  <rect x="5" y="8" width="1" height="2" fill="#dfa128"/>
+  <rect x="1" y="9" width="3" height="1" fill="#e9ad32"/>
+  <rect x="4" y="9" width="3" height="1" fill="#e9ad32"/>
+  <rect x="0" y="10" width="3" height="1" fill="#d99520"/>
+  <rect x="4" y="10" width="3" height="1" fill="#d99520"/>
+</svg>

@@ -1,5 +1,33 @@
 import { BLOCK_SIZE } from "@2dcraft.com/shared/constants.js";
 
+const SWORD_ARM_SWING = [
+    [0, 0],
+    [0.22, -0.55],
+    [0.5, 1.1],
+    [0.78, 0.4],
+    [1, 0],
+];
+const SWORD_WEAPON_SWING = [
+    [0, 0],
+    [0.22, -0.35],
+    [0.5, 0.85],
+    [0.78, 0.25],
+    [1, 0],
+];
+
+function sampleSwing(points, progress) {
+    for (let index = 1; index < points.length; index++) {
+        const [end, endValue] = points[index];
+        if (progress > end) continue;
+
+        const [start, startValue] = points[index - 1];
+        const phase = Math.max(0, Math.min(1, (progress - start) / (end - start)));
+        const eased = phase * phase * (3 - 2 * phase);
+        return startValue + (endValue - startValue) * eased;
+    }
+    return 0;
+}
+
 export function getHeadPitch(lookDirection = 0) {
     const angle = lookDirection * Math.PI / 180;
     // Fold left/right aiming into the same up/down pitch in model space.
@@ -36,6 +64,22 @@ export function getBoatPartPitch(name, phase) {
     if (name === "rightArm") return 0.75 - Math.sin(phase) * 0.55;
     if (name === "leftLeg" || name === "rightLeg") return 1.05;
     return 0;
+}
+
+export function getSwordSwingPose(swing, holdItem, seconds) {
+    if (!swing || swing.weaponId !== holdItem?.itemId ||
+        !Number.isFinite(swing.startedAt) ||
+        !Number.isFinite(swing.duration) || swing.duration <= 0) return null;
+
+    const age = seconds - swing.startedAt;
+    if (age < 0 || age >= swing.duration) return null;
+
+    const progress = age / swing.duration;
+    return {
+        direction: Math.sign(swing.aim?.x) || Math.sign(swing.facing) || 1,
+        armAngle: sampleSwing(SWORD_ARM_SWING, progress),
+        weaponAngle: sampleSwing(SWORD_WEAPON_SWING, progress),
+    };
 }
 
 // Cosmetic mob pose. Movement, attacks, hitboxes, and saves remain authoritative.

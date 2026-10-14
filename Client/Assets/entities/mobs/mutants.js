@@ -62,12 +62,14 @@ function nearestMob(mob, range, canTarget) {
     return nearest;
 }
 
-function triggerAttackPose(entity, duration = 0.4) {
+function triggerAttackPose(entity, duration = 0.4, kind = "melee") {
     entity.attackPoseDuration = duration;
     entity.attackPoseUntil = runtime.passedTime + duration;
+    entity.attackPoseKind = kind;
     if (entity.body) {
         entity.body.mutantAttackPoseDuration = duration;
         entity.body.mutantAttackPoseUntil = entity.attackPoseUntil;
+        entity.body.mutantAttackPoseKind = kind;
     }
 }
 
@@ -112,31 +114,31 @@ export class MutantZombie extends Zombie {
         const direction = Math.sign(
             player.position.x + player.hitbox.x / 2 - this.position.x - this.hitbox.x / 2,
         ) || this.direction;
-        player.hit(5, this.position.x, 5, `Hit by ${this.name}'s roar`);
+        player.hit(5, this.position.x, 5, `Hit by ${this.name}'s roar`, this);
         player.velocity.x += direction * 3 * BLOCK_SIZE;
         player.velocity.y = Math.min(player.velocity.y, -2 * BLOCK_SIZE);
         this.roarCooldown = randomRange(8, 11);
         this.roarMoveUntil = runtime.passedTime + 0.8;
         this.targetVelocity.x = 0;
         playMutantSound(this, mutantSounds("mutant_zombie", ["roar1", "roar2"]));
-        triggerAttackPose(this, 0.8);
+        triggerAttackPose(this, 0.8, "roar");
     }
 
     hitPlayerLogic() {
         if (this.attackCooldown) return;
         const player = this.entityCollision(EntityTypes.Player);
-        if (!player?.abilities.hasHealth) return;
+        if (!player || !player.abilities.hasHealth) return;
         if (Math.random() < 0.2) {
             const direction = Math.sign(player.position.x - this.position.x) || this.direction;
-            player.hit(8, this.position.x, 0, `Thrown by ${this.name}`);
+            player.hit(8, this.position.x, 0, `Thrown by ${this.name}`, this);
             player.velocity.x = direction * 7 * BLOCK_SIZE;
             player.velocity.y = Math.min(player.velocity.y, -15 * BLOCK_SIZE);
             this.attackCooldown = 2.2;
             playPositionalSound(this.position, "mobs/mutant_zombie/attack.ogg");
-            triggerAttackPose(this, 0.9);
+            triggerAttackPose(this, 0.9, "throw");
             return;
         }
-        player.hit(8, this.position.x, 7, `Killed by ${this.name}`);
+        player.hit(8, this.position.x, 7, `Killed by ${this.name}`, this);
         this.attackCooldown = 1.6;
         playPositionalSound(this.position, "mobs/mutant_zombie/attack.ogg");
         triggerAttackPose(this, 0.45);
@@ -222,7 +224,7 @@ export class MutantCreeper extends Creeper {
         }
         if (!this.attackCooldown &&
             this.entityCollision(EntityTypes.Player)) {
-            player.hit(5, this.position.x, 5, `Hit by ${this.name}`);
+            player.hit(5, this.position.x, 5, `Hit by ${this.name}`, this);
             player.velocity.y = Math.min(player.velocity.y, -3 * BLOCK_SIZE);
             this.attackCooldown = 1.3;
             triggerAttackPose(this, 0.4);
@@ -267,7 +269,7 @@ export class MutantCreeper extends Creeper {
             this.chargeCooldown = randomRange(12, 18);
             this.body.flashingColor = "#8ed8ff";
             if (playerDistance(this, player) < 2.5 * BLOCK_SIZE) {
-                player.hit(6, this.position.x, 2, "Struck by Mutant Creeper lightning");
+                player.hit(6, this.position.x, 2, "Struck by Mutant Creeper lightning", this);
             }
             playPositionalSound(this.position, "mobs/mutant_creeper/charge.ogg");
             return;
@@ -437,7 +439,7 @@ export class MutantSkeleton extends Skeleton {
         this.volleyCooldown = 2.8;
         this.shootMoveUntil = runtime.passedTime + 0.8;
         this.targetVelocity.x = 0;
-        triggerAttackPose(this, 0.8);
+        triggerAttackPose(this, 0.8, "shoot");
     }
 
     fireVolley(target) {
@@ -460,6 +462,7 @@ export class MutantSkeleton extends Skeleton {
                         Math.sin(shotAngle) * 18 * BLOCK_SIZE,
                     ),
                     dimension: this.dimension,
+                    ownerUUID: this.UUID,
                 },
                 multiplayer,
             );
@@ -473,7 +476,7 @@ export class MutantSkeleton extends Skeleton {
             playerDistance(this, player) > 2.3 * BLOCK_SIZE) return;
         const direction = Math.sign(player.position.x - this.position.x) || this.direction;
         if (direction !== this.direction) return;
-        player.hit(8, this.position.x, 0, `Punched by ${this.name}`);
+        player.hit(8, this.position.x, 0, `Punched by ${this.name}`, this);
         player.velocity.x = direction * 7 * BLOCK_SIZE;
         player.velocity.y = Math.min(player.velocity.y, -4 * BLOCK_SIZE);
         this.attackCooldown = 1.3;
@@ -529,7 +532,7 @@ export class MutantEnderman extends Enderman {
             player.dimension !== this.dimension) return;
 
         if (!this.attackCooldown && this.entityCollision(EntityTypes.Player)) {
-            player.hit(12, this.position.x, 8, `Hit by ${this.name}`);
+            player.hit(12, this.position.x, 8, `Hit by ${this.name}`, this);
             this.attackCooldown = 1.6;
             triggerAttackPose(this, 0.5);
         }
@@ -553,7 +556,7 @@ export class MutantEnderman extends Enderman {
         this.direction = Math.sign(player.position.x - destination.x) || this.direction;
         this.moving = false;
         this.resetMoveTime();
-        triggerAttackPose(this, 0.5);
+        triggerAttackPose(this, 0.5, "teleport");
         this.hitNearbyEntities();
     }
 
@@ -700,7 +703,7 @@ export class MutantSnowGolem extends SnowGolem {
             multiplayer,
         );
         this.attackCooldown = 1.5;
-        triggerAttackPose(this, 0.4);
+        triggerAttackPose(this, 0.4, "throw");
     }
 }
 
@@ -751,9 +754,9 @@ export class SpiderPig extends Pig {
             this.velocity.y = Math.min(this.velocity.y, -2 * BLOCK_SIZE);
         }
         if (distance <= 1.5 * BLOCK_SIZE && !this.attackCooldown) {
-            target.hit(8, this.position.x, 5, `Bitten by ${this.name}`);
+            target.hit(8, this.position.x, 5, `Bitten by ${this.name}`, this);
             this.attackCooldown = 1.3;
-            triggerAttackPose(this, 0.4);
+            triggerAttackPose(this, 0.4, "bite");
             return;
         }
         if (!this.grounded || this.leapCooldown > 0 ||

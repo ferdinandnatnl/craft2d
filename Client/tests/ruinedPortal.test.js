@@ -11,7 +11,7 @@ test("ruined portals are sparse and seed dependent", () => {
     const locations = seed => Array.from({ length: 2001 }, (_, i) => i - 1000)
         .filter(index => isRuinedPortalChunk(seed, index));
     const first = locations("overworld-a");
-    assert.ok(first.length >= 10 && first.length <= 50, `found ${first.length} in 2001 chunks`);
+    assert.ok(first.length >= 40 && first.length <= 55, `found ${first.length} in 2001 chunks`);
     assert.deepEqual(first, locations("overworld-a"));
     assert.notDeepEqual(first, locations("overworld-b"));
 });

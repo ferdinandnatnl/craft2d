@@ -46,6 +46,7 @@
     color: #fff;
     text-shadow: 0.15em 0.15em rgba(0, 0, 0, 0.55);
     letter-spacing: 0.02em;
+    overflow-wrap: anywhere;
 }
 
 .media-boot-bar {

@@ -24,6 +24,8 @@ export class Chat {
 
         this.currentMessage = "";
         this.cursorPosition = 0;
+        this.selectionStart = 0;
+        this.selectionEnd = 0;
 
         this.cursorBlinkTime = 0;
         this.showCursor = true;
@@ -47,6 +49,7 @@ export class Chat {
     openChat() {
         this.historyIndex = 0;
         this.inChat = true;
+        this.clearSelection();
         if (runtime.world.player) runtime.world.player.canMove = false;
         document.addEventListener("keydown", this._boundKeyHandler, {
             capture: true,
@@ -61,12 +64,21 @@ export class Chat {
         });
         this.currentMessage = "";
         this.cursorPosition = 0;
+        this.clearSelection();
         this.resetAutocomplete();
     }
 
     _handleChatKeyDown(event) {
         event.preventDefault();
         const key = event.key;
+
+        if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "a") {
+            this.resetAutocomplete();
+            this.selectionStart = 0;
+            this.selectionEnd = this.currentMessage.length;
+            this.cursorPosition = this.currentMessage.length;
+            return;
+        }
 
         if (key === "Escape") {
             this.closeChat();
@@ -83,38 +95,61 @@ export class Chat {
         }
         if (key === "Backspace") {
             this.resetAutocomplete();
-            if (this.cursorPosition > 0) {
+            if (this.hasSelection()) {
+                const start = Math.min(this.selectionStart, this.selectionEnd);
+                const end = Math.max(this.selectionStart, this.selectionEnd);
+                this.currentMessage =
+                    this.currentMessage.slice(0, start) +
+                    this.currentMessage.slice(end);
+                this.cursorPosition = start;
+            } else if (this.cursorPosition > 0) {
                 this.currentMessage =
                     this.currentMessage.slice(0, this.cursorPosition - 1) +
                     this.currentMessage.slice(this.cursorPosition);
                 this.cursorPosition--;
             }
+            this.clearSelection();
             return;
         }
         if (key === "Delete") {
             this.resetAutocomplete();
-            if (this.cursorPosition < this.currentMessage.length) {
+            if (this.hasSelection()) {
+                const start = Math.min(this.selectionStart, this.selectionEnd);
+                const end = Math.max(this.selectionStart, this.selectionEnd);
+                this.currentMessage =
+                    this.currentMessage.slice(0, start) +
+                    this.currentMessage.slice(end);
+                this.cursorPosition = start;
+            } else if (this.cursorPosition < this.currentMessage.length) {
                 this.currentMessage =
                     this.currentMessage.slice(0, this.cursorPosition) +
                     this.currentMessage.slice(this.cursorPosition + 1);
             }
+            this.clearSelection();
             return;
         }
         if (key === "ArrowLeft") {
             this.resetAutocomplete();
-            this.cursorPosition = Math.max(0, this.cursorPosition - 1);
+            this.cursorPosition = this.hasSelection()
+                ? Math.min(this.selectionStart, this.selectionEnd)
+                : Math.max(0, this.cursorPosition - 1);
+            this.clearSelection();
             return;
         }
         if (key === "ArrowRight") {
             this.resetAutocomplete();
-            this.cursorPosition = Math.min(
-                this.currentMessage.length,
-                this.cursorPosition + 1,
-            );
+            this.cursorPosition = this.hasSelection()
+                ? Math.max(this.selectionStart, this.selectionEnd)
+                : Math.min(
+                      this.currentMessage.length,
+                      this.cursorPosition + 1,
+                  );
+            this.clearSelection();
             return;
         }
         if (key === "ArrowUp") {
             this.resetAutocomplete();
+            this.clearSelection();
             if (
                 this.chatLog.length > 0 &&
                 this.historyIndex < this.chatLog.length
@@ -129,6 +164,7 @@ export class Chat {
         }
         if (key === "ArrowDown") {
             this.resetAutocomplete();
+            this.clearSelection();
             if (this.historyIndex > 1) {
                 this.historyIndex--;
                 this.currentMessage =
@@ -149,14 +185,22 @@ export class Chat {
             !event.altKey &&
             !event.metaKey
         ) {
-            if (this.currentMessage.length >= this.maxLength) return;
+            const start = this.hasSelection()
+                ? Math.min(this.selectionStart, this.selectionEnd)
+                : this.cursorPosition;
+            const end = this.hasSelection()
+                ? Math.max(this.selectionStart, this.selectionEnd)
+                : this.cursorPosition;
+            if (this.currentMessage.length - (end - start) >= this.maxLength)
+                return;
             if (event.repeat) return;
             this.resetAutocomplete();
             this.currentMessage =
-                this.currentMessage.slice(0, this.cursorPosition) +
+                this.currentMessage.slice(0, start) +
                 key +
-                this.currentMessage.slice(this.cursorPosition);
-            this.cursorPosition++;
+                this.currentMessage.slice(end);
+            this.cursorPosition = start + key.length;
+            this.clearSelection();
         }
     }
 
@@ -263,6 +307,15 @@ export class Chat {
         this.originalInput = "";
         this.completionStart = 0;
         this.completionEnd = 0;
+    }
+
+    hasSelection() {
+        return this.selectionStart !== this.selectionEnd;
+    }
+
+    clearSelection() {
+        this.selectionStart = this.cursorPosition;
+        this.selectionEnd = this.cursorPosition;
     }
 
     getCompletionContext() {
@@ -447,6 +500,7 @@ export class Chat {
 
     autocomplete() {
         if (!this.inChat) return;
+        this.clearSelection();
 
         if (this.suggestionIndex === -1) {
             const context = this.getCompletionContext();
@@ -1118,6 +1172,10 @@ export class Chat {
         this.message("5. Craft eyes. Use one to find the End shrine.", "", Colors.Aqua);
         this.message("6. Fill its three frames; enter the End.", "", Colors.Aqua);
         this.message("7. Defeat the dragon.", "", Colors.Aqua);
+        this.message("Farm: hoe grass or dirt; plant seeds, carrots, or potatoes.", "", Colors.Aqua);
+        this.message("Keep water within 4 blocks; use bone meal to speed crops.", "", Colors.Aqua);
+        this.message("Breed cows/sheep with wheat, pigs with carrots/potatoes, chickens with seeds.", "", Colors.Aqua);
+        this.message("Feed babies to help them grow. Chickens lay eggs; thrown eggs can hatch chicks.", "", Colors.Aqua);
         this.message("Use /locate village to find the nearest village.", "", Colors.Aqua);
         this.message("Shear a pumpkin and place it last to build a golem.", "", Colors.Aqua);
         this.message("Snow golem: 2 snow blocks below the pumpkin.", "", Colors.Aqua);
@@ -1225,6 +1283,21 @@ export class Chat {
         const beforeCursor = this.currentMessage.slice(0, this.cursorPosition);
         const cursorX = 17 + this.measureTextWidth(beforeCursor, 30);
 
+        if (this.hasSelection()) {
+            const start = Math.min(this.selectionStart, this.selectionEnd);
+            const end = Math.max(this.selectionStart, this.selectionEnd);
+            const selectionX = 17 + this.measureTextWidth(
+                this.currentMessage.slice(0, start),
+                30,
+            );
+            const selectionWidth = this.measureTextWidth(
+                this.currentMessage.slice(start, end),
+                30,
+            );
+            ctx.fillStyle = "rgba(70, 130, 255, .65)";
+            ctx.fillRect(selectionX, CANVAS.height - 45, selectionWidth, 30);
+        }
+
         drawText({
             text: this.currentMessage,
             x: 17,
@@ -1235,7 +1308,7 @@ export class Chat {
             textAlign: "left",
         });
 
-        if (this.showCursor) {
+        if (this.showCursor && !this.hasSelection()) {
             ctx.fillStyle = "white";
             ctx.fillRect(cursorX, CANVAS.height - 22, 13, 4); // Draw cursor
         }

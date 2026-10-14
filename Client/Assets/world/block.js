@@ -259,6 +259,21 @@ export class Block extends Square {
         let props = {};
         let storage = [];
 
+        if (block.blockId === Blocks().Farmland) {
+            this.metaData = new Metadata({ moisture: 0, moistureDecayTicks: 0 });
+            return;
+        }
+
+        if ([Blocks().CrocodileEgg, Blocks().CaimanEgg].includes(block.blockId)) {
+            this.metaData = new Metadata({
+                hatch: 0,
+                eggs: 1,
+                hatchTicks: 0,
+                wasDawn: false,
+            });
+            return;
+        }
+
         if (block.blockId === Blocks().SeaPickle) {
             this.metaData = new Metadata({ waterlogged: true, pickles: 1 });
             this.updateSeaPickleLightLevel();
@@ -391,11 +406,12 @@ export class Block extends Square {
     }
 
     recieveSyncMetaData(metaData) {
+        const previousOpen = this.metaData?.open;
         this.metaData = new Metadata(metaData);
-
         if (this.blockType === Blocks().SeaPickle) {
             this.updateSeaPickleLightLevel(true);
         }
+        this.updateStateFromMetaData();
 
         if (this.metaData.storage) {
             const storage = this.metaData.storage.map((row) =>
@@ -405,17 +421,21 @@ export class Block extends Square {
             this.metaData.storage = storage;
         }
 
+        if (previousOpen !== this.metaData?.open) this.markChunkDirty();
+
         if (this.world.player?.inventory.interactedBlock === this) {
             this.world.player.inventory.reloadStorageSlots();
         }
     }
 
     setBlockMetaData(metaData) {
+        const previousOpen = this.metaData?.open;
         this.metaData = new Metadata(metaData);
 
         if (this.blockType === Blocks().SeaPickle) {
             this.updateSeaPickleLightLevel(true);
         }
+        this.updateStateFromMetaData();
 
         if (this.metaData.storage) {
             // Create a deep copy of the storage array and create new InventoryItem instances with the copied data
@@ -425,6 +445,8 @@ export class Block extends Square {
 
             this.metaData.storage = storage;
         }
+
+        if (previousOpen !== this.metaData?.open) this.markChunkDirty();
     }
 
     updateSeaPickleLightLevel(markDirty = false) {
@@ -466,11 +488,30 @@ export class Block extends Square {
         return true;
     }
 
+    updateStateFromMetaData() {
+        if (!this.metaData) return;
+        if (this.blockType === Blocks().Farmland &&
+            Number.isFinite(this.metaData.moisture)) {
+            this.setState(this.metaData.moisture > 0 ? 1 : 0);
+        }
+        const blockDef = getBlock(this.blockType);
+        if (blockDef.cropOutcome && Number.isInteger(this.metaData.stage)) {
+            this.setState(Math.max(0, Math.min(
+                blockDef.states.length - 1,
+                this.metaData.stage,
+            )));
+        }
+        if ([Blocks().CrocodileEgg, Blocks().CaimanEgg].includes(this.blockType) &&
+            Number.isInteger(this.metaData.hatch)) {
+            this.setState(Math.max(0, Math.min(2, this.metaData.hatch)));
+        }
+    }
+
     setBlockType(blockType, override = false) {
         if (this.blockType === blockType && !override) return;
 
-        const myChunk = getDimensionChunks(activeDimension).has(this.chunkX)
-            ? getDimensionChunks(activeDimension).get(this.chunkX)
+        const myChunk = getDimensionChunks(this.dimensionIndex).has(this.chunkX)
+            ? getDimensionChunks(this.dimensionIndex).get(this.chunkX)
             : null;
 
         this.dark = false;
@@ -545,6 +586,7 @@ export class Block extends Square {
         this.redstoneOutput = this.wall ? 0 : block.baseRedstoneOutput;
 
         this.updateSprite();
+        this.markChunkDirty();
     }
 
     update() {
@@ -554,6 +596,11 @@ export class Block extends Square {
         if (blockDef.fluid) {
             this.updateSprite();
             this.simulateWaterFlow();
+        }
+
+        if (blockDef.blockId === Blocks().Farmland) {
+            this.handleFarmlandMoisture();
+            return;
         }
 
         if (blockDef.spawnerType) this.handleSpawner();
@@ -568,6 +615,11 @@ export class Block extends Square {
         }
 
         if (!this.metaData) return;
+
+        if ([Blocks().CrocodileEgg, Blocks().CaimanEgg].includes(blockDef.blockId)) {
+            this.reptileEggLogic();
+            return;
+        }
 
         // Handle crop growth
         if (blockDef.cropOutcome) {
@@ -919,6 +971,7 @@ export class Block extends Square {
     }
 
     handleSpawner() {
+        if (multiplayer && !this.world.isWorldAuthority) return;
         if (activeDimension !== this.dimensionIndex) return;
 
         const props = this.metaData;
@@ -987,8 +1040,17 @@ export class Block extends Square {
             this.metaData.stage = 0;
         }
 
-        // Increment growth every tick
-        if (this.lightLevel > 5) this.metaData.growth++;
+        const farmland = this.world.getBlockAtWorldPosition(
+            this.transform.position.x,
+            this.transform.position.y + BLOCK_SIZE,
+            false,
+            this.dimensionIndex,
+        );
+        const growthRate = farmland?.blockType === Blocks().Farmland &&
+            (farmland.metaData?.moisture ?? 0) > 0
+            ? 1
+            : 0.25;
+        if (this.lightLevel > 8) this.metaData.growth += growthRate;
 
         // Calculate total stages from states array
         const totalStages = blockDef.states.length;
@@ -1006,11 +1068,64 @@ export class Block extends Square {
             this.setState(currentStage);
         }
 
-        // // Check if fully grown
-        // if (currentStage === totalStages - 1) {
-        //     // Fully grown, ready to harvest
-        //     // We'll let breaking the block handle the loot (no auto-harvest)
-        // }
+    }
+
+    handleFarmlandMoisture() {
+        if (!this.metaData) this.metaData = new Metadata({ moisture: 0, moistureDecayTicks: 0 });
+        const wasMoist = this.metaData.moisture > 0;
+        if (this.isWaterNearby()) {
+            this.metaData.moisture = 7;
+            this.metaData.moistureDecayTicks = 0;
+        } else if (this.metaData.moisture > 0) {
+            this.metaData.moistureDecayTicks =
+                (this.metaData.moistureDecayTicks || 0) + 1;
+            if (this.metaData.moistureDecayTicks >= TICK_SPEED * 30) {
+                this.metaData.moisture--;
+                this.metaData.moistureDecayTicks = 0;
+            }
+        }
+
+        const isMoist = this.metaData.moisture > 0;
+        if (wasMoist !== isMoist) {
+            this.setState(isMoist ? 1 : 0);
+            this.syncMetaData(false);
+        }
+    }
+
+    isWaterNearby() {
+        for (let x = -4; x <= 4; x++) {
+            for (let y = -1; y <= 0; y++) {
+                const nearby = this.world.getBlockAtWorldPosition(
+                    this.transform.position.x + x * BLOCK_SIZE,
+                    this.transform.position.y + y * BLOCK_SIZE,
+                    false,
+                    this.dimensionIndex,
+                );
+                if (nearby?.blockType === Blocks().Water) return true;
+            }
+        }
+        return false;
+    }
+
+    applyBoneMeal() {
+        const blockDef = getBlock(this.blockType);
+        if (blockDef.cropOutcome) {
+            const maxStage = blockDef.states.length - 1;
+            if ((this.metaData?.stage ?? 0) >= maxStage) return false;
+            this.metaData.growth = Math.min(
+                maxStage * blockDef.cropSpeed,
+                (this.metaData.growth || 0) + randomRange(2, 4) * blockDef.cropSpeed,
+            );
+            this.handleCropGrowth(blockDef);
+            this.syncMetaData();
+            return true;
+        }
+
+        if (!blockDef.saplingOutcome || !this.metaData) return false;
+        this.metaData.growth = (this.metaData.growth || 0) + randomRange(600, 1_200);
+        if (this.metaData.growth >= 2_400) this.saplingGrow();
+        else this.syncMetaData();
+        return true;
     }
 
     saplingGrow() {
@@ -1037,7 +1152,164 @@ export class Block extends Square {
         return chunk.localYToUserY(this.y);
     }
 
-    entityCollision(entity) {}
+    entityCollision(entity) {
+        if (![Blocks().CrocodileEgg, Blocks().CaimanEgg].includes(this.blockType) ||
+            !this.canTrampleReptileEgg(entity)) return;
+
+        const ticksPerSecond = Math.max(0, runtime.deltaTime || 0) * 20;
+        const chance = entity.fallDistance >= 3
+            ? Math.min(1, ticksPerSecond / 3)
+            : Math.min(1, ticksPerSecond / 100);
+        if (Math.random() < chance) this.crushReptileEgg(entity);
+    }
+
+    canTrampleReptileEgg(entity) {
+        const typeName = entity?.entityTypeName || entity?.name;
+        if (["Crocodile", "Caiman", "Platypus", "Bat"].includes(typeName)) return false;
+        if (entity?.type === 1) return true;
+        return entity?.type === 3 && runtime.GAMERULES.doMobGriefing;
+    }
+
+    crushReptileEgg(trampler) {
+        const blockPosition = this.world.getBlockWorldPosition(this);
+        this.playBreakSound();
+        this.playBreakParticles();
+        this.world.setBlockTypeAtPosition(
+            blockPosition.x,
+            blockPosition.y,
+            Blocks().Air,
+            false,
+            this.dimensionIndex,
+            null,
+            false,
+            false,
+        );
+
+        const isCaimanEgg = this.blockType === Blocks().CaimanEgg;
+        for (const reptile of this.world.entities) {
+            if (
+                !(isCaimanEgg ? reptile.isCaiman : reptile.isCrocodile) ||
+                reptile.dimension !== this.dimensionIndex ||
+                reptile.health <= 0 ||
+                reptile.tamed ||
+                Vector2.Distance(
+                    new Vector2(
+                        reptile.position.x + reptile.hitbox.x / 2,
+                        reptile.position.y + reptile.hitbox.y / 2,
+                    ),
+                    blockPosition,
+                ) > BLOCK_SIZE * 25
+            ) continue;
+            reptile.currentTarget = trampler;
+            reptile.retaliationTarget = trampler;
+            reptile.retaliationUntil = runtime.passedTime + 8;
+        }
+    }
+
+    reptileEggLogic() {
+        const state = this.metaData;
+        const ground = this.world.getBlockAtWorldPosition(
+            this.transform.position.x,
+            this.transform.position.y + BLOCK_SIZE,
+            false,
+            this.dimensionIndex,
+        );
+        if (!ground || !isReptileEggGround(ground.blockType)) return;
+
+        const isDawn = runtime.day === true &&
+            runtime.time >= 6.5 &&
+            runtime.time < 6.75;
+        const dawnCrack = isDawn && !state.wasDawn;
+        state.wasDawn = isDawn;
+        state.hatchTicks = (state.hatchTicks || 0) + 1;
+        if (!dawnCrack && Math.random() >= 1 / 120) return;
+
+        if (state.hatch < 2) {
+            state.hatch++;
+            this.setState(state.hatch);
+            this.syncMetaData(false);
+            return;
+        }
+
+        const count = Math.max(1, state.eggs || 1);
+        if (this.blockType === Blocks().CaimanEgg) this.hatchCaimanEggs(count);
+        else this.hatchCrocodileEggs(count);
+    }
+
+    crocodileEggLogic() {
+        this.reptileEggLogic();
+    }
+
+    hatchCrocodileEggs(count) {
+        this.hatchReptileEggs(count, "Crocodile");
+    }
+
+    hatchCaimanEggs(count) {
+        this.hatchReptileEggs(count, "Caiman");
+    }
+
+    hatchReptileEggs(count, entityName) {
+        const spawnType = entityRegistry.Entities?.[entityName];
+        if (!spawnType || typeof this.world?.summonEntity !== "function") return;
+
+        const eggPosition = this.world.getBlockWorldPosition(this);
+        const players = (this.world.entities || []).filter(entity =>
+            entity.type === 1 &&
+            entity.dimension === this.dimensionIndex &&
+            entity.abilities?.hasHealth,
+        );
+        const closestPlayer = players
+            .map(player => ({
+                player,
+                distance: Vector2.Distance(
+                    new Vector2(
+                        player.position.x + player.hitbox.x / 2,
+                        player.position.y + player.hitbox.y / 2,
+                    ),
+                    eggPosition,
+                ),
+            }))
+            .filter(({ distance }) => distance <= BLOCK_SIZE * 20)
+            .sort((a, b) => a.distance - b.distance)[0]?.player;
+
+        this.world.setBlockTypeAtPosition(
+            eggPosition.x,
+            eggPosition.y,
+            Blocks().Air,
+            false,
+            this.dimensionIndex,
+            null,
+            false,
+            false,
+        );
+
+        for (let index = 0; index < count; index++) {
+            const position = new Vector2(
+                eggPosition.x + BLOCK_SIZE * (0.2 + index * 0.2),
+                eggPosition.y - spawnType.spawnSize.height * BLOCK_SIZE,
+            );
+            const hatchling = this.world.summonEntity(
+                spawnType,
+                position,
+                {
+                    myChunkX: this.chunkX,
+                    tamed: Boolean(closestPlayer),
+                    ownerUUID: closestPlayer?.UUID ?? null,
+                    sitting: Boolean(closestPlayer),
+                    command: closestPlayer ? 2 : 0,
+                    babyAgeTicks: 24_000,
+                },
+            );
+            hatchling.dimension = this.dimensionIndex;
+            const chunk = this.world.getChunkForX(
+                position.x,
+                this.dimensionIndex,
+            );
+            if (chunk && !chunk.entities.includes(hatchling)) {
+                chunk.entities.push(hatchling);
+            }
+        }
+    }
 
     // Callbacks for entities
     endEntityCollision(entity) {
@@ -1077,8 +1349,15 @@ export class Block extends Square {
 
     setState(index) {
         const sprite = getBlock(this.blockType).states[index];
+        if (sprite !== this.spriteName) this.markChunkDirty();
         this.spriteName = sprite;
         this.setSprite(getSpriteUrl("blocks/" + sprite));
+    }
+
+    markChunkDirty() {
+        const chunk = getDimensionChunks(this.dimensionIndex).get(this.chunkX);
+        if (!chunk) return;
+        chunk.revision = (chunk.revision || 0) + 1;
     }
 
     furnaceLogic() {
@@ -1684,7 +1963,7 @@ export class Block extends Square {
     ) {
         if (getBlock(this.blockType).air) return;
 
-        const chunk = getDimensionChunks(activeDimension).get(this.chunkX);
+        const chunk = getDimensionChunks(this.dimensionIndex).get(this.chunkX);
 
         if (!chunk) return;
 
@@ -1706,7 +1985,7 @@ export class Block extends Square {
         // Handle crop loot when fully grown
         if (!skipDrops) {
             if (!wall && blockDef.cropOutcome) {
-                if (this.metaData?.props?.stage === blockDef.states.length - 1)
+                if (this.metaData?.stage === blockDef.states.length - 1)
                     this.dropCropLoot(blockDef);
                 else this.dropBlock();
             } else if (drop) {
@@ -1720,6 +1999,7 @@ export class Block extends Square {
                     block.x,
                     block.y,
                     wall,
+                    this.dimensionIndex,
                 );
 
                 if (blockAtPos && blockAtPos !== this) {
@@ -1754,6 +2034,8 @@ export class Block extends Square {
 
     playBreakParticles() {
         const blockDef = getBlock(this.blockType);
+
+        this.world.fallingLeavesEmitter?.spawnFromBlock(this);
 
         if (!blockDef.iconSprite) return;
 
@@ -1794,6 +2076,7 @@ export class Block extends Square {
                     itemId: item.itemId,
                     count: item.count,
                 },
+                this.dimensionIndex,
             );
         });
     }
@@ -1840,6 +2123,7 @@ export class Block extends Square {
                     itemId: item.itemId,
                     count: item.count,
                 },
+                this.dimensionIndex,
             );
         });
     }
@@ -1866,6 +2150,7 @@ export class Block extends Square {
                 itemId: block.dropItem != null ? block.dropItem : null,
                 props: props,
             },
+            this.dimensionIndex,
         );
     }
 
@@ -1888,6 +2173,7 @@ export class Block extends Square {
                         count: item.count,
                         props: structuredClone(item.props || {}),
                     },
+                    this.dimensionIndex,
                 );
             }
         }
@@ -2007,6 +2293,19 @@ export class Block extends Square {
 
 export function getBlock(blockId) {
     return blockMap().has(blockId) ? blockMap().get(blockId) : 0;
+}
+
+function isReptileEggGround(blockType) {
+    const blocks = Blocks();
+    return [
+        blocks.Dirt,
+        blocks.GrassBlock,
+        blocks.Podzol,
+        blocks.Sand,
+        blocks.SandStone,
+        blocks.Gravel,
+        blocks.Stone,
+    ].includes(blockType);
 }
 
 export function getDoorPair(blockType) {

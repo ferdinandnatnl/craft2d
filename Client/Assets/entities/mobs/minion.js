@@ -25,6 +25,7 @@ export const MinionState = Object.freeze({
     Mining: "mining",
     Woodcutting: "woodcutting",
     Excavating: "excavating",
+    Building: "building",
     CollectingItems: "collecting-items",
     CarryingEntity: "carrying-entity",
     DeliveringResources: "delivering-resources",
@@ -38,6 +39,10 @@ const MAX_TREE_BLOCKS = 256;
 const TREE_SCAN_RADIUS = 32;
 const MAX_TREES_PER_SEARCH = 16;
 const MAX_EXCAVATION_SIDE = 64;
+const MAX_BLUEPRINT_SIDE = 32;
+const MAX_BLUEPRINT_BLOCKS = MAX_BLUEPRINT_SIDE * MAX_BLUEPRINT_SIDE * 2;
+const MINESHAFT_HEADROOM_BLOCKS = 3;
+const MINING_PROGRESS_IDLE_TIMEOUT = 1.25;
 const AI_INTERVAL = 0.18;
 const PATH_REFRESH_INTERVAL = 0.7;
 const DEFAULT_WORTHLESS_BLOCKS = new Set([
@@ -62,6 +67,13 @@ const DEFAULT_WORTHLESS_BLOCKS = new Set([
 
 const tileKey = ({ x, y }) => `${x},${y}`;
 const reservationKey = (dimension, { x, y }) => `${dimension}:${x},${y}`;
+const jobReservationKey = (job) => job ? JSON.stringify({
+    type: job.type,
+    target: job.target,
+    blockType: job.blockType,
+    bounds: job.bounds,
+    direction: job.direction,
+}) : null;
 const cloneData = (value) => value == null ? null : JSON.parse(JSON.stringify(value));
 
 function copyInventoryItem(item = {}) {
@@ -119,9 +131,10 @@ function climbMaterialFromBlock(block) {
 }
 
 function createMinionBody() {
-    return new Body({
+    const renderScale = BLOCK_SIZE / 30;
+    const body = new Body({
         sprite: "minion/as_entityminion",
-        renderScale: 4,
+        renderScale,
         parts: {
             leftLeg: new BodyPart({
                 spriteCrop: { x: 3, y: 13, width: 2, height: 5 },
@@ -178,6 +191,8 @@ function createMinionBody() {
             }),
         },
     });
+    body.drawOffsetY = BLOCK_SIZE - 25.5 * renderScale;
+    return body;
 }
 
 function validTask(task) {
@@ -231,6 +246,44 @@ function validTask(task) {
             bounds.maxY - bounds.minY >= MAX_EXCAVATION_SIDE) return null;
         return { type: task.type, bounds: { ...bounds } };
     }
+    if (task.type === "build") {
+        const target = tile(task.target);
+        if (!target || !Array.isArray(task.blueprint) ||
+            task.blueprint.length === 0 || task.blueprint.length > MAX_BLUEPRINT_BLOCKS) {
+            return null;
+        }
+        const blueprint = [];
+        const seen = new Set();
+        for (const entry of task.blueprint) {
+            const definition = getBlock(entry?.blockType);
+            if (!Number.isInteger(entry?.x) || !Number.isInteger(entry?.y) ||
+                entry.x < 0 || entry.x >= MAX_BLUEPRINT_SIDE ||
+                entry.y < 0 || entry.y >= MAX_BLUEPRINT_SIDE ||
+                !Number.isInteger(entry.blockType) || entry.blockType < 0 ||
+                !definition || definition.air || definition.fluid ||
+                !definition.collision || definition.specialType ||
+                definition.extendedBlock ||
+                Math.abs(target.x + entry.x) > 1_000_000 ||
+                target.y + entry.y >= CHUNK_HEIGHT ||
+                (entry.wall !== undefined && typeof entry.wall !== "boolean")) return null;
+            const key = `${entry.wall === true ? 1 : 0}:${entry.x},${entry.y}`;
+            if (seen.has(key)) return null;
+            seen.add(key);
+            blueprint.push({
+                x: entry.x,
+                y: entry.y,
+                blockType: entry.blockType,
+                wall: entry.wall === true,
+            });
+        }
+        return {
+            type: "build",
+            target,
+            blueprint,
+            ...(task.started === true ? { started: true } : {}),
+            ...(Number.isInteger(task.steps) ? { steps: Math.max(0, task.steps) } : {}),
+        };
+    }
     if (task.type === "mineshaft" || task.type === "stripmine") {
         const target = tile(task.target);
         if (!target) return null;
@@ -243,6 +296,10 @@ function validTask(task) {
             result.currentY = task.currentY;
             result.steps = Number.isInteger(task.steps)
                 ? Math.max(0, Math.min(CHUNK_HEIGHT, task.steps)) : 0;
+            result.lastSupportStep = Number.isInteger(task.lastSupportStep)
+                ? Math.max(0, Math.min(CHUNK_HEIGHT, task.lastSupportStep)) : 0;
+            result.lastTorchStep = Number.isInteger(task.lastTorchStep)
+                ? Math.max(0, Math.min(CHUNK_HEIGHT, task.lastTorchStep)) : 0;
             result.phase = task.type === "stripmine" ? "tunnel" : "shaft";
             if (task.type === "mineshaft") {
                 result.targetY = Number.isInteger(task.targetY)
@@ -287,6 +344,7 @@ export class Minion extends Villager {
             UUID,
             body: createMinionBody(),
         });
+        this.holdItem = new InventoryItem({ itemId: Items.IronPickaxe, count: 1 });
         this.name = "Minion";
         this.entityTypeName = "Minion";
         this.isMinion = true;
@@ -294,8 +352,9 @@ export class Minion extends Villager {
         this.dimension = dimension;
         this.direction = direction < 0 ? -1 : 1;
         this.hitbox.x = 0.52 * BLOCK_SIZE;
-        this.hitbox.y = 1.35 * BLOCK_SIZE;
+        this.hitbox.y = BLOCK_SIZE;
         this.speed = 1.5;
+        this.acceleration = 24;
         this.maxVelocity.x = this.speed * BLOCK_SIZE * 1.5;
         this.workSpeedBonusUntil = 0;
         this.ownerMissingTimer = 0;
@@ -320,18 +379,22 @@ export class Minion extends Villager {
         this.path = null;
         this.pathGoalKey = null;
         this.pathTimer = 0;
-        this.pathFindingFails = 0;
         this.aiTimer = 0;
         this.searchTimer = 0;
         this.stuckTimer = 0;
+        this.stuckRecoveryAttempts = 0;
         this.lastX = position.x;
         this.miningTimer = 0;
         this.miningKey = null;
         this.miningBlockPosition = null;
+        this.miningBlockType = null;
         this.miningProgress = 0;
         this.miningStage = 0;
         this.miningSoundTimer = 0;
         this.workSwingProgress = 0;
+        this.workSwingStartedAt = 0;
+        this.workSwingUntil = 0;
+        this.unreachableTargets = new Map();
         this.retryTimer = 0;
         this.collectTimer = 0;
         this.syncTimer = 0;
@@ -387,6 +450,10 @@ export class Minion extends Villager {
         this.job = validTask(task);
         this.currentTarget = null;
         this.path = null;
+        this.pathGoalKey = null;
+        this.stuckTimer = 0;
+        this.stuckRecoveryAttempts = 0;
+        this.unreachableTargets.clear();
         this.clearMiningProgress();
         this.resumeTaskAfterDelivery = null;
         this.deliveryActive = false;
@@ -459,14 +526,20 @@ export class Minion extends Villager {
         const walked = Math.abs(this.position.x - previousX);
         const walkSpeed = dt > 0 ? walked / dt : 0;
         const targetWalkAmount = this.grounded && walked < BLOCK_SIZE
-            ? Math.min(1, walkSpeed / BLOCK_SIZE * 0.2)
+            ? Math.min(1, walkSpeed / BLOCK_SIZE * 0.6)
             : 0;
         this.walkAnimationAmount += (targetWalkAmount - this.walkAnimationAmount) *
             (1 - Math.pow(0.6, dt * 20));
         this.walkAnimationPhase += this.walkAnimationAmount * dt * 20;
-        if (this.miningKey && this.miningTimer > 0) {
-            const workSpeed = runtime.passedTime < this.workSpeedBonusUntil ? 2 : 1;
-            this.workSwingProgress = (this.workSwingProgress + dt * 1.7 * workSpeed) % 1;
+        if (this.miningKey && this.miningTimer > 0 &&
+            runtime.passedTime >= this.workSwingUntil) {
+            this.startWorkSwing();
+        }
+        if (runtime.passedTime < this.workSwingUntil) {
+            this.workSwingProgress = Math.min(
+                1,
+                (runtime.passedTime - this.workSwingStartedAt) / 0.32,
+            );
         } else {
             this.workSwingProgress = 0;
         }
@@ -494,6 +567,7 @@ export class Minion extends Villager {
     updateWorkerAI(dt) {
         this.pickUpNearbyDrops();
         if (this.hasInventory() && this.inventoryFull() &&
+            !["build", "mineshaft"].includes(this.job?.type) &&
             this.state !== MinionState.DeliveringResources) {
             this.beginDelivery();
         }
@@ -514,6 +588,7 @@ export class Minion extends Villager {
             case MinionState.Mining:
             case MinionState.Woodcutting:
             case MinionState.Excavating:
+            case MinionState.Building:
                 this.workOnCurrentTarget(dt);
                 break;
             case MinionState.CollectingItems:
@@ -547,17 +622,25 @@ export class Minion extends Villager {
                 break;
         }
         this.collectNearbyDrops();
-        if (Math.abs(this.position.x - this.lastX) < 1 &&
+        const madeProgress = Math.abs(this.position.x - this.lastX) >= 1;
+        if (!madeProgress &&
             Math.abs(this.targetVelocity.x) > 0 && this.grounded) {
             this.stuckTimer += dt;
         } else {
             this.stuckTimer = 0;
+            if (madeProgress) this.stuckRecoveryAttempts = 0;
             this.lastX = this.position.x;
         }
         if (this.stuckTimer > 1.5) {
             this.path = null;
+            this.pathGoalKey = null;
             this.pathTimer = PATH_REFRESH_INTERVAL;
             this.stuckTimer = 0;
+            this.stuckRecoveryAttempts++;
+            if (this.stuckRecoveryAttempts >= 3 && this.job) {
+                if (this.currentTarget) this.skipUnreachableWorkTarget();
+                else this.setUnreachable();
+            }
         }
     }
 
@@ -569,6 +652,9 @@ export class Minion extends Villager {
             case "mine-vein": return MinionState.SearchingResources;
             case "woodcut": return MinionState.SearchingResources;
             case "excavate": return MinionState.SearchingResources;
+            case "build": return job.started
+                ? MinionState.SearchingResources
+                : MinionState.MovingToTarget;
             case "mineshaft":
             case "stripmine":
                 if (this._activeVein) return MinionState.SearchingResources;
@@ -656,7 +742,6 @@ export class Minion extends Villager {
         );
         const clearance = [
             this.blockAt(stepX, stepY - 1),
-            this.blockAt(stepX, stepY - 2),
         ];
         for (const obstacle of clearance) {
             if (!hasBlockCollision(obstacle)) continue;
@@ -720,6 +805,17 @@ export class Minion extends Villager {
     moveForCurrentTask() {
         if (!this.job) return this.finishJob();
         if (this.currentTarget) return this.moveForWorkTarget();
+        if (this.job.type === "build") {
+            if (!this.job.started) {
+                const target = this.job.target;
+                if (!target) return this.finishJob();
+                const candidates = this.stanceCandidatesNear(target, 2, 3);
+                if (!this.navigateTo(candidates, `build:${target.x}:${target.y}`)) return;
+                this.job.started = true;
+            }
+            this.state = MinionState.SearchingResources;
+            return;
+        }
         if (this.job.type === "mineshaft" || this.job.type === "stripmine") {
             if (!this.job.started) {
                 const target = this.job.target;
@@ -758,13 +854,15 @@ export class Minion extends Villager {
         if (!this.job) return this.finishJob();
 
         if (this._activeVein) {
-            const target = this._activeVein
+            const candidates = this._activeVein
                 .filter((entry) => {
                     const block = this.blockAt(entry.x, entry.y);
                     return block && block.blockType === entry.blockType && isMineable(block);
                 })
-                .filter((entry) => !this.isReserved(entry))
-                .sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b))[0];
+                .filter((entry) => !this.isTemporarilyUnreachable(entry))
+                .sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b));
+            const target = candidates.find((entry) => !this.isReserved(entry)) ||
+                this.findCollaborativeWorkTarget(candidates);
             if (target) {
                 this.selectWorkTarget(target, MinionState.Mining);
                 return;
@@ -792,6 +890,12 @@ export class Minion extends Villager {
             this.selectWorkTarget(target, MinionState.Excavating);
             return;
         }
+        if (this.job.type === "build") {
+            const target = this.findBuildTarget();
+            if (!target) return this.finishOrWaitForReservations();
+            this.selectWorkTarget(target, MinionState.Building);
+            return;
+        }
         if (this.job.type === "mineshaft" || this.job.type === "stripmine") {
             this.state = MinionState.Excavating;
             return;
@@ -803,9 +907,122 @@ export class Minion extends Villager {
         this.finishJob();
     }
 
+    findBuildTarget() {
+        const job = this.job;
+        if (job?.type !== "build" || !Array.isArray(job.blueprint)) return null;
+        const candidates = [];
+        for (const entry of job.blueprint) {
+            const target = {
+                x: job.target.x + entry.x,
+                y: job.target.y + entry.y,
+                blockType: entry.blockType,
+                wall: entry.wall === true,
+            };
+            const block = this.blockAt(target.x, target.y, target.wall);
+            const current = getBlock(block?.blockType);
+            if (!block || !current || block.blockType === target.blockType ||
+                (!current.air && !current.replaceable) || this.isReserved(target) ||
+                this.isTemporarilyUnreachable(target)) continue;
+            if (!this.inventory.some((item) =>
+                item.count > 0 && item.blockId === target.blockType)) continue;
+            candidates.push(target);
+        }
+        return candidates.sort((a, b) =>
+            b.y - a.y || this.distanceToTile(a) - this.distanceToTile(b) ||
+            a.x - b.x || Number(a.wall) - Number(b.wall))[0] || null;
+    }
+
+    workOnBuildTarget() {
+        const target = this.currentTarget;
+        if (!target) {
+            this.state = MinionState.SearchingResources;
+            return;
+        }
+        const block = this.blockAt(target.x, target.y, target.wall);
+        const current = getBlock(block?.blockType);
+        if (!block || !current) {
+            this.setUnreachable();
+            return;
+        }
+        if (block.blockType === target.blockType ||
+            (!current.air && !current.replaceable)) {
+            this.completeWorkTarget();
+            return;
+        }
+        if (runtime.GAMERULES?.doMobGriefing === false) {
+            this.setUnreachable();
+            return;
+        }
+        const material = this.inventory.find((item) =>
+            item.count > 0 && item.blockId === target.blockType);
+        if (!material) {
+            this.completeWorkTarget();
+            return;
+        }
+        if (!this.canReachBlock(target)) {
+            this.state = MinionState.MovingToTarget;
+            this._navigationResumeState = MinionState.Building;
+            this.moveForWorkTarget();
+            return;
+        }
+        const horizontalOffset = (target.x + 0.5) * BLOCK_SIZE -
+            (this.position.x + this.hitbox.x / 2);
+        if (Math.abs(horizontalOffset) > BLOCK_SIZE * 0.1 &&
+            !this.turnToWalkDirection(Math.sign(horizontalOffset))) return;
+        this.holdItem = new InventoryItem({ blockId: target.blockType, count: 1 });
+        const occupied = !target.wall && current.collision &&
+            this.world.entities.some((entity) => {
+                if (entity === this || entity.type === EntityTypes.Drop ||
+                    entity.dimension !== this.dimension || entity.health <= 0) return false;
+                return entity.position.x < (target.x + 1) * BLOCK_SIZE &&
+                    entity.position.x + entity.hitbox.x > target.x * BLOCK_SIZE &&
+                    entity.position.y < (target.y + 1) * BLOCK_SIZE &&
+                    entity.position.y + entity.hitbox.y > target.y * BLOCK_SIZE;
+        });
+        if (occupied) {
+            this.skipUnreachableWorkTarget();
+            return;
+        }
+        const placed = this.world.setBlockType(block, target.blockType, true);
+        if (!placed) {
+            this.skipUnreachableWorkTarget();
+            return;
+        }
+        this.startWorkSwing();
+        this.consumeMinionBlock(material);
+        if (multiplayer) {
+            this.world.serverPlaceBlock(
+                placed.chunkX,
+                placed.x,
+                placed.y,
+                placed.blockType,
+                target.wall,
+                this.dimension,
+            );
+        }
+        this.job.steps = (this.job.steps || 0) + 1;
+        this.completeWorkTarget();
+    }
+
+    consumeMinionBlock(item) {
+        item.count--;
+        if (item.count <= 0) {
+            item.blockId = null;
+            item.itemId = null;
+            item.count = 0;
+            item.props = {};
+        }
+        this.broadcastState();
+    }
+
     selectWorkTarget(target, workState) {
         this.releaseCurrentTarget();
-        this.currentTarget = { x: target.x, y: target.y, blockType: target.blockType };
+        this.currentTarget = {
+            x: target.x,
+            y: target.y,
+            blockType: target.blockType,
+            ...(target.wall === true ? { wall: true } : {}),
+        };
         this.currentTargetKey = reservationKey(this.dimension, this.currentTarget);
         this.reserveCurrentTarget();
         this._navigationResumeState = workState;
@@ -835,6 +1052,10 @@ export class Minion extends Villager {
     }
 
     workOnCurrentTarget(dt) {
+        if (this.job?.type === "build") {
+            this.workOnBuildTarget();
+            return;
+        }
         if (!this.currentTarget &&
             (this.job?.type === "mineshaft" || this.job?.type === "stripmine")) {
             this.workOnShaftOrTunnel(dt);
@@ -861,9 +1082,14 @@ export class Minion extends Villager {
             this.moveForWorkTarget();
             return;
         }
+        const horizontalOffset = (this.currentTarget.x + 0.5) * BLOCK_SIZE -
+            (this.position.x + this.hitbox.x / 2);
+        const targetDirection = Math.abs(horizontalOffset) < BLOCK_SIZE * 0.1
+            ? this.direction
+            : Math.sign(horizontalOffset);
+        if (!this.turnToWalkDirection(targetDirection)) return;
         this.setHeldToolForBlock(block);
         this.targetVelocity.x = 0;
-        this.direction = this.currentTarget.x * BLOCK_SIZE < this.position.x ? -1 : 1;
         const miningKey = tileKey(this.currentTarget);
         const workTime = this.miningWorkTime(block, 0.35, 4);
         this.beginMiningBlock(block, miningKey);
@@ -871,6 +1097,11 @@ export class Minion extends Villager {
         if (this.miningTimer < workTime) return;
         if (!this.breakWorkerBlock(block)) {
             this.setUnreachable();
+            return;
+        }
+        if (this.job?.type === "excavate") {
+            this.completeWorkTarget();
+            this.searchTimer = 0;
             return;
         }
         this.clearMiningProgress();
@@ -892,7 +1123,7 @@ export class Minion extends Villager {
             this.miningTimer = 0;
             this.miningProgress = 0;
             this.miningSoundTimer = 0;
-            this.workSwingProgress = 0;
+            this.startWorkSwing();
             this.playMiningSound(block);
         }
         const position = block.transform?.position;
@@ -905,12 +1136,54 @@ export class Minion extends Villager {
                 : this.currentTarget?.y ?? block.y ?? null,
             wall: Boolean(block.wall),
         };
+        this.miningBlockType = block.blockType;
+    }
+
+    startWorkSwing() {
+        this.workSwingStartedAt = runtime.passedTime;
+        this.workSwingUntil = runtime.passedTime + 0.32;
+        this.workSwingProgress = 0.12;
+    }
+
+    sharedMiningProgressKey(
+        position = this.miningBlockPosition,
+        blockType = this.miningBlockType,
+    ) {
+        if (!Number.isInteger(position?.x) || !Number.isInteger(position?.y)) return null;
+        return `${this.dimension}:${this.ownerUUID || this.UUID}:` +
+            `${position.wall ? "wall" : "block"}:${position.x},${position.y}:${blockType}`;
     }
 
     advanceMiningProgress(block, workTime, dt) {
         const step = Math.max(0, dt);
-        this.miningTimer += step;
-        this.miningProgress = Math.min(1, this.miningTimer / workTime);
+        const now = Number.isFinite(runtime.passedTime) ? runtime.passedTime : 0;
+        if (!(this.world.minionMiningProgress instanceof Map)) {
+            this.world.minionMiningProgress = new Map();
+        }
+        const progressByBlock = this.world.minionMiningProgress;
+        for (const [key, progress] of progressByBlock) {
+            if (!Number.isFinite(progress?.lastWorkedAt) ||
+                now - progress.lastWorkedAt > MINING_PROGRESS_IDLE_TIMEOUT) {
+                progressByBlock.delete(key);
+            }
+        }
+
+        const sharedKey = this.sharedMiningProgressKey();
+        if (sharedKey) {
+            let shared = progressByBlock.get(sharedKey);
+            if (!shared || now - shared.lastWorkedAt > MINING_PROGRESS_IDLE_TIMEOUT) {
+                shared = { progress: 0, lastWorkedAt: now };
+            }
+            shared.progress = Math.min(1,
+                shared.progress + step / Math.max(0.001, workTime));
+            shared.lastWorkedAt = now;
+            progressByBlock.set(sharedKey, shared);
+            this.miningTimer = shared.progress * workTime;
+            this.miningProgress = shared.progress;
+        } else {
+            this.miningTimer += step;
+            this.miningProgress = Math.min(1, this.miningTimer / workTime);
+        }
         this.miningStage = Math.floor(Math.min(10, this.miningProgress * 10));
         this.miningSoundTimer += step;
         if (this.miningSoundTimer < 0.2 ||
@@ -934,10 +1207,10 @@ export class Minion extends Villager {
         this.miningTimer = 0;
         this.miningKey = null;
         this.miningBlockPosition = null;
+        this.miningBlockType = null;
         this.miningProgress = 0;
         this.miningStage = 0;
         this.miningSoundTimer = 0;
-        this.workSwingProgress = 0;
     }
 
     breakWorkerBlock(block) {
@@ -948,6 +1221,7 @@ export class Minion extends Villager {
         const tile = {
             x: Math.floor(block.transform.position.x / BLOCK_SIZE),
             y: Math.floor(block.transform.position.y / BLOCK_SIZE),
+            wall: Boolean(block.wall),
         };
         const heldTool = getItem(this.holdItem?.itemId);
         const heldToolType = heldTool?.toolType === ToolType.Axe &&
@@ -961,6 +1235,9 @@ export class Minion extends Villager {
         const y = block.transform.position.y;
         const type = block.blockType;
         block.breakBlock(shouldDrop, false);
+        this.world.minionMiningProgress?.delete(
+            this.sharedMiningProgressKey(tile, type),
+        );
         if (multiplayer) {
             this.world.serverBreakBlock(
                 block.chunkX,
@@ -1034,6 +1311,11 @@ export class Minion extends Villager {
         const horizontalReach = Math.abs(centerX - blockX) <= BLOCK_SIZE * 1.35;
         if (!horizontalReach) return false;
 
+        if (this.job?.type === "build") {
+            const bodyCenterY = this.position.y + this.hitbox.y / 2;
+            return Math.abs(bodyCenterY - blockY) <= BLOCK_SIZE * 1.75;
+        }
+
         // The licensed mod assigns one task to a whole connected tree and
         // chops its trunk from the base. Keep that behavior in this 2D world:
         // upper logs in the same tree do not require the worker to stand on
@@ -1068,16 +1350,18 @@ export class Minion extends Villager {
                 Math.abs(b.x - anchor.x) - Math.abs(b.y - anchor.y),
             );
             if (!candidates.length) return null;
-            this.job.targets = this.connectedBlocks(candidates[0], (block) =>
-                block.blockType === type,
-                MAX_VEIN_BLOCKS,
-                false,
-            );
+        this.job.targets = this.connectedBlocks(candidates[0], (block) =>
+            block.blockType === type,
+            MAX_VEIN_BLOCKS,
+            false,
+        );
         }
-        return this.job.targets
+        const candidates = this.job.targets
             .filter((entry) => this.blockAt(entry.x, entry.y)?.blockType === entry.blockType)
-            .filter((entry) => !this.isReserved(entry))
-            .sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b))[0] || null;
+            .filter((entry) => !this.isTemporarilyUnreachable(entry))
+            .sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b));
+        return candidates.find((entry) => !this.isReserved(entry)) ||
+            this.findCollaborativeWorkTarget(candidates);
     }
 
     findTreeTarget() {
@@ -1088,13 +1372,17 @@ export class Minion extends Villager {
                 const block = this.blockAt(entry.x, entry.y);
                 return block && block.blockType === entry.blockType && isMineable(block);
             });
-            const free = live.filter((entry) => !this.isReserved(entry));
+            const free = live.filter((entry) =>
+                !this.isReserved(entry) && !this.isTemporarilyUnreachable(entry));
             const logsAvailable = free.filter((entry) => isWoodBlock(this.blockAt(entry.x, entry.y)));
             const leavesAvailable = free.filter((entry) => isLeavesBlock(this.blockAt(entry.x, entry.y)));
             const target = (logsAvailable.length ? logsAvailable : leavesAvailable)
                 .sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b))[0];
             if (target) return target;
-            if (live.length) return null;
+            if (live.length) {
+                return this.findCollaborativeWorkTarget(live
+                    .filter((entry) => !this.isTemporarilyUnreachable(entry)));
+            }
             this.job.targets = null;
         }
         const logs = [];
@@ -1140,13 +1428,40 @@ export class Minion extends Villager {
                 const block = this.blockAt(x, y);
                 if (!isMineable(block)) continue;
                 const entry = { x, y, blockType: block.blockType };
-                if (this.isReserved(entry) || !this.isExposedExcavationBlock(entry, bounds)) continue;
+                if (this.isTemporarilyUnreachable(entry) ||
+                    !this.isExposedExcavationBlock(entry, bounds)) continue;
                 candidates.push(entry);
             }
         }
-        candidates.sort((a, b) => a.y - b.y ||
-            this.distanceToTile(a) - this.distanceToTile(b));
-        return candidates[0] || null;
+        candidates.sort((a, b) =>
+            this.distanceToTile(a) - this.distanceToTile(b) || a.y - b.y);
+        return candidates.find((entry) => !this.isReserved(entry)) ||
+            this.findCollaborativeWorkTarget(candidates);
+    }
+
+    findCollaborativeWorkTarget(candidates) {
+        if (!this.job || !candidates?.length) return null;
+        const activeTargets = new Map();
+        const currentJobKey = jobReservationKey(this.job);
+        for (const worker of this.world.entities) {
+            if (worker === this || !worker.isMinion || worker.health <= 0 ||
+                worker.dimension !== this.dimension || worker.ownerUUID !== this.ownerUUID ||
+                jobReservationKey(worker.job) !== currentJobKey || !worker.currentTarget ||
+                !worker.currentTargetKey) continue;
+            const key = reservationKey(
+                worker.dimension,
+                worker.currentTarget,
+            );
+            activeTargets.set(key, (activeTargets.get(key) || 0) + 1);
+        }
+        const targets = candidates
+            .filter((entry) => this.isReserved(entry) &&
+                activeTargets.has(reservationKey(this.dimension, entry)))
+            .sort((a, b) =>
+                activeTargets.get(reservationKey(this.dimension, a)) -
+                    activeTargets.get(reservationKey(this.dimension, b)) ||
+                this.distanceToTile(a) - this.distanceToTile(b));
+        return targets[0] || null;
     }
 
     isExposedExcavationBlock(target, bounds) {
@@ -1193,14 +1508,14 @@ export class Minion extends Villager {
         return output;
     }
 
-    blockAt(x, y) {
+    blockAt(x, y, wall = false) {
         if (!Number.isInteger(x) || !Number.isInteger(y) || y < 0 || y >= CHUNK_HEIGHT) {
             return null;
         }
         return this.world.getBlockAtWorldPosition(
             x * BLOCK_SIZE,
             y * BLOCK_SIZE,
-            false,
+            wall,
             this.dimension,
         );
     }
@@ -1228,7 +1543,9 @@ export class Minion extends Villager {
                 }
             }
         }
-        return candidates.sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b));
+        return candidates.sort((a, b) =>
+            Number(this.isNodeBlockedByEntity(a)) - Number(this.isNodeBlockedByEntity(b)) ||
+            this.distanceToTile(a) - this.distanceToTile(b));
     }
 
     stanceCandidatesNear(point, xRadius = 2, yRadius = 3) {
@@ -1242,12 +1559,29 @@ export class Minion extends Villager {
                 }
             }
         }
-        return candidates.sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b));
+        return candidates.sort((a, b) =>
+            Number(this.isNodeBlockedByEntity(a)) - Number(this.isNodeBlockedByEntity(b)) ||
+            this.distanceToTile(a) - this.distanceToTile(b));
+    }
+
+    isNodeBlockedByEntity(node) {
+        const left = node.x * BLOCK_SIZE + (BLOCK_SIZE - this.hitbox.x) / 2;
+        const top = node.y * BLOCK_SIZE - this.hitbox.y;
+        return this.world.entities.some((entity) => {
+            if (entity === this ||
+                entity.type !== EntityTypes.Player ||
+                entity.dimension !== this.dimension || entity.health <= 0 ||
+                !entity.hitbox) return false;
+            return left < entity.position.x + entity.hitbox.x &&
+                left + this.hitbox.x > entity.position.x &&
+                top < entity.position.y + entity.hitbox.y &&
+                top + this.hitbox.y > entity.position.y;
+        });
     }
 
     navigateTo(candidates, goalKey) {
         if (!candidates?.length) {
-            this.pathFindingFails++;
+            if (this.currentTarget && this.skipUnreachableWorkTarget()) return false;
             this.setUnreachable();
             return false;
         }
@@ -1261,61 +1595,42 @@ export class Minion extends Villager {
                 ? nonCurrentCandidates
                 : candidates;
             let bestPath = null;
-            let bestCost = Infinity;
             const followRange = getMinionConfig().minionFollowRange;
             const maxVisited = this.job?.type === "follow"
                 ? Math.max(256, Math.min(10_000, Math.floor(followRange ** 2)))
                 : 2500;
-            for (const goal of pathCandidates.slice(0, 5)) {
-                const path = findMinionPath(
-                    this.world,
-                    this.dimension,
-                    start,
-                    goal,
-                    maxVisited,
-                );
-                if (!path) continue;
-                const score = path.length;
-                if (score < bestCost) bestPath = path;
-                bestCost = score;
-                break;
-            }
+            const tryPathCandidates = (goals) => {
+                for (const goal of goals) {
+                    const path = findMinionPath(
+                        this.world,
+                        this.dimension,
+                        start,
+                        goal,
+                        maxVisited,
+                        this,
+                    );
+                    if (path) return path;
+                }
+                return null;
+            };
+            bestPath = tryPathCandidates(pathCandidates.slice(0, 5)) ||
+                tryPathCandidates(pathCandidates.slice(5));
             this.path = bestPath;
             this.pathGoalKey = goalKey;
             this.pathTimer = 0;
             if (!bestPath) {
                 this.targetVelocity.x = 0;
                 if (this.assistFollowClimb(candidates)) {
-                    this.pathFindingFails = 0;
                     return false;
                 }
-                this.pathFindingFails++;
-                if (this.pathFindingFails >= 3 && this.job) {
-                    this.teleportToNode(pathCandidates[0]);
-                    this.pathFindingFails = 0;
-                    return true;
+                if (this.currentTarget && this.skipUnreachableWorkTarget()) {
+                    return false;
                 }
                 this.setUnreachable();
                 return false;
             }
-            this.pathFindingFails = 0;
         }
         return this.followPath();
-    }
-
-    teleportToNode(node) {
-        this.position.x = node.x * BLOCK_SIZE +
-            (BLOCK_SIZE - this.hitbox.x) / 2;
-        this.position.y = node.y * BLOCK_SIZE - this.hitbox.y;
-        this.velocity.x = 0;
-        this.velocity.y = 0;
-        this.targetVelocity.x = 0;
-        this.targetVelocity.y = 0;
-        this.grounded = true;
-        this.path = null;
-        this.pathGoalKey = null;
-        this.syncChunkMembership();
-        this.broadcastState();
     }
 
     followPath() {
@@ -1332,8 +1647,10 @@ export class Minion extends Villager {
             this.targetVelocity.x = 0;
             return true;
         }
-        const direction = next.x > current.x ? 1 : -1;
-        this.direction = direction;
+        const direction = next.x === current.x
+            ? this.direction
+            : next.x > current.x ? 1 : -1;
+        if (!this.turnToWalkDirection(direction)) return false;
         const destinationX = next.x * BLOCK_SIZE + BLOCK_SIZE / 2 - this.hitbox.x / 2;
         if (Math.abs(this.position.x - destinationX) <= 3 && current.x === next.x) {
             this.targetVelocity.x = 0;
@@ -1341,7 +1658,7 @@ export class Minion extends Villager {
             return false;
         }
 
-        const obstacleRows = [next.y - 1, next.y - 2];
+        const obstacleRows = [next.y - 1];
         for (const obstacleY of obstacleRows) {
             const block = this.blockAt(next.x, obstacleY);
             if (block && hasBlockCollision(block)) {
@@ -1413,21 +1730,66 @@ export class Minion extends Villager {
         if (!(this.world.minionReservations instanceof Map)) {
             this.world.minionReservations = new Map();
         }
-        this.world.minionReservations.set(this.currentTargetKey, this.UUID);
+        const reserved = this.world.minionReservations.get(this.currentTargetKey);
+        const workers = reserved instanceof Set
+            ? reserved
+            : new Set(reserved ? [reserved] : []);
+        workers.add(this.UUID);
+        this.world.minionReservations.set(this.currentTargetKey, workers);
     }
 
     releaseCurrentTarget() {
-        if (this.currentTargetKey && this.world.minionReservations?.get(this.currentTargetKey) === this.UUID) {
-            this.world.minionReservations.delete(this.currentTargetKey);
+        if (this.currentTargetKey && this.world.minionReservations instanceof Map) {
+            const reserved = this.world.minionReservations.get(this.currentTargetKey);
+            if (reserved instanceof Set) {
+                reserved.delete(this.UUID);
+                if (!reserved.size) this.world.minionReservations.delete(this.currentTargetKey);
+            } else if (reserved === this.UUID) {
+                this.world.minionReservations.delete(this.currentTargetKey);
+            }
         }
         this.currentTargetKey = null;
     }
 
     isReserved(target) {
         const key = reservationKey(this.dimension, target);
-        const ownerUUID = this.world.minionReservations?.get(key);
-        return Boolean(ownerUUID && ownerUUID !== this.UUID &&
-            this.world.entities.some((entity) => entity.UUID === ownerUUID && entity.isMinion));
+        const reserved = this.world.minionReservations?.get(key);
+        const owners = reserved instanceof Set ? reserved : [reserved];
+        return owners.some((ownerUUID) => ownerUUID && ownerUUID !== this.UUID &&
+            this.world.entities.some((entity) => entity.UUID === ownerUUID &&
+                entity.isMinion && entity.health > 0 && entity.currentTargetKey === key));
+    }
+
+    unreachableTargetKey(target) {
+        return `${this.dimension}:${target.wall === true ? "wall" : "block"}:${tileKey(target)}`;
+    }
+
+    isTemporarilyUnreachable(target) {
+        const key = this.unreachableTargetKey(target);
+        const expiresAt = this.unreachableTargets.get(key);
+        if (!expiresAt) return false;
+        if (expiresAt > runtime.passedTime) return true;
+        this.unreachableTargets.delete(key);
+        return false;
+    }
+
+    skipUnreachableWorkTarget() {
+        const target = this.currentTarget;
+        if (!target) return false;
+        this.unreachableTargets.set(
+            this.unreachableTargetKey(target),
+            runtime.passedTime + 12,
+        );
+        this.releaseCurrentTarget();
+        this.currentTarget = null;
+        this.clearMiningProgress();
+        this.path = null;
+        this.pathGoalKey = null;
+        this.stuckRecoveryAttempts = 0;
+        this.targetVelocity.x = 0;
+        this.searchTimer = 0;
+        this.state = this.stateForJob(this.job);
+        return true;
     }
 
     finishOrWaitForReservations() {
@@ -1441,18 +1803,18 @@ export class Minion extends Villager {
     hasActiveJobReservations() {
         const reservations = this.world.minionReservations;
         if (!(reservations instanceof Map)) return false;
-        const taskKey = (job) => job ? JSON.stringify({
-            type: job.type,
-            target: job.target,
-            blockType: job.blockType,
-            bounds: job.bounds,
-            direction: job.direction,
-        }) : null;
-        for (const [key, ownerUUID] of reservations) {
+        for (const [key, owners] of reservations) {
             if (!key.startsWith(`${this.dimension}:`)) continue;
-            const worker = this.world.entities.find((entity) => entity.UUID === ownerUUID);
-            if (worker?.isMinion && worker.UUID !== this.UUID &&
-                taskKey(worker.job) === taskKey(this.job)) return true;
+            const ownerUUIDs = owners instanceof Set ? owners : [owners];
+            for (const ownerUUID of ownerUUIDs) {
+                const worker = this.world.entities.find((entity) =>
+                    entity.UUID === ownerUUID && entity.isMinion && entity.health > 0 &&
+                    entity.currentTargetKey === key,
+                );
+                if (worker && worker.UUID !== this.UUID &&
+                    worker.ownerUUID === this.ownerUUID &&
+                    jobReservationKey(worker.job) === jobReservationKey(this.job)) return true;
+            }
         }
         return false;
     }
@@ -1509,12 +1871,14 @@ export class Minion extends Villager {
             const left = this.addToInventory(incoming);
             const added = drop.count - left;
             if (added <= 0) {
-                if (this.hasInventory()) this.beginDelivery();
+                if (this.hasInventory() &&
+                    !["build", "mineshaft"].includes(this.job?.type)) this.beginDelivery();
                 return;
             }
             drop.count = left;
             if (drop.count <= 0) this.world.removeEntity(drop, multiplayer);
-            if (left > 0 || this.inventoryFull()) {
+            if ((left > 0 || this.inventoryFull()) &&
+                !["build", "mineshaft"].includes(this.job?.type)) {
                 this.beginDelivery();
                 return;
             }
@@ -1720,6 +2084,16 @@ export class Minion extends Villager {
         return this.speed * (runtime.passedTime < this.workSpeedBonusUntil ? 2 : 1);
     }
 
+    turnToWalkDirection(direction) {
+        const facing = direction < 0 ? -1 : 1;
+        if (this.velocity.x * facing < -BLOCK_SIZE * 0.05) {
+            this.targetVelocity.x = 0;
+            return false;
+        }
+        this.direction = facing;
+        return true;
+    }
+
     jump() {
         if (!this.grounded) return;
         this.velocity.y = -9 * BLOCK_SIZE;
@@ -1746,6 +2120,8 @@ export class Minion extends Villager {
             if (this.job.currentY >= this.job.targetY) {
                 return this.finishJob();
             }
+            if (this.buildShaftSupport()) return;
+            if (this.buildShaftTorch()) return;
             this.digNextShaftStep(dt);
             return;
         }
@@ -1756,9 +2132,14 @@ export class Minion extends Villager {
 
     digNextShaftStep(dt) {
         const direction = this.job.direction < 0 ? -1 : 1;
+        if (!this.turnToWalkDirection(direction)) return;
         const targetX = this.job.currentX + direction;
         const targetFootY = this.job.currentY + 1;
-        for (const y of [this.job.currentY, this.job.currentY - 1]) {
+        const headroomRows = Array.from(
+            { length: MINESHAFT_HEADROOM_BLOCKS },
+            (_, index) => targetFootY - index - 1,
+        );
+        for (const y of headroomRows) {
             const block = this.blockAt(targetX, y);
             if (block && !getBlock(block.blockType).air) {
                 if (!isMineable(block)) return this.setUnreachable();
@@ -1768,10 +2149,16 @@ export class Minion extends Villager {
             }
         }
         const floor = this.blockAt(targetX, targetFootY);
-        if (!floor || !hasBlockCollision(floor)) return this.setUnreachable();
+        if (!floor) return this.setUnreachable();
+        if (!hasBlockCollision(floor)) {
+            const material = this.findShaftBuildingMaterial();
+            if (!material) return this.finishJob();
+            if (!this.placeBlockFromInventory(floor, material)) return this.setUnreachable();
+            return;
+        }
         this.targetVelocity.x = direction * this.currentSpeed() * BLOCK_SIZE;
         const feet = this.currentFootNode();
-        if (feet.x === targetX && feet.y >= targetFootY - 1) {
+        if (this.grounded && feet.x === targetX && feet.y >= targetFootY) {
             this.job.currentX = targetX;
             this.job.currentY = targetFootY;
             this.job.steps++;
@@ -1779,9 +2166,72 @@ export class Minion extends Villager {
         }
     }
 
+    findShaftBuildingMaterial() {
+        return this.inventory.find((item) => {
+            if (item.count <= 0 || item.blockId === null) return false;
+            const definition = getBlock(item.blockId);
+            return definition?.collision && !definition.air && !definition.fluid &&
+                !definition.specialType && !definition.extendedBlock;
+        }) || null;
+    }
+
+    placeBlockFromInventory(block, item) {
+        if (!block || !item?.blockId || item.count <= 0) return false;
+        const placed = this.world.setBlockType(block, item.blockId, true);
+        if (!placed) return false;
+        this.consumeMinionBlock(item);
+        if (multiplayer) {
+            this.world.serverPlaceBlock(
+                placed.chunkX,
+                placed.x,
+                placed.y,
+                placed.blockType,
+                Boolean(block.wall),
+                this.dimension,
+            );
+        }
+        return true;
+    }
+
+    buildShaftSupport() {
+        const job = this.job;
+        if (job?.type !== "mineshaft" || !job.steps || job.steps % 8 !== 0 ||
+            job.lastSupportStep === job.steps) return false;
+        job.lastSupportStep = job.steps;
+        // Keep the brace above all three blocks of headroom for the player.
+        const beam = this.blockAt(job.currentX, job.currentY - MINESHAFT_HEADROOM_BLOCKS - 1);
+        if (!beam || !getBlock(beam.blockType)?.air) return false;
+        const material = this.inventory.find((item) => {
+            if (item.count <= 0 || item.blockId === null) return false;
+            const category = getBlock(item.blockId)?.category;
+            return [BlockCategory.Logs, BlockCategory.Planks].includes(category);
+        });
+        return material ? this.placeBlockFromInventory(beam, material) : false;
+    }
+
+    buildShaftTorch() {
+        const job = this.job;
+        if (job?.type !== "mineshaft" || !job.steps || job.steps % 12 !== 0 ||
+            job.lastTorchStep === job.steps) return false;
+        job.lastTorchStep = job.steps;
+        const x = job.currentX;
+        const y = job.currentY - MINESHAFT_HEADROOM_BLOCKS - 1;
+        const target = this.blockAt(x, y);
+        if (!target || !getBlock(target.blockType)?.air) {
+            const side = this.blockAt(x - job.direction, y);
+            if (!side || !getBlock(side.blockType)?.air) return false;
+            return this.placeBlockFromInventory(side,
+                this.inventory.find((item) => item.blockId === Blocks.Torch && item.count > 0));
+        }
+        const torch = this.inventory.find((item) =>
+            item.blockId === Blocks.Torch && item.count > 0);
+        return torch ? this.placeBlockFromInventory(target, torch) : false;
+    }
+
     digNextTunnelStep(dt) {
         if (this.job.steps >= 80) return this.finishJob();
         const direction = this.job.direction < 0 ? -1 : 1;
+        if (!this.turnToWalkDirection(direction)) return;
         const targetX = this.job.currentX + direction;
         const targetBlocks = [
             this.blockAt(targetX, this.job.currentY - 1),
@@ -1831,6 +2281,7 @@ export class Minion extends Villager {
         }, (candidate) => candidate.blockType === block.blockType, MAX_VEIN_BLOCKS, false);
         const target = this._activeVein
             .filter((entry) => !this.isReserved(entry))
+            .filter((entry) => !this.isTemporarilyUnreachable(entry))
             .sort((a, b) => this.distanceToTile(a) - this.distanceToTile(b))[0];
         if (!target) return;
         this.selectWorkTarget(target, MinionState.Mining);

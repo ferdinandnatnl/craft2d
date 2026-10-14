@@ -54,7 +54,7 @@ export class Warden extends Mob {
         const player = this.entityCollision(EntityTypes.Player);
         if (!player) return;
 
-        player.hit(8, this.position.x, 7, `Killed by ${this.name}`);
+        player.hit(8, this.position.x, 7, `Killed by ${this.name}`, this);
         this.attackCooldown = this.attackCooldownMax;
     }
 
