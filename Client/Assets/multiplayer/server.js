@@ -240,14 +240,18 @@ window.addEventListener("beforeunload", () => {
     sendMultiplayerLeaveSync(true);
 });
 
-if (multiplayer) {
+export function connectMultiplayerServer() {
+    if (!multiplayer || runtime.server) return runtime.server;
+
     const ip = localStorage.getItem("multiplayerIP");
     const port = localStorage.getItem("multiplayerPort");
 
     if (ip && port) {
         runtime.server = new Server(ip, port);
+        return runtime.server;
     } else {
         alert("Multiplayer server IP and port not set!");
         window.location.href = "./"; // Redirect to home if no server is set
+        return null;
     }
 }

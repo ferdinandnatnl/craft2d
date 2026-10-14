@@ -180,6 +180,11 @@ export class Game {
         if (!multiplayer) {
             loadWorldFromLocalStorage();
         } else {
+            const { connectMultiplayerServer } = await import(
+                "../multiplayer/server.js"
+            );
+            connectMultiplayerServer();
+
             while (!runtime.world.generator.multiplayerSeedLoaded) {
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
