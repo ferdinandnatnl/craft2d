@@ -77,7 +77,18 @@ O F O
 
 `O` is obsidian, `.` is air, and `F` is the inside air block to ignite.
 
-To host a multiplayer server, run `node server.js` from the Server directory. By default, this hosts on port 25565.
+To host a multiplayer server on your local network, install dependencies as
+described above, then run `npm run lan` from the `Server` directory. This builds
+the client, starts the game server, and serves the game over HTTP on port 4173.
+The terminal lists the addresses to share. Players on the same Wi-Fi can open
+`craft2d.com`, choose **Multiplayer → Direct Connection**, and enter the printed
+server address (port 25565 by default). If the browser asks, allow local network
+access. If the browser blocks the connection, use the printed local Game URL
+instead. Keep the host process running while people play. The server world is
+saved in `Server/world/`.
+
+To run only the game server, run `node server.js` from the `Server` directory.
+By default, it listens on port 25565.
 
 Production client build:
 

@@ -7,6 +7,7 @@ import fs from "fs";
 import { BLOCK_SIZE, CHUNK_HEIGHT } from "@2dcraft.com/shared/constants.js";
 
 const propertiesFile = "server.properties";
+const lanMode = process.argv.includes("--lan");
 const userCacheFile = "usercache.json";
 const bannedIPsFile = "banned-ips.json";
 const serverLogFile = "server.log";
@@ -76,7 +77,7 @@ function loadProperties() {
     }
 
     properties.motd = parseMotd(properties.motd);
-    properties.serverIp = properties.serverIp.trim();
+    properties.serverIp = lanMode ? "" : properties.serverIp.trim();
 
     world.seed = properties.levelSeed;
 

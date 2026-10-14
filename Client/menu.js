@@ -74,6 +74,7 @@ export let selectedServerId = null;
 export let tempServerName = "New Server";
 export let tempServerIP = "";
 export let tempQuickConnectIP = "";
+let connectingToServer = false;
 
 export let lastPingTime = 0;
 export let cachedServerStatuses = [];
@@ -1459,7 +1460,32 @@ export function selectWorld(id, selectedElement) {
     selectedWorld = id;
 }
 
-export async function pingServer(server) {
+function isLocalNetworkHost(host) {
+    const normalizedHost = host.toLowerCase();
+    if (
+        normalizedHost === "localhost" ||
+        normalizedHost.endsWith(".localhost") ||
+        normalizedHost.endsWith(".local")
+    ) {
+        return true;
+    }
+
+    const octets = normalizedHost.split(".").map(Number);
+    if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+        return false;
+    }
+
+    const [first, second] = octets;
+    return (
+        first === 10 ||
+        (first === 172 && second >= 16 && second <= 31) ||
+        (first === 192 && second === 168) ||
+        (first === 169 && second === 254) ||
+        first === 127
+    );
+}
+
+export async function pingServer(server, { userInitiated = false } = {}) {
     return new Promise((resolve) => {
         const [ip, port = "25565"] = server.ip.split(":");
 
@@ -1470,6 +1496,20 @@ export async function pingServer(server) {
                 status: null,
                 latency: null,
                 error: "Invalid IP or port",
+            });
+            return;
+        }
+
+        if (
+            window.location.protocol === "https:" &&
+            isLocalNetworkHost(ip) &&
+            !userInitiated
+        ) {
+            resolve({
+                server,
+                status: null,
+                latency: null,
+                error: "Connect to check this LAN server",
             });
             return;
         }
@@ -1940,7 +1980,9 @@ export function updateQuickConnectIP(value) {
     tempQuickConnectIP = value || "";
 }
 
-export function connectToServer() {
+export async function connectToServer() {
+    if (connectingToServer) return;
+
     let serverAddress = "";
 
     if (quickConnectContainer.style.display === "flex") {
@@ -1977,13 +2019,34 @@ export function connectToServer() {
         serverAddress = selectedServer.ip;
     }
 
-    const [ip, port = "25565"] = serverAddress.split(":");
-    localStorage.setItem("multiplayerIP", ip);
-    localStorage.setItem("multiplayerPort", port);
+    connectingToServer = true;
+    const connectButtonWasDisabled = connectButton.disabled;
+    connectButton.disabled = true;
+    try {
+        const result = await pingServer(
+            { ip: serverAddress },
+            { userInitiated: true },
+        );
+        if (!result.status) {
+            alert(
+                `Could not connect to ${serverAddress}. Make sure the host is running and on the same Wi-Fi. If your browser asks, allow local network access. If it still blocks the connection, open the host's printed Game URL.`,
+            );
+            return;
+        }
 
-    setTimeout(() => {
+        if (result.status.onlinePlayers >= result.status.maxPlayers) {
+            alert("This server is full.");
+            return;
+        }
+
+        const [ip, port = "25565"] = serverAddress.split(":");
+        localStorage.setItem("multiplayerIP", ip);
+        localStorage.setItem("multiplayerPort", port);
         window.location.href = "game.html?multiplayer=true";
-    }, 500);
+    } finally {
+        connectingToServer = false;
+        connectButton.disabled = connectButtonWasDisabled;
+    }
 }
 
 export function cancelQuickConnect() {
