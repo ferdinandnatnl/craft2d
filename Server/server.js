@@ -863,6 +863,30 @@ function processMessage(message, ws) {
             break;
         }
 
+        case "weatherCommand": {
+            const sender = getPlayerByUUID(data.sender);
+            const type = data.message?.type;
+            const duration = data.message?.duration;
+            const validDuration = duration === null ||
+                (Number.isInteger(duration) && duration >= 1 && duration <= 180000);
+            if (
+                sender?.ws === ws && data.sender === worldAuthorityUUID &&
+                ["clear", "rain", "thunder"].includes(type) && validDuration &&
+                world.weather.setWeather(type, duration)
+            ) {
+                broadcast({
+                    type: "weatherState",
+                    message: world.weather.getState(),
+                });
+            }
+            break;
+        }
+
+        // Weather state comes from the server. Ignore client attempts to
+        // broadcast a forged state; authorized changes use weatherCommand.
+        case "weatherState":
+            break;
+
         case "playerHit": {
             const attacker = getPlayerByUUID(data.sender);
             const targetUUID = data.message?.targetUUID;

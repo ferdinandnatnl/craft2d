@@ -275,16 +275,17 @@ export class Chat {
             { name: "clear", args: [] },
             { name: "clearlog", args: [] },
             { name: "gamemode", args: ["mode"] },
-            { name: "tp", args: ["x", "y"] },
+            { name: "tp", args: ["playerOrX", "y"], usage: "<player> | <x> <y>" },
+            { name: "teleport", args: ["playerOrX", "y"], usage: "<player> | <x> <y>" },
             { name: "spawnpoint", args: ["x", "y"] },
             { name: "summon", args: ["entity", "x", "y", "count"] },
             { name: "kill", args: [] },
             {
                 name: "time",
                 args: ["time"],
-                usage: "<time (1 - 7.5)> or set day",
+                usage: "set <day|noon|night|midnight> | <1 - 7.5> | query",
             },
-            { name: "help", args: [] },
+            { name: "help", args: ["command"], usage: "[command]" },
             { name: "progress", args: [] },
             { name: "structure", args: ["structure"] },
             { name: "locate", args: ["structure"] },
@@ -298,6 +299,21 @@ export class Chat {
             { name: "fill", args: ["block", "x", "y", "x", "y"] },
             { name: "difficulty", args: ["difficulty"] },
             { name: "screenshot", args: ["count", "lighting"] },
+            {
+                name: "weather",
+                args: ["weather", "duration"],
+                usage: "<clear|rain|thunder|query> [durationSeconds]",
+            },
+            { name: "heal", args: ["amount"], usage: "[amount]" },
+            { name: "feed", args: ["amount"], usage: "[amount]" },
+            { name: "xp", args: ["xpAction", "amount"], usage: "<add|set> <levels>" },
+            { name: "experience", args: ["xpAction", "amount"], usage: "<add|set> <levels>" },
+            { name: "spawn", args: [] },
+            { name: "position", args: [] },
+            { name: "where", args: [] },
+            { name: "fly", args: ["toggle"], usage: "[on|off]" },
+            { name: "list", args: [] },
+            { name: "save", args: [] },
         ];
     }
 
@@ -372,7 +388,7 @@ export class Chat {
                 argIndex === 2 &&
                 parts[1]?.toLowerCase() === "set"
             ) {
-                return ["day"].filter((time) => time.startsWith(prefix));
+                return ["day", "noon", "night", "midnight"].filter((time) => time.startsWith(prefix));
             }
 
             let suggestions;
@@ -392,6 +408,26 @@ export class Chat {
                 case "count":
                 case "damage":
                     suggestions = ["1", "64"];
+                    break;
+                case "amount":
+                    suggestions = commandName === "xp" || commandName === "experience"
+                        ? ["1", "5", "10", "100", "9999"]
+                        : ["1", "5", "10", "20"];
+                    break;
+                case "xpAction":
+                    suggestions = ["add", "set"];
+                    break;
+                case "toggle":
+                    suggestions = ["on", "off"];
+                    break;
+                case "weather":
+                    suggestions = ["clear", "rain", "thunder", "query"];
+                    break;
+                case "duration":
+                    suggestions = ["30", "300", "600"];
+                    break;
+                case "command":
+                    suggestions = commands.map((cmd) => cmd.name);
                     break;
                 case "mode":
                     suggestions = [
@@ -418,6 +454,19 @@ export class Chat {
                             : "0",
                     ];
                     break;
+
+                case "playerOrX": {
+                    const currentX = runtime.world?.player
+                        ? runtime.world.worldToBlocks(runtime.world.player.position).x.toString()
+                        : "0";
+                    suggestions = [
+                        "~",
+                        "0",
+                        currentX,
+                        ...this.getOnlinePlayers().map((player) => player.name),
+                    ];
+                    break;
+                }
 
                 case "entity":
                     const entitySuggestions = Object.keys(Entities).filter(
@@ -452,7 +501,7 @@ export class Chat {
                     suggestions = ["overworld", "nether", "end", "0", "1", "2"];
                     break;
                 case "time":
-                    suggestions = ["set", "1", "3", "5", "7.5"];
+                    suggestions = ["set", "query", "1", "3", "5", "7.5"];
                     break;
                 case "block":
                     const blockSuggestions = Object.keys(Blocks).filter(
@@ -600,8 +649,8 @@ export class Chat {
     }
 
     doCheat(message) {
-        const messageArray = message.split(" ");
-        const cheat = messageArray[0];
+        const messageArray = message.trim().split(/\s+/);
+        const cheat = messageArray[0]?.toLowerCase();
 
         switch (cheat) {
             case "give":
@@ -617,6 +666,7 @@ export class Chat {
                 this.gamemode(messageArray);
                 break;
             case "tp":
+            case "teleport":
                 this.teleport(messageArray);
                 break;
             case "summon":
@@ -630,7 +680,7 @@ export class Chat {
                 this.setTime(messageArray);
                 break;
             case "help":
-                this.printHelp();
+                this.printHelp(messageArray);
                 break;
             case "progress":
                 this.printProgress();
@@ -683,6 +733,35 @@ export class Chat {
                 break;
             case "screenshot":
                 this.screenshot(messageArray);
+                break;
+            case "weather":
+                this.weather(messageArray);
+                break;
+            case "heal":
+                this.heal(messageArray);
+                break;
+            case "feed":
+                this.feed(messageArray);
+                break;
+            case "xp":
+            case "experience":
+                this.experience(messageArray);
+                break;
+            case "spawn":
+                this.spawn();
+                break;
+            case "position":
+            case "where":
+                this.position();
+                break;
+            case "fly":
+                this.fly(messageArray);
+                break;
+            case "list":
+                this.listPlayers();
+                break;
+            case "save":
+                this.save();
                 break;
             default:
                 this.message("Invalid Command!", "", Colors.Red);
@@ -899,32 +978,232 @@ export class Chat {
 
     setTime(messageArray) {
         if (!messageArray[1]) {
-            this.invalidCommand("/time <time (1 - 7.5)> or /time set day");
+            this.invalidCommand("/time set <day|noon|night|midnight> or /time <1 - 7.5>");
             return;
         }
 
         if (messageArray[1].toLowerCase() === "set") {
-            if (messageArray[2]?.toLowerCase() !== "day") {
-                this.invalidCommand("/time set day");
+            const timeOfDay = {
+                day: 1,
+                noon: 3,
+                night: 5,
+                midnight: 5.5,
+            }[messageArray[2]?.toLowerCase()];
+            if (timeOfDay === undefined) {
+                this.invalidCommand("/time set <day|noon|night|midnight>");
                 return;
             }
 
-            runtime.time = 1;
-            runtime.day = true;
-            this.cheatMessage("Time set to day.");
+            runtime.time = timeOfDay;
+            runtime.day = timeOfDay < 3.5 || timeOfDay >= 6.5;
+            this.cheatMessage(`Time set to ${messageArray[2].toLowerCase()}.`);
             return;
         }
 
-        const newTime = parseFloat(messageArray[1]);
+        if (messageArray[1].toLowerCase() === "query") {
+            const time = Number(runtime.time);
+            this.message(
+                `Time: ${Number.isFinite(time) ? time.toFixed(2) : "unknown"} (${runtime.day ? "day" : "night"}).`,
+                "",
+                Colors.Green,
+            );
+            return;
+        }
 
-        if (isNaN(newTime)) {
-            this.invalidCommand("/time <time (1 - 7.5)> or /time set day");
+        const newTime = Number(messageArray[1]);
+
+        if (!Number.isFinite(newTime) || newTime < 1 || newTime > 7.5) {
+            this.invalidCommand("/time set <day|noon|night|midnight> or /time <1 - 7.5>");
             return;
         }
 
         this.cheatMessage(`Time set to ${newTime}`);
 
         runtime.time = newTime;
+        runtime.day = !(newTime > 3.5 && newTime < 6.5);
+    }
+
+    weather(messageArray) {
+        const type = messageArray[1]?.toLowerCase();
+        const weather = runtime.world?.weather;
+        if (!weather) {
+            this.message("Weather is unavailable.", "", Colors.Red);
+            return;
+        }
+
+        if (type === "query") {
+            const state = weather.thundering
+                ? "thunder"
+                : weather.raining
+                  ? "rain"
+                  : "clear";
+            this.message(`Weather: ${state}.`, "", Colors.Green);
+            return;
+        }
+
+        if (!["clear", "rain", "thunder"].includes(type)) {
+            this.invalidCommand("/weather <clear|rain|thunder|query> [durationSeconds]");
+            return;
+        }
+
+        let durationTicks = null;
+        if (messageArray[2] !== undefined) {
+            const durationSeconds = Number(messageArray[2]);
+            if (!Number.isSafeInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 9000) {
+                this.invalidCommand("/weather <clear|rain|thunder> [durationSeconds (1 - 9000)]");
+                return;
+            }
+            durationTicks = durationSeconds * 20;
+        }
+
+        if (multiplayer && !runtime.world.isWorldAuthority) {
+            this.message("Only the world host can change multiplayer weather.", "", Colors.Red);
+            return;
+        }
+
+        weather.setWeather(type, durationTicks);
+        if (multiplayer) {
+            runtime.server?.send({
+                type: "weatherCommand",
+                message: { type, duration: durationTicks },
+                sender: runtime.world.player?.UUID,
+            });
+        }
+        this.cheatMessage(`Weather set to ${type}.`);
+    }
+
+    heal(messageArray) {
+        const player = runtime.world?.player;
+        if (!player || player.isDead || !player.abilities?.hasHealth) {
+            this.message("You cannot be healed right now.", "", Colors.Red);
+            return;
+        }
+
+        const amount = messageArray[1] === undefined
+            ? player.maxHealth - player.health
+            : Number(messageArray[1]);
+        if (!Number.isSafeInteger(amount) || amount <= 0) {
+            if (messageArray[1] === undefined && player.health >= player.maxHealth) {
+                this.message("Health is already full.", "", Colors.Green);
+                return;
+            }
+            this.invalidCommand("/heal [amount]");
+            return;
+        }
+
+        const before = player.health;
+        player.addHealth(Math.min(amount, player.maxHealth - player.health));
+        player.mutliplayerSyncPlayerState?.();
+        this.cheatMessage(`Healed ${player.health - before} health.`);
+    }
+
+    feed(messageArray) {
+        const player = runtime.world?.player;
+        if (!player) {
+            this.message("No player found.", "", Colors.Red);
+            return;
+        }
+
+        if (messageArray[1] === undefined) {
+            player.resetFoodStats();
+        } else {
+            const amount = Number(messageArray[1]);
+            if (!Number.isSafeInteger(amount) || amount < 1 || amount > 20) {
+                this.invalidCommand("/feed [amount (1 - 20)]");
+                return;
+            }
+            player.addFood(amount, 0);
+        }
+        player.mutliplayerSyncPlayerState?.();
+        this.cheatMessage(`Food level is now ${player.foodLevel}.`);
+    }
+
+    experience(messageArray) {
+        const player = runtime.world?.player;
+        const action = messageArray[1]?.toLowerCase();
+        const amount = Number(messageArray[2]);
+        if (!player || !["add", "set"].includes(action) ||
+            !Number.isSafeInteger(amount) || amount < 0 || amount > 9999 ||
+            (action === "add" && amount === 0)) {
+            this.invalidCommand("/xp <add|set> <levels (0 - 9999)>");
+            return;
+        }
+
+        if (action === "add") player.gainExperienceLevel(amount);
+        else player.xpLevel = amount;
+        player.mutliplayerSyncPlayerState?.();
+        this.cheatMessage(`Experience level is now ${player.xpLevel}.`);
+    }
+
+    spawn() {
+        const player = runtime.world?.player;
+        if (!player) {
+            this.message("No player found.", "", Colors.Red);
+            return;
+        }
+
+        const targetPosition = player.spawnPoint || runtime.world.getDefaultSpawnPosition();
+        if (!targetPosition) {
+            this.message("No spawn point is available.", "", Colors.Red);
+            return;
+        }
+        gotoDimension(Dimensions.Overworld);
+        player.teleport(targetPosition);
+        player.mutliplayerSyncPlayerState?.();
+        this.cheatMessage("Teleported to spawn.");
+    }
+
+    position() {
+        const player = runtime.world?.player;
+        if (!player) {
+            this.message("No player found.", "", Colors.Red);
+            return;
+        }
+
+        const coordinates = runtime.world.worldToBlocks(player.position);
+        const dimensions = ["Overworld", "Nether", "The End"];
+        const biome = runtime.world.getChunkForX(player.position.x, player.dimension)?.biome?.name;
+        this.message(
+            `Position: x ${coordinates.x}, y ${coordinates.y} (${dimensions[player.dimension] ?? "Unknown"}${biome ? `, ${biome}` : ""}).`,
+            "",
+            Colors.Green,
+        );
+    }
+
+    fly(messageArray) {
+        const player = runtime.world?.player;
+        if (!player || !player.abilities?.mayFly) {
+            this.message("Flight is available in Creative mode.", "", Colors.Red);
+            return;
+        }
+
+        const requested = messageArray[1]?.toLowerCase();
+        if (requested && !["on", "off"].includes(requested)) {
+            this.invalidCommand("/fly [on|off]");
+            return;
+        }
+        player.abilities.flying = requested === undefined
+            ? !player.abilities.flying
+            : requested === "on";
+        this.cheatMessage(`Flight ${player.abilities.flying ? "enabled" : "disabled"}.`);
+    }
+
+    listPlayers() {
+        const uniquePlayers = this.getOnlinePlayers();
+        this.message(
+            `Players online (${uniquePlayers.length}): ${uniquePlayers.map((player) => player.name).join(", ") || "none"}`,
+            "",
+            Colors.Green,
+        );
+    }
+
+    save() {
+        if (multiplayer) {
+            this.message("Multiplayer worlds save automatically.", "", Colors.Green);
+            return;
+        }
+        saveWorld(false);
+        this.cheatMessage("World saved.");
     }
 
     structure(messageArray) {
@@ -1010,9 +1289,42 @@ export class Chat {
             return;
         }
 
+        if (messageArray[1] && !messageArray[2]) {
+            const targetName = messageArray[1];
+            const matches = this.getOnlinePlayers().filter(
+                (player) => player.name.toLowerCase() === targetName.toLowerCase(),
+            );
+            if (matches.length > 1) {
+                this.message(`More than one player is named ${targetName}.`, "", Colors.Red);
+                return;
+            }
+            if (matches.length === 1) {
+                const target = matches[0];
+                if (
+                    !Number.isInteger(target.dimension) || target.dimension < 0 ||
+                    target.dimension > 2 || !Number.isFinite(target.position?.x) ||
+                    !Number.isFinite(target.position?.y)
+                ) {
+                    this.message("That player's position is unavailable.", "", Colors.Red);
+                    return;
+                }
+
+                gotoDimension(target.dimension);
+                runtime.world.player.teleport(target.position);
+                runtime.world.player.mutliplayerSyncPlayerState?.();
+                this.cheatMessage(`Teleported to ${target.name}.`);
+                return;
+            }
+
+            if (targetName !== "~" && !Number.isFinite(Number(targetName))) {
+                this.message(`Player ${targetName} is not online.`, "", Colors.Red);
+                return;
+            }
+        }
+
         // Check if x and y coordinates are provided
         if (!messageArray[1] || !messageArray[2]) {
-            this.invalidCommand("/tp <x> <y>");
+            this.invalidCommand("/tp <player> or /tp <x> <y>");
             return;
         }
 
@@ -1022,13 +1334,21 @@ export class Chat {
         const targetPosition = this.getWorldPosition(new Vector2(x, y));
 
         if (!targetPosition) {
-            this.invalidCommand("/tp <x> <y>");
+            this.invalidCommand("/tp <player> or /tp <x> <y>");
             return;
         }
 
         runtime.world.player.teleport(targetPosition);
+        runtime.world.player.mutliplayerSyncPlayerState?.();
 
         this.cheatMessage(`Teleported player to x: ${x} y: ${y}`);
+    }
+
+    getOnlinePlayers() {
+        const players = [runtime.world?.player, ...(runtime.world?.entities ?? [])]
+            .filter((entity) => entity && Number.isInteger(entity.gamemode) &&
+                typeof entity.name === "string");
+        return [...new Map(players.map((player) => [player.UUID, player])).values()];
     }
 
     spawnpoint(messageArray) {
@@ -1135,17 +1455,33 @@ export class Chat {
         this.message("Usage: " + usage, "", Colors.Red);
     }
 
-    printHelp() {
+    printHelp(messageArray = []) {
         const commands = this.getCommandSuggestions();
+        const requestedName = messageArray[1]?.toLowerCase();
 
-        this.message("Available Commands:", "", Colors.LightPurple);
-        commands.forEach((command) => {
-            const args = command.usage ??
-                (command.args.length
-                    ? command.args.map((arg) => `<${arg}>`).join(" ")
-                    : "");
-            this.message(`/${command.name} ${args}`, "", Colors.Aqua);
-        });
+        if (requestedName) {
+            const command = commands.find(({ name }) => name === requestedName);
+            if (!command) {
+                this.message(`Unknown command: ${requestedName}.`, "", Colors.Red);
+                return;
+            }
+            const args = command.usage ?? command.args.map((arg) => `<${arg}>`).join(" ");
+            this.message(`/${command.name} ${args}`.trim(), "", Colors.Aqua);
+            return;
+        }
+
+        this.message("Available commands (use /help <command> for usage):", "", Colors.LightPurple);
+        let line = "";
+        for (const command of commands) {
+            const args = command.usage ?? command.args.map((arg) => `<${arg}>`).join(" ");
+            const entry = `/${command.name}${args ? ` ${args}` : ""}`;
+            if (line && line.length + entry.length + 2 > 72) {
+                this.message(line, "", Colors.Aqua);
+                line = "";
+            }
+            line = line ? `${line}, ${entry}` : entry;
+        }
+        if (line) this.message(line, "", Colors.Aqua);
     }
 
     printProgress() {
@@ -1343,7 +1679,7 @@ export class Chat {
         ctx.fillStyle = "rgb(0, 0, 0, .7)";
         ctx.fillRect(10, top, width, visible.length * 30 + 28);
         drawText({
-            text: "Tab to complete",
+            text: `Tab to cycle (${suggestions.length})`,
             x: 17,
             y: top + 20,
             size: 18,
