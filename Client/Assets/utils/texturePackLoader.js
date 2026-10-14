@@ -48,16 +48,28 @@ export async function loadVanillaTextures(onProgress) {
     // Loop through Entities
     const Entities = entityRegistry.Entities;
     if (Entities) {
+        // Constructors are inspected before a world exists. Some register
+        // themselves with their world to look up their current chunk.
+        const textureInspectionWorld = {
+            getChunkForX: () => null,
+        };
         for (const entityKey in Entities) {
             const entity = Entities[entityKey];
-            const initEntity = new entity();
-            if (initEntity.body?.sprite) {
-                spritePaths.push(`entity/${initEntity.body.sprite}`);
-            }
-            for (const part of Object.values(initEntity.body?.parts ?? {})) {
-                if (part.ownSpriteMap) {
-                    spritePaths.push(`entity/${part.ownSpriteMap}`);
+            try {
+                const initEntity = new entity(textureInspectionWorld);
+                if (initEntity.body?.sprite) {
+                    spritePaths.push(`entity/${initEntity.body.sprite}`);
                 }
+                for (const part of Object.values(initEntity.body?.parts ?? {})) {
+                    if (part.ownSpriteMap) {
+                        spritePaths.push(`entity/${part.ownSpriteMap}`);
+                    }
+                }
+            } catch (error) {
+                console.warn(
+                    `Could not inspect textures for entity ${entityKey}; continuing startup.`,
+                    error,
+                );
             }
         }
     }
