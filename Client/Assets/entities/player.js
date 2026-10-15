@@ -1757,11 +1757,13 @@ export class Player extends Entity {
     dieEvent() {
         if (this.horse) this.horse.dismount(this);
         if (this.boat) this.boat.dismount(this);
+        const playerName =
+            (typeof this.name === "string" && this.name.trim()) || "Player";
         if (!this.deathCause) {
-            this.deathCause = `${this.name || "Player"} was killed`;
+            this.deathCause = `${playerName} was killed`;
         }
 
-        runtime.game.chat.message("Player has died.");
+        runtime.game.chat.message(`${playerName} has died.`);
 
         if (this.windowOpen && runtime.GAMERULES.keepInventory) {
             this.closeInventory();
