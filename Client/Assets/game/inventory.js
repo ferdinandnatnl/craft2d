@@ -5,7 +5,12 @@ import { Items } from "@2dcraft.com/shared/items.js";
 import { RecipeType } from "@2dcraft.com/shared/recipe.js";
 import { recipes } from "@2dcraft.com/shared/recipes.js";
 import { drawSkinPreview } from "./skinPreview.js";
-import { playPositionalSound, playSound } from "./sounds.js";
+import {
+    playPositionalSound,
+    playRandomSoundFromArray,
+    playSound,
+    Sounds,
+} from "./sounds.js";
 import { Vector2, randomRange } from "../utils/classes.js";
 import { BLOCK_SIZE, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
@@ -13,6 +18,7 @@ import { CANVAS, ctx, drawImage, drawRect, drawText, mouseOverPosition } from ".
 import { getSpriteSize, getSpriteUrl, isEqualToOriginal } from "../utils/texturePackLoader.js";
 import { getBlock } from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
+import { VILLAGER_PROFESSION_NAMES } from "@2dcraft.com/shared/villagerTrades.js";
 import { CREATIVE_TABS, canUseAsWallpaper, creativeCategory, creativeMatchesSearch } from "./creativeCatalog.js";
 
 const VANILLA_GUI_SCALE = 2;
@@ -120,6 +126,8 @@ export class Inventory {
         this.holdingItem = null;
 
         this.storage = null;
+        this.villagerTrade = null;
+        this.villagerTradeSelected = 0;
 
         this.wasItemInConverterOutput = false;
 
@@ -132,6 +140,7 @@ export class Inventory {
 
     getGuiScale() {
         return this.openUIImage.url === "inventory" ||
+            this.openUIImage.url === "villager" ||
             this.openUIImage.url.startsWith("creative_inventory/")
             ? getVanillaGuiScale()
             : LEGACY_GUI_SCALE;
@@ -139,6 +148,7 @@ export class Inventory {
 
     usesVanillaInventoryLayout() {
         return this.openUIImage.url === "inventory" ||
+            this.openUIImage.url === "villager" ||
             this.openUIImage.url.startsWith("creative_inventory/");
     }
 
@@ -358,6 +368,8 @@ export class Inventory {
         this.storage = null;
 
         this.updateStorage = false;
+        this.villagerTrade = null;
+        this.villagerTradeSelected = 0;
 
         this.showItems = true;
 
@@ -572,6 +584,258 @@ export class Inventory {
 
         // Ensure the storageSlots are synchronized with the storage
         this.syncStorageSlots();
+    }
+
+    openVillagerTrade(villager) {
+        this.villagerTrade = villager;
+        this.villagerTradeSelected = 0;
+        this.openUIImage = {
+            url: "villager",
+            crop: { x: 0, y: 0, width: 176, height: 166 },
+        };
+        this.positionPlayerInventorySlots(false);
+        this.craftingSlots = [];
+        this.craftingTable = false;
+        this.clearSlot(this.craftingOutputSlot);
+        this.storage = null;
+        this.storageSlots = [];
+        this.updateStorage = false;
+        this.clearButtons();
+        this.showItems = true;
+        this.interactedBlock = null;
+    }
+
+    getVillagerTradeRowBounds(index) {
+        const scale = this.getGuiScale();
+        return {
+            x: this.inventoryUI.x + 6 * scale,
+            y: this.inventoryUI.y + (7 + index * 20) * scale,
+            width: 24 * scale,
+            height: 18 * scale,
+        };
+    }
+
+    getVillagerTradeOutputBounds() {
+        const scale = this.getGuiScale();
+        return {
+            x: this.inventoryUI.x + 114 * scale,
+            y: this.inventoryUI.y + 49 * scale,
+            width: 20 * scale,
+            height: 20 * scale,
+        };
+    }
+
+    updateVillagerTrade() {
+        const villager = this.villagerTrade;
+        const player = runtime.world?.player;
+        if (!villager || !player || villager.health <= 0 || villager.isSleeping ||
+            villager.dimension !== player.dimension) {
+            player?.closeInventory();
+            return;
+        }
+
+        villager.checkTradeRestock?.();
+        this.hoverItem = null;
+        this.hoverSlot = { x: null, y: null, array: null };
+        const mouse = input.getMousePosition();
+        const offers = villager.tradeOffers ?? [];
+        const rowIndex = offers.findIndex((_, index) => {
+            const bounds = this.getVillagerTradeRowBounds(index);
+            return mouseOverPosition(
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
+            );
+        });
+        if (rowIndex !== -1) {
+            if (input.isLeftMouseButtonPressed()) {
+                this.villagerTradeSelected = rowIndex;
+            }
+            return;
+        }
+
+        const outputBounds = this.getVillagerTradeOutputBounds();
+        if (mouseOverPosition(
+            outputBounds.x,
+            outputBounds.y,
+            outputBounds.width,
+            outputBounds.height,
+        )) {
+            if (input.isLeftMouseButtonPressed()) {
+                this.completeVillagerTrade(this.villagerTradeSelected);
+            }
+            return;
+        }
+
+        this.mouseHoverOverSlotsLogic();
+        if (!input.isRightMouseDown()) this.resetLastHoveredSlot();
+    }
+
+    getVillagerTradeCostPlan(offer) {
+        if (!Array.isArray(offer?.costs) || offer.costs.length === 0) return null;
+
+        const requirements = new Map();
+        for (const cost of offer.costs) {
+            const isItem = cost?.itemId !== undefined;
+            const id = isItem ? cost.itemId : cost?.blockId;
+            if (id === null || id === undefined ||
+                !Number.isInteger(cost?.count) || cost.count <= 0) {
+                return null;
+            }
+
+            const key = `${isItem ? "item" : "block"}:${id}`;
+            const requirement = requirements.get(key);
+            if (requirement) requirement.count += cost.count;
+            else requirements.set(key, { isItem, id, count: cost.count });
+        }
+
+        const plan = [];
+        for (const requirement of requirements.values()) {
+            let remaining = requirement.count;
+            for (let y = 0; y < this.items.length && remaining > 0; y++) {
+                if (y === OFFHAND_ROW) continue;
+                for (let x = 0; x < this.items[y].length && remaining > 0; x++) {
+                    const current = this.items[y][x].item;
+                    const matches = requirement.isItem
+                        ? current.itemId === requirement.id && current.blockId == null
+                        : current.blockId === requirement.id && current.itemId === null;
+                    if (!matches || current.count <= 0) continue;
+
+                    const count = Math.min(current.count, remaining);
+                    plan.push({ y, x, count });
+                    remaining -= count;
+                }
+            }
+            if (remaining > 0) return null;
+        }
+        return plan;
+    }
+
+    villagerTradeHasResources(offer) {
+        return this.getVillagerTradeCostPlan(offer) !== null;
+    }
+
+    completeVillagerTrade(index) {
+        const villager = this.villagerTrade;
+        const player = runtime.world?.player;
+        const offer = villager?.tradeOffers?.[index];
+        if (!villager || !player || villager.health <= 0 || villager.isSleeping ||
+            villager.dimension !== player.dimension || !offer) return false;
+
+        const costPlan = this.getVillagerTradeCostPlan(offer);
+        if (offer.uses >= offer.maxUses || !costPlan) {
+            playRandomSoundFromArray({
+                array: Sounds.Villager_No,
+                positional: true,
+                origin: villager.position,
+                range: 8,
+            });
+            return false;
+        }
+
+        for (const { y, x, count } of costPlan) this.removeItem(y, x, count);
+        const output = new InventoryItem({ ...offer.result });
+        const overflow = this.addItem(output);
+        if (overflow > 0) {
+            player.drop(new InventoryItem({ ...offer.result, count: overflow }), overflow);
+        }
+        offer.uses++;
+        villager.tradeCount = Math.min(1_000_000, (villager.tradeCount || 0) + 1);
+        villager.refreshTradeRank?.();
+        playRandomSoundFromArray({
+            array: Sounds.Villager_Yes,
+            positional: true,
+            origin: villager.position,
+            range: 8,
+        });
+        return true;
+    }
+
+    drawVillagerTrades() {
+        const villager = this.villagerTrade;
+        if (!villager) return;
+        const scale = this.getGuiScale();
+        const offers = villager.tradeOffers ?? [];
+        const profession = VILLAGER_PROFESSION_NAMES[villager.profession] ?? "Villager";
+        const ranks = ["", "Novice", "Apprentice", "Journeyman", "Expert", "Master"];
+        drawText({
+            text: profession,
+            x: this.inventoryUI.x + 137 * scale,
+            y: this.inventoryUI.y + 14 * scale,
+            size: 9 * scale,
+            textAlign: "center",
+            shadow: true,
+        });
+        drawText({
+            text: ranks[villager.professionLevel] ?? "Novice",
+            x: this.inventoryUI.x + 137 * scale,
+            y: this.inventoryUI.y + 30 * scale,
+            size: 8 * scale,
+            textAlign: "center",
+            color: "#e7dca4",
+            shadow: true,
+        });
+
+        const drawTradeItem = (tradeItem, x, y) => {
+            if (!tradeItem) return;
+            const slot = new InventorySlot({
+                position: { x, y },
+                item: new InventoryItem({ ...tradeItem }),
+            });
+            slot.draw(
+                this.inventoryUI.x + this.openUIOffset.x,
+                this.inventoryUI.y + this.openUIOffset.y,
+                null,
+                scale / 3,
+            );
+        };
+
+        drawRect({
+            x: this.inventoryUI.x + 31 * scale,
+            y: this.inventoryUI.y + 6 * scale,
+            width: scale,
+            height: 65 * scale,
+            color: "rgba(0,0,0,0.22)",
+        });
+
+        for (let index = 0; index < offers.length; index++) {
+            const offer = offers[index];
+            const bounds = this.getVillagerTradeRowBounds(index);
+            if (index === this.villagerTradeSelected) {
+                drawRect({
+                    ...bounds,
+                    color: "rgba(255,255,255,0.35)",
+                });
+            }
+            drawTradeItem(offer.costs?.[0], 8 * scale, (8 + index * 20) * scale);
+        }
+
+        const selected = offers[this.villagerTradeSelected];
+        if (!selected) return;
+        const available = this.villagerTradeHasResources(selected) &&
+            selected.uses < selected.maxUses;
+        for (let index = 0; index < selected.costs.length; index++) {
+            drawTradeItem(selected.costs[index], (35 + index * 24) * scale, 51 * scale);
+        }
+        drawTradeItem(selected.result, 116 * scale, 51 * scale);
+        if (!available) {
+            drawRect({
+                x: this.inventoryUI.x + 114 * scale,
+                y: this.inventoryUI.y + 49 * scale,
+                width: 20 * scale,
+                height: 20 * scale,
+                color: "rgba(0,0,0,0.45)",
+            });
+        }
+        drawText({
+            text: `${Math.max(0, selected.maxUses - selected.uses)}/${selected.maxUses}`,
+            x: this.inventoryUI.x + 126 * scale,
+            y: this.inventoryUI.y + 77 * scale,
+            size: 7 * scale,
+            textAlign: "center",
+            shadow: true,
+        });
     }
 
     openHopper(storage) {
@@ -1457,6 +1721,13 @@ export class Inventory {
     }
 
     update() {
+        if (this.villagerTrade) {
+            this.updateVillagerTrade();
+            this.handleHotbarAssignment();
+            this.handleButtonInteractions();
+            this.syncInventoryMultiplayer();
+            return;
+        }
         if (this.openUIImage.url.startsWith("creative_inventory/")) {
             this.updateCreativeMenu();
         }
@@ -1581,6 +1852,7 @@ export class Inventory {
         this.mouseOverCheck(this.storageSlots);
 
         if (
+            !this.villagerTrade &&
             !this.openUIImage.url.startsWith("creative_inventory/") &&
             this.isSlotHovered(
                 this.craftingOutputSlot.position.x,
@@ -1995,6 +2267,7 @@ export class Inventory {
 
         if (this.showItems) {
             this.drawItems();
+            this.drawVillagerTrades();
             if (this.openUIImage.url === "inventory" ||
                 this.creativeTab === "inventory" && path.startsWith("creative_inventory/")) {
                 this.drawPlayerSkin(ctx);
@@ -2171,6 +2444,8 @@ export class Inventory {
         if (this.openUIImage.url.startsWith("creative_inventory/") &&
             this.creativeTab !== "inventory") {
             this.drawSlots([this.items[3]]);
+        } else if (this.villagerTrade) {
+            this.drawSlots(this.items.slice(0, OFFHAND_ROW));
         } else {
             this.drawSlots(this.items);
         }
@@ -2178,7 +2453,8 @@ export class Inventory {
         if (this.craftingTable) {
             this.drawCraftingGuide();
         }
-        if (!this.openUIImage.url.startsWith("creative_inventory/"))
+        if (!this.villagerTrade &&
+            !this.openUIImage.url.startsWith("creative_inventory/"))
             this.drawCraftingSlots();
         this.drawSlots(this.creativeSlots);
         this.drawSlots(this.storageSlots);
@@ -2732,7 +3008,7 @@ export class Inventory {
         const spritePath = getSpriteUrl(path);
         const spriteSize = getSpriteSize(path);
         const actualWidth = spriteSize.width || 16;
-        const actualHeight = spriteSize.width || 16;
+        const actualHeight = spriteSize.height || 16;
 
         let cutoff = 0;
         if (holdingItem.blockId) {
@@ -2743,7 +3019,7 @@ export class Inventory {
         const targetHeight = this.usesVanillaInventoryLayout()
             ? 16 * this.getGuiScale()
             : 40;
-        const scale = targetHeight / actualHeight; // Scale based on full height, not cropped
+        const scale = targetHeight / Math.max(actualWidth, actualHeight);
 
         const cropY = cutoff * actualHeight; // Crop from the top by the cutoff amount
 
@@ -2754,7 +3030,7 @@ export class Inventory {
             scale: scale,
             centerX: false,
             dark: holdingItem.props.wall === true,
-            fixAnimation: cutoff === 0,
+            fixAnimation: cutoff === 0 && actualHeight >= actualWidth,
             crop: {
                 x: 0,
                 y: cropY, // Start cropping from the top by the cutoff value

@@ -5,6 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { Blocks } from "@2dcraft.com/shared/blocks.js";
 import { isUpperSlab } from "@2dcraft.com/shared/slabs.js";
 import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, TERRAIN_HEIGHT, WATER_LEVEL } from "../utils/globals.js";
@@ -43,6 +44,35 @@ const solid = (block) => {
     const def = block && getBlock(block.blockType);
     return !!(def && !def.air && !def.transparent && !def.fluid && !block.cutoff);
 };
+
+function playerCaveFactor(world, dimension, lighting) {
+    const player = world.player;
+    if (!lighting || dimension !== Dimensions.Overworld || !player || !world.generator) {
+        return 0;
+    }
+
+    const centerX = player.position.x + player.hitbox.x / 2;
+    const feetY = player.position.y + player.hitbox.y - 1;
+    const surfaceY = world.generator.getTerrainHeight(centerX / BLOCK_SIZE, dimension);
+    const feetBlockY = world.worldToUserBlockY?.(feetY) ??
+        CHUNK_HEIGHT - Math.floor(feetY / BLOCK_SIZE);
+    const depth = surfaceY - feetBlockY;
+    if (depth < 3) return 0;
+
+    const underground = THREE.MathUtils.smoothstep(depth, 3, 8);
+    const exposure = player.getSkyExposure?.();
+    let cover = 0;
+    if (Number.isFinite(exposure)) cover = 1 - clamp(exposure, 0, 1);
+    else if (player.getSunLight?.() === false) cover = 1;
+    return underground * THREE.MathUtils.smoothstep(cover, 0.1, 0.7);
+}
+
+function getHeldTorch(player) {
+    return [player?.holdItem, player?.inventory?.getOffhandItem?.()].find(
+        (item) => item?.count > 0 &&
+            (item.blockId === Blocks.Torch || item.blockId === Blocks.RedstoneTorch),
+    );
+}
 
 function addEndFrameEye(batch, x, y, z, light) {
     const x0 = x + 0.25, x1 = x + 0.75;
@@ -94,6 +124,43 @@ function addBed(batch, x, row, headOffset, light) {
     }
     quad(footSprite, footLegX, bottom, 3 / 16, 3 / 16, footLegUv, front + 0.001);
     quad(headSprite, headLegX, bottom, 3 / 16, 3 / 16, headLegUv, front + 0.001);
+}
+
+function addChest(batch, x, row, z, light, sprite) {
+    const inset = 1 / 16;
+    const size = 14 / 16;
+    const bottom = -row - 1 + inset;
+    const front = z + inset + size + 0.001;
+    const left = x + inset;
+    const back = z + inset;
+
+    // The 16px chest sprite has a transparent 1px side and 2px top border.
+    // Use an opaque wooden body, then map only its 14x14 front onto the face.
+    batch.box(
+        "oak_planks",
+        {},
+        left,
+        bottom,
+        back,
+        size,
+        size,
+        size,
+        light,
+        { front: false, back: false },
+    );
+    batch.quad(
+        sprite,
+        {},
+        [
+            [left, bottom, front],
+            [left + size, bottom, front],
+            [left + size, bottom + size, front],
+            [left, bottom + size, front],
+        ],
+        [0, 0, 1],
+        light,
+        [1 / 16, 0, 15 / 16, 14 / 16],
+    );
 }
 
 export class VoxelRenderer {
@@ -168,7 +235,14 @@ export class VoxelRenderer {
             this.sun.shadow.radius = 2;
             this.ambient = new THREE.HemisphereLight(0xc2d7f2, 0x514535, 1.65);
             this.scene.add(this.sun, this.sun.target, this.ambient);
-            this.lights = Array.from({ length: 3 }, () => {
+            this.playerLight = new THREE.PointLight(0xffa246, 0, 10, 1.4);
+            this.playerLight.castShadow = !this.mobilePerformanceMode;
+            this.playerLight.shadow.mapSize.set(256, 256);
+            this.playerLight.shadow.camera.near = 0.05;
+            this.playerLight.shadow.normalBias = 0.018;
+            this.playerLight.shadow.bias = -0.0006;
+            this.scene.add(this.playerLight);
+            this.lights = Array.from({ length: 2 }, () => {
                 const light = new THREE.PointLight(0xffaa55, 0, 12, 1.4);
                 light.castShadow = !this.mobilePerformanceMode;
                 light.shadow.mapSize.set(256, 256);
@@ -234,7 +308,7 @@ export class VoxelRenderer {
         }
     }
 
-    updateTerrain(world, camera, width, height, dimension, lighting) {
+    updateTerrain(world, camera, width, height, dimension, lighting, caveFactor) {
         const left = Math.floor(camera.x / BLOCK_SIZE) - 2;
         const right = Math.ceil((camera.x + width) / BLOCK_SIZE) + 2;
         const top = Math.max(0, Math.floor(camera.y / BLOCK_SIZE) - 8);
@@ -265,7 +339,7 @@ export class VoxelRenderer {
                 }
             }
         }
-        const key = `${dimension}:${left}:${right}:${top}:${bottom}:${hash}:${lighting}`;
+        const key = `${dimension}:${left}:${right}:${top}:${bottom}:${hash}:${lighting}:${caveFactor.toFixed(2)}`;
         if (this.terrainKey === key) return;
         this.terrainKey = key;
         const batch = new FaceBatch(this.materials);
@@ -279,7 +353,14 @@ export class VoxelRenderer {
                 : block;
             const skyExposure = exposureBlock?.skyExposure ??
                 (exposureBlock?.sunLight ? 1 : 0);
-            const light = renderLightTint(block.lightLevel, skyExposure, lighting);
+            const sheltered = caveFactor * (exposureBlock?.sunLight ? 0 : 1);
+            const lightLevel = THREE.MathUtils.lerp(
+                block.lightLevel ?? 1,
+                block.lightSourceLevel || 1,
+                sheltered,
+            );
+            const renderedExposure = THREE.MathUtils.lerp(skyExposure, 0, sheltered);
+            const light = renderLightTint(lightLevel, renderedExposure, lighting);
             const shade = wall ? light * 0.72 : light;
             const sprite = block.spriteName || def.sprite;
             if (!sprite) continue;
@@ -291,6 +372,10 @@ export class VoxelRenderer {
                     [x, -y - 1, frontZ], [x + 1, -y - 1, frontZ],
                     [x + 1, -y, frontZ], [x, -y, frontZ],
                 ], [0, 0, 1], shade);
+                continue;
+            }
+            if (def.specialType === SpecialType.SingleChest) {
+                addChest(batch, x, y, z, shade, sprite);
                 continue;
             }
             const ox = def.blockOffset?.x || 0, oy = def.blockOffset?.y || 0;
@@ -333,9 +418,7 @@ export class VoxelRenderer {
                 }
                 continue;
             }
-            // Chests are non-colliding for gameplay, but still need block volume.
-            if (!def.collision && def.transparent && !block.cutoff &&
-                def.specialType !== SpecialType.SingleChest) {
+            if (!def.collision && def.transparent && !block.cutoff) {
                 // Crossed cutout planes give grass and flowers a real footprint.
                 const options = { plant: true, emissive: !!block.lightSourceLevel };
                 batch.quad(sprite, options,
@@ -357,7 +440,7 @@ export class VoxelRenderer {
         this.foregroundWater = water;
     }
 
-    updateScenery(world, dimension, lighting) {
+    updateScenery(world, dimension, lighting, caveFactor) {
         if (dimension !== Dimensions.Overworld || world.generator.specialWorldProps.void) {
             if (this.sceneryChunks.size || this.backgroundWater.length || this.backgroundWaterSurface) {
                 this.clearScenery();
@@ -414,7 +497,8 @@ export class VoxelRenderer {
                 const lodStep = includeLod
                     ? getDistantLodStep(distanceChunks, RENDER_DISTANCE)
                     : 1;
-                const lodLighting = includeLod ? lighting : null;
+                const lodLighting = includeLod
+                    ? `${lighting}:${caveFactor.toFixed(2)}` : null;
                 const sourceRevision = cachedSource?.revision;
                 const existing = this.sceneryChunks.get(index);
                 const sameSource = existing?.sourceChunk === cachedSource &&
@@ -452,6 +536,7 @@ export class VoxelRenderer {
                         lodStep,
                         distanceChunks,
                         lighting,
+                        caveFactor,
                     );
                     chunk.lodGroup = lod.group;
                     this.positionDistantLod(lod.group);
@@ -509,7 +594,7 @@ export class VoxelRenderer {
         );
     }
 
-    buildDistantChunkLod(chunk, step, distanceChunks, lighting) {
+    buildDistantChunkLod(chunk, step, distanceChunks, lighting, caveFactor) {
         const group = new THREE.Group();
         const batch = new FaceBatch(this.materials);
         const frontZ = PLAY_PLANE_Z;
@@ -538,7 +623,14 @@ export class VoxelRenderer {
                 const x1 = x0 + sample.width;
                 const y0 = y, y1 = y + sample.height;
                 const skyExposure = block.sunLight === true ? 1 : 0;
-                const light = renderLightTint(block.lightLevel, skyExposure, lighting) * fade;
+                const sheltered = caveFactor * (block.sunLight === true ? 0 : 1);
+                const lightLevel = THREE.MathUtils.lerp(
+                    block.lightLevel ?? 1,
+                    block.lightSourceLevel || 1,
+                    sheltered,
+                );
+                const renderedExposure = THREE.MathUtils.lerp(skyExposure, 0, sheltered);
+                const light = renderLightTint(lightLevel, renderedExposure, lighting) * fade;
                 if (definition.specialType === SpecialType.Bed) {
                     if (definition.extendedBlock?.length) {
                         addBed(batch, chunk.x / BLOCK_SIZE + block.x, block.y,
@@ -784,7 +876,7 @@ export class VoxelRenderer {
         this.waterHasContent = true;
     }
 
-    updateLighting(time, seconds, dimension, lighting, effects) {
+    updateLighting(time, seconds, dimension, lighting, effects, caveFactor, player) {
         let day = daylightFactor(time);
         if (dimension !== Dimensions.Overworld || getDimension(dimension).alwaysDay || !lighting) day=1;
         this.renderer.toneMappingExposure = 1.15 + (1 - day);
@@ -796,7 +888,11 @@ export class VoxelRenderer {
         this.sun.color.set(0x90b3ed).lerp(DAY_SUN, day).lerp(DUSK_SUN, dusk * 0.55);
         this.sun.intensity = 0.55 + day * 2.41;
         this.sun.castShadow = effects;
-        this.ambient.intensity=0.9+day*0.63;
+        this.ambient.intensity = THREE.MathUtils.lerp(
+            0.9 + day * 0.63,
+            0.16 + day * 0.06,
+            caveFactor,
+        );
         if (dimension === Dimensions.End) {
             this.sun.intensity=0.35; this.sun.color.set(0xaaa1c7);
             this.ambient.intensity=0.9; this.ambient.color.set(0x9a87b5);
@@ -808,6 +904,22 @@ export class VoxelRenderer {
             dimension === Dimensions.Overworld ? NIGHT_FOG : 0x24151a);
         if (dimension === Dimensions.Overworld) {
             this.scene.fog.color.lerp(DAY_FOG, day).lerp(DUSK_FOG, dusk * 0.4);
+        }
+        const heldTorch = getHeldTorch(player);
+        this.playerLight.visible = caveFactor > 0 && !!heldTorch;
+        this.playerLight.intensity = heldTorch ? caveFactor * 1.7 : 0;
+        this.playerLight.color.set(
+            heldTorch?.blockId === Blocks.RedstoneTorch ? 0xff4422 : 0xffa246,
+        );
+        this.playerLight.castShadow = effects && !this.mobilePerformanceMode;
+        if (player && heldTorch) {
+            const handX = player.position.x + player.hitbox.x / 2 +
+                Math.sign(player.direction || 1) * BLOCK_SIZE * 0.25;
+            this.playerLight.position.set(
+                handX / BLOCK_SIZE,
+                -(player.position.y + player.hitbox.y * 0.68) / BLOCK_SIZE,
+                0.65,
+            );
         }
         this.sources.sort((a,b)=>Math.hypot(a.x-x,-a.y-y)-Math.hypot(b.x-x,-b.y-y));
         this.lights.forEach((light,index)=>{
@@ -838,16 +950,17 @@ export class VoxelRenderer {
         if (!this.initialize() || !this.supported) return false;
         try {
             this.updateCamera(camera,width,height);
-            this.updateTerrain(world,camera,width,height,dimension,lighting);
-            this.updateScenery(world,dimension,lighting);
+            const caveFactor = playerCaveFactor(world, dimension, lighting);
+            this.updateTerrain(world,camera,width,height,dimension,lighting,caveFactor);
+            this.updateScenery(world,dimension,lighting,caveFactor);
             this.updateWater(
                 this.foregroundWater || [],
                 this.backgroundWater || [],
                 this.backgroundWaterSurface,
             );
             this.materials.update(seconds, effects);
-            this.updateLighting(time,seconds,dimension,lighting,effects);
-            this.entities.update(world.entities,dimension,this.camera,seconds,lighting);
+            this.updateLighting(time,seconds,dimension,lighting,effects,caveFactor,world.player);
+            this.entities.update(world.entities,dimension,this.camera,seconds,lighting,caveFactor);
             if (dimension === Dimensions.Overworld) {
                 this.scene.background = this.sky.draw(this.renderer, {
                     width,
@@ -885,6 +998,7 @@ export class VoxelRenderer {
         for (const group of [this.terrain,this.scenery]) group?.traverse(child=>child.geometry?.dispose());
         this.water?.geometry.dispose(); this.water?.material.dispose(); this.waterNormals?.dispose();
         this.sky?.dispose(); this.sun?.shadow.dispose();
+        this.playerLight?.shadow.dispose();
         for (const light of this.lights || []) light.shadow.dispose();
         this.disposePostprocessing();
         this.renderer?.dispose();

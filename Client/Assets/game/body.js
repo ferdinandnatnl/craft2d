@@ -676,7 +676,19 @@ export class BodyPart {
 
         if (!spritePath) return;
 
-        const spriteSize = getSpriteSize(spritePath).width;
+        const spriteDimensions = getSpriteSize(spritePath);
+        const spriteSize = spriteDimensions.width || 16;
+        const isSpear = [
+            Items.WoodSpear,
+            Items.StoneSpear,
+            Items.IronSpear,
+            Items.GoldSpear,
+            Items.DiamondSpear,
+            Items.NetheriteSpear,
+        ].includes(holdItem.itemId);
+        const spriteHeight = isSpear
+            ? spriteDimensions.height || spriteSize
+            : spriteSize;
 
         const sprite = getSpriteUrl(spritePath);
 
@@ -719,16 +731,16 @@ export class BodyPart {
 
         drawImage({
             url: sprite,
-            x: (-spriteSize * scale * (BLOCK_SIZE / spriteSize)) / 2,
-            y: (-spriteSize * scale * (BLOCK_SIZE / spriteSize)) / 2,
+            x: (-spriteSize * scale) / 2,
+            y: (-spriteHeight * scale) / 2,
             scale: (BLOCK_SIZE / spriteSize) * scale,
             centerX: false,
-            sizeY: spriteSize - cutoff * spriteSize,
+            sizeY: spriteHeight - cutoff * spriteHeight,
             crop: {
                 x: 0,
                 y: 0,
                 width: spriteSize,
-                height: spriteSize,
+                height: spriteHeight,
             },
         });
 

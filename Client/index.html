@@ -2,11 +2,194 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta http-equiv="refresh" content="0;url=./game.html" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta name="theme-color" content="#10171e" />
         <title>craft2d.com</title>
+        <link rel="stylesheet" href="boot.css" />
+        <link rel="stylesheet" href="style.css" />
+        <link rel="stylesheet" href="menu.css" />
+        <link rel="icon" href="Assets/sprites/misc/icon_16x16.png" />
     </head>
-    <body>
-        <a href="./game.html">Play craft2d.com</a>
+    <body oncontextmenu="return false;">
+        <div id="media-boot">
+            <div class="media-boot-inner">
+                <div class="media-boot-title">Loading resources...</div>
+                <div class="media-boot-bar"><div class="media-boot-fill"></div></div>
+                <div class="media-boot-pct">0%</div>
+            </div>
+        </div>
+        <div class="chromium-issue-1092080-workaround__wrapper">
+            <canvas id="voxel-canvas" aria-hidden="true"></canvas>
+            <canvas id="canvas"></canvas>
+            <div id="loading">Loading...</div>
+
+            <dialog
+                id="player-name-onboarding"
+                class="player-name-onboarding"
+                aria-modal="true"
+                aria-labelledby="player-name-title"
+                aria-describedby="player-name-copy"
+            >
+                <form id="player-name-form" class="player-name-panel">
+                    <h1 id="player-name-title" class="input-field-title player-name-title">
+                        Welcome to craft2d.com
+                    </h1>
+                    <p id="player-name-copy" class="player-name-copy">What should we call you?</p>
+                    <label class="input-field-container" for="player-name-input">
+                        <span class="input-field-title">Your name</span>
+                        <input
+                            class="input-field"
+                            id="player-name-input"
+                            name="playerName"
+                            type="text"
+                            maxlength="15"
+                            autocomplete="nickname"
+                            autocapitalize="words"
+                            aria-describedby="player-name-error"
+                            required
+                        />
+                    </label>
+                    <p id="player-name-error" class="player-name-error" aria-live="polite"></p>
+                    <button class="btn" type="submit">Start Playing</button>
+                </form>
+            </dialog>
+
+            <div id="touch-controls" aria-label="Touch game controls">
+                <div class="touch-top">
+                    <button type="button" class="touch-button" data-action="sprint" aria-label="Sprint">Run</button>
+                    <button type="button" class="touch-button" data-action="drop" aria-label="Drop item">Drop</button>
+                    <button type="button" class="touch-button" data-action="use" aria-label="Inventory">Bag</button>
+                    <button type="button" class="touch-button" data-action="pause" aria-label="Pause menu">Menu</button>
+                </div>
+                <div class="touch-move">
+                    <button type="button" class="touch-button" data-action="moveLeft" aria-label="Move left">◀</button>
+                    <button type="button" class="touch-button" data-action="moveRight" aria-label="Move right">▶</button>
+                </div>
+                <div class="touch-actions">
+                    <button type="button" class="touch-button" data-action="jump" aria-label="Jump">Jump</button>
+                    <button type="button" class="touch-button" data-action="attack" aria-label="Attack or break">Break</button>
+                    <button type="button" class="touch-button" data-action="place" aria-label="Use item or place block">Use</button>
+                </div>
+            </div>
+
+            <div class="chromium-issue-1092080-workaround__overlay"></div>
+
+            <div id="pause-menu">
+                <div class="pause-menu-page" data-page="1">
+                    <h2
+                        class="input-field-title pause-menu-title"
+                        style="
+                            margin-top: -2rem;
+                            margin-bottom: 2rem;
+                            font-size: xx-large;
+                        "
+                    >
+                        Game Menu
+                    </h2>
+                    <button class="btn" onclick="game.pauseMenu.close()">
+                        Back to Game
+                    </button>
+                    <button class="btn" onclick="game.pauseMenu.setPage(2)">
+                        Debug Menu
+                    </button>
+                    <button class="btn" id="pause-difficulty-btn" onclick="togglePauseDifficulty()">
+                        Difficulty: Easy
+                    </button>
+                    <button class="btn" id="pause-renderer-btn" onclick="game.cycleRenderer()">
+                        Renderer - 3D
+                    </button>
+                    <!-- These will be uncommented when advancements are added -->
+                    <!-- <div>
+                        <button class="btn">Advancements</button>
+                        <button class="btn">Statistics</button>
+                    </div> -->
+                    <button class="btn" onclick="leaveGameToWorlds()">
+                        Save and Quit to Worlds
+                    </button>
+                </div>
+
+                <div class="pause-menu-page" data-page="2">
+                    <h2 class="input-field-title pause-menu-title">
+                        Debug Menu
+                    </h2>
+                    <button class="btn" onclick="game.pauseMenu.setPage(1)">
+                        Back
+                    </button>
+                    <button
+                        class="btn"
+                        onclick="
+                            if (typeof saveWorld === 'function') saveWorld();
+                        "
+                    >
+                        Save World
+                    </button>
+                    <button
+                        class="btn"
+                        onclick="
+                            if (typeof saveWorld === 'function')
+                                saveWorld(false, true);
+                        "
+                    >
+                        Save World File
+                    </button>
+                    <button
+                        class="btn"
+                        id="debug-chunk-borders"
+                        onclick="toggleChunkBorders()"
+                    >
+                        Chunk Borders
+                    </button>
+                    <button
+                        class="btn"
+                        id="debug-camera"
+                        onclick="toggleCamera()"
+                    >
+                        Camera
+                    </button>
+                    <button
+                        class="btn"
+                        id="debug-hitbox"
+                        onclick="toggleHitbox()"
+                    >
+                        Hitbox
+                    </button>
+                    <button
+                        class="btn"
+                        id="debug-print-block"
+                        onclick="togglePrintBlock()"
+                    >
+                        Print Block
+                    </button>
+                    <button
+                        class="btn"
+                        id="debug-file-size"
+                        onclick="toggleFileSize()"
+                    >
+                        File Size
+                    </button>
+                    <button class="btn" id="debug-fps" onclick="toggleFps()">
+                        FPS
+                    </button>
+                    <button
+                        class="btn"
+                        id="debug-coords"
+                        onclick="toggleCoordinates()"
+                    >
+                        Coords
+                    </button>
+                </div>
+            </div>
+            <div id="death-screen" class="death-screen">
+                <h2 class="death-screen-title">You Died!</h2>
+                <p id="death-cause" class="death-screen-cause">Steve was killed</p>
+                <p class="death-screen-subtitle">Score: <span id="death-score-value">0</span></p>
+                <div class="death-screen-buttons">
+                    <button class="btn" onclick="respawnFromDeathScreen()">Respawn</button>
+                    <button class="btn" onclick="leaveGameToWorlds()">Select World</button>
+                </div>
+            </div>
+        </div>
+
+        <script type="module" src="/game-main.js"></script>
     </body>
 </html>

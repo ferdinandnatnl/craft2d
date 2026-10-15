@@ -997,7 +997,6 @@ export class WorldGenerator {
             }
         } else {
             const floorY = site.floors[index];
-            const building = Structures[`${structureName}${piece}`];
             levels.forEach((level, x) => {
                 for (let y = level; y < floorY; y++) {
                     chunk.setBlockType(x, y, villageGround);
@@ -1008,16 +1007,6 @@ export class WorldGenerator {
             });
             this.generateStructure(`${structureName}${piece}`, chunk.x,
                 floorY * BLOCK_SIZE, dimensionIndex, () => 1);
-            for (const x of building.villageEntrances) {
-                for (const y of [floorY + 1, floorY + 2]) {
-                    const door = chunk.getBlock(x, y);
-                    const expected = building.blocks[building.blocks.length - 1 -
-                        (y - floorY)][x];
-                    if (door?.blockType === expected) {
-                        door.setBlockMetaData({ open: true });
-                    }
-                }
-            }
         }
         chunk.hasVillage = true;
 
@@ -1028,7 +1017,14 @@ export class WorldGenerator {
                 const villager = this.world.summonEntity(
                     Entities.Villager,
                     new Vector2(chunk.x + (x + 0.2) * BLOCK_SIZE, 0),
-                    { myChunkX: chunk.x, homeX: chunk.x + 8 * BLOCK_SIZE },
+                    {
+                        myChunkX: chunk.x,
+                        homeX: chunk.x + 8 * BLOCK_SIZE,
+                        villagerType: this.calculateChunkBiome(
+                            site.anchorChunkIndex,
+                            dimensionIndex,
+                        ).name,
+                    },
                 );
                 villager.dimension = dimensionIndex;
                 villager.position.y = this.world.userBlockYToWorld(floorY + 1) -

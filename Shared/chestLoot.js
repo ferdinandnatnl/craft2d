@@ -80,6 +80,10 @@ export const ChestLoot = Object.freeze({
             maxCount: 2,
             subtract: 4,
         }),
+        new LootItem({ itemId: Items.Saddle, maxCount: 1, subtract: 6 }),
+        new LootItem({ itemId: Items.IronHorseArmor, maxCount: 1, subtract: 8 }),
+        new LootItem({ itemId: Items.GoldHorseArmor, maxCount: 1, subtract: 10 }),
+        new LootItem({ itemId: Items.DiamondHorseArmor, maxCount: 1, subtract: 18 }),
         new LootItem({
             itemId: Items.Stick,
             maxCount: 4,
@@ -174,6 +178,10 @@ export const ChestLoot = Object.freeze({
             maxCount: 1,
             subtract: 2,
         }),
+        new LootItem({ itemId: Items.Saddle, maxCount: 1, subtract: 4 }),
+        new LootItem({ itemId: Items.IronHorseArmor, maxCount: 1, subtract: 6 }),
+        new LootItem({ itemId: Items.GoldHorseArmor, maxCount: 1, subtract: 8 }),
+        new LootItem({ itemId: Items.DiamondHorseArmor, maxCount: 1, subtract: 14 }),
         new LootItem({
             itemId: Items.GoldIngot,
             maxCount: 4,

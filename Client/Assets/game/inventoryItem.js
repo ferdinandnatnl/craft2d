@@ -68,10 +68,14 @@ export class InventorySlot {
         const frameCount = Math.floor(actualHeight / actualWidth);
 
         const animationSpeed = 2;
-        const frame = Math.floor(runtime.globalFrame / animationSpeed) % frameCount;
+        const frame = frameCount > 1
+            ? Math.floor(runtime.globalFrame / animationSpeed) % frameCount
+            : 0;
 
         const cropY = frame * actualWidth;
-        const cropHeight = Math.min(actualWidth, actualHeight - cropY);
+        const cropHeight = frameCount > 1
+            ? Math.min(actualWidth, actualHeight - cropY)
+            : actualHeight;
 
         const crop = {
             x: 0,

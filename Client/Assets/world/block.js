@@ -1742,12 +1742,15 @@ export class Block extends Square {
         upper.setBlockMetaData(metadata);
 
         if (door.wooden) {
-            playPositionalSound(
-                this.world.getBlockWorldPosition(this),
-                Sounds.Wood_Click,
-                10,
-                nextState ? 0.8 : 0.65,
-            );
+            playRandomSoundFromArray({
+                array: nextState
+                    ? Sounds.Wooden_Door_Open
+                    : Sounds.Wooden_Door_Close,
+                positional: true,
+                origin: this.world.getBlockWorldPosition(this),
+                range: 10,
+                volume: nextState ? 0.8 : 0.65,
+            });
         }
 
         lower.syncMetaData(false);

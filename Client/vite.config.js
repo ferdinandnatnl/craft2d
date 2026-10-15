@@ -62,6 +62,7 @@ export default defineConfig({
         rollupOptions: {
             input: {
                 main: resolve(__dirname, "index.html"),
+                // Retain the old URL as a redirect for bookmarks and multiplayer links.
                 game: resolve(__dirname, "game.html"),
                 worlds: resolve(__dirname, "worlds.html"),
                 structureCreator: resolve(__dirname, "structureCreator.html"),

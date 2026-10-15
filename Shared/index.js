@@ -22,3 +22,4 @@ export * from "./chestLoot.js";
 export * from "./inventoryItem.js";
 export * from "./recipe.js";
 export * from "./recipes.js";
+export * from "./villagerTrades.js";

@@ -21,12 +21,81 @@ import { mutantAttackAmount, mutantPartParent, mutantPartPitch, mutantWalkBob } 
 import { MUTANT_CREEPER_RIG } from "./mutantCreeperRig.js";
 import { renderLightTint } from "./renderLight.js";
 import ironGolemModel from "../sprites/entity/golem/iron_golem.geo.json" with { type: "json" };
+import horseModel from "../models/entity/horse.json" with { type: "json" };
 
 // Keep movement side-on while revealing the front of cuboid faces and skins.
 const FACING_YAW = Math.PI / 3;
+// The Bedrock horse rig faces down its -Z axis. Keep its long side on the
+// side-scrolling X axis and turn its head in the entity's travel direction.
+const HORSE_FACING_YAW = Math.PI / 2;
 const minionModelPosition = ([x, y, z]) => [x / 16, (24 - y) / 16, z / 16];
 const heldItemHandOffsetY = (record, armName) =>
     record.bends?.[armName] ? -6 / 16 : record.minionModel ? -7 / 16 : -12 / 16;
+const HORSE_BONES = new Set([
+    "Body", "Tail", "LegBL", "LegBR", "LegFL", "LegFR", "Neck",
+    "Head", "Muzzle", "EarL", "EarR", "Mane", "Saddle",
+]);
+const horseImages = new Map();
+const horseSkins = new Map();
+const horseEquipmentTextures = new Map();
+
+function loadHorseImage(path) {
+    const url = getSpriteUrl(path);
+    if (!horseImages.has(url)) {
+        horseImages.set(url, new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = reject;
+            image.src = url;
+        }));
+    }
+    return horseImages.get(url);
+}
+
+function horseSkin(entity) {
+    const basePath = `entity/horse/horse_${entity.coat}`;
+    const markingsPath = entity.markings === "none"
+        ? null
+        : `entity/horse/horse_markings_${entity.markings}`;
+    const key = `${getSpriteUrl(basePath)}|${markingsPath ? getSpriteUrl(markingsPath) : ""}`;
+    if (horseSkins.has(key)) return horseSkins.get(key);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestMipmapLinearFilter;
+    Promise.all([
+        loadHorseImage(basePath),
+        markingsPath ? loadHorseImage(markingsPath) : Promise.resolve(null),
+    ]).then(([base, markings]) => {
+        canvas.width = base.naturalWidth || base.width;
+        canvas.height = base.naturalHeight || base.height;
+        const context = canvas.getContext("2d");
+        context.imageSmoothingEnabled = false;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(base, 0, 0, canvas.width, canvas.height);
+        if (markings) context.drawImage(markings, 0, 0, canvas.width, canvas.height);
+        texture.needsUpdate = true;
+    }).catch((error) => {
+        console.warn("Could not load a horse skin texture.", error);
+    });
+    horseSkins.set(key, texture);
+    return texture;
+}
+
+function horseEquipmentTexture(path) {
+    if (!horseEquipmentTextures.has(path)) {
+        const texture = new THREE.TextureLoader().load(getSpriteUrl(path));
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.NearestMipmapLinearFilter;
+        horseEquipmentTextures.set(path, texture);
+    }
+    return horseEquipmentTextures.get(path);
+}
 
 export class VoxelEntities {
     constructor(scene) {
@@ -40,6 +109,7 @@ export class VoxelEntities {
 
     create(entity) {
         if (entity.isBoat) return this.createBoat(entity);
+        if (entity.isHorse) return this.createHorseModel(entity);
         const image = entity.body?.image ?? (entity.voxelSprite ? entity.img : null);
         const spriteName = entity.body?.sprite ?? entity.sprite ?? "";
         if (spriteName === "golem/iron_golem.svg") {
@@ -861,6 +931,171 @@ export class VoxelEntities {
         };
     }
 
+    createHorseModel(entity) {
+        const model = horseModel["minecraft:geometry"][0];
+        const textureCanvas = horseSkin(entity).image;
+        const material = new THREE.MeshStandardMaterial({
+            map: horseSkin(entity),
+            roughness: 0.95,
+            alphaTest: 0.1,
+        });
+        const armorMaterial = new THREE.MeshStandardMaterial({
+            transparent: true,
+            alphaTest: 0.1,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            roughness: 0.95,
+        });
+        const saddleMaterial = new THREE.MeshStandardMaterial({
+            map: horseEquipmentTexture("entity/equipment/horse_saddle/saddle"),
+            roughness: 0.95,
+            alphaTest: 0.1,
+        });
+        const group = new THREE.Group();
+        const joints = new Map([["root", group]]);
+        const pivots = {};
+        const armorMeshes = [];
+        const saddleMeshes = [];
+
+        for (const bone of model.bones.filter((part) => HORSE_BONES.has(part.name))) {
+            const parent = joints.get(bone.parent) ?? group;
+            const parentBone = model.bones.find((part) => part.name === bone.parent);
+            const parentPivot = parentBone?.pivot ?? [0, 0, 0];
+            const joint = new THREE.Group();
+            joint.position.set(
+                (bone.pivot[0] - parentPivot[0]) / 16,
+                (bone.pivot[1] - parentPivot[1]) / 16,
+                (bone.pivot[2] - parentPivot[2]) / 16,
+            );
+            joint.rotation.order = "ZYX";
+            joint.rotation.set(...(bone.rotation ?? [0, 0, 0]).map((angle) =>
+                angle * Math.PI / 180));
+            joint.name = bone.name;
+            parent.add(joint);
+            joints.set(bone.name, joint);
+            pivots[bone.name] = joint;
+
+            for (const cube of bone.cubes ?? []) {
+                const dims = cube.size;
+                if (dims.some((dimension) => dimension <= 0)) continue;
+                const [u, v] = Array.isArray(cube.uv)
+                    ? cube.uv
+                    : cube.uv?.north ?? [0, 0];
+                const inflate = (cube.inflate ?? 0) * 2;
+                const geometry = skinBox(
+                    dims[0] + inflate,
+                    dims[1] + inflate,
+                    dims[2] + inflate,
+                    u,
+                    v,
+                    textureCanvas,
+                    cube.mirror ?? false,
+                    dims,
+                );
+                const mesh = new THREE.Mesh(
+                    geometry,
+                    bone.name === "Saddle" ? saddleMaterial : material,
+                );
+                mesh.position.set(
+                    (cube.origin[0] + dims[0] / 2 - bone.pivot[0]) / 16,
+                    (cube.origin[1] + dims[1] / 2 - bone.pivot[1]) / 16,
+                    (cube.origin[2] + dims[2] / 2 - bone.pivot[2]) / 16,
+                );
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                if (bone.name === "Saddle") {
+                    mesh.visible = false;
+                    saddleMeshes.push(mesh);
+                }
+                joint.add(mesh);
+
+                if (bone.name !== "Saddle") {
+                    const armorGeometry = skinBox(
+                        dims[0] + 0.18,
+                        dims[1] + 0.18,
+                        dims[2] + 0.18,
+                        u,
+                        v,
+                        textureCanvas,
+                        cube.mirror ?? false,
+                        dims,
+                    );
+                    const armorMesh = new THREE.Mesh(armorGeometry, armorMaterial);
+                    armorMesh.position.copy(mesh.position);
+                    armorMesh.visible = false;
+                    armorMesh.castShadow = true;
+                    armorMesh.receiveShadow = true;
+                    joint.add(armorMesh);
+                    armorMeshes.push(armorMesh);
+                }
+            }
+        }
+
+        this.scene.add(group);
+        return {
+            group,
+            pivots,
+            material,
+            armorMaterial,
+            saddleMaterial,
+            armorMeshes,
+            saddleMeshes,
+            horseModel: true,
+            skinKey: `${entity.coat}/${entity.markings}`,
+            armorType: null,
+            saddled: false,
+            source: entity.img?.src,
+            sharedTextures: true,
+        };
+    }
+
+    updateHorseModel(record, entity, seconds, light) {
+        const skinKey = `${entity.coat}/${entity.markings}`;
+        if (record.skinKey !== skinKey) {
+            record.skinKey = skinKey;
+            record.material.map = horseSkin(entity);
+            record.material.needsUpdate = true;
+        }
+
+        if (record.armorType !== entity.armorType) {
+            record.armorType = entity.armorType;
+            record.armorMaterial.map = entity.armorType
+                ? horseEquipmentTexture(`entity/equipment/horse_body/${entity.armorType}`)
+                : null;
+            record.armorMaterial.needsUpdate = true;
+            for (const mesh of record.armorMeshes) mesh.visible = Boolean(entity.armorType);
+        }
+        if (record.saddled !== entity.saddled) {
+            record.saddled = entity.saddled;
+            for (const mesh of record.saddleMeshes) mesh.visible = entity.saddled;
+        }
+
+        record.group.rotation.y = entity.direction < 0
+            ? HORSE_FACING_YAW
+            : -HORSE_FACING_YAW;
+        record.group.scale.setScalar(entity.isBaby ? 0.5 : 1);
+        const speed = Math.abs(entity.velocity?.x ?? 0);
+        const stride = Math.min(1, speed / (entity.rideSpeed * BLOCK_SIZE));
+        const phase = seconds * (5 + stride * 8);
+        const gait = stride * 0.65;
+        const airborne = entity.grounded ? 0 : 1;
+        record.pivots.LegFL.rotation.x = Math.sin(phase) * gait - airborne * 0.45;
+        record.pivots.LegFR.rotation.x = -Math.sin(phase) * gait - airborne * 0.45;
+        record.pivots.LegBL.rotation.x = -Math.sin(phase) * gait + airborne * 0.5;
+        record.pivots.LegBR.rotation.x = Math.sin(phase) * gait + airborne * 0.5;
+        record.pivots.Tail.rotation.x = Math.sin(seconds * 2.2) * 0.1;
+        record.pivots.Head.rotation.x = entity.jumpButtonWasDown
+            ? -0.08 - entity.jumpCharge * 0.18
+            : airborne * -0.12;
+
+        for (const material of [record.material, record.armorMaterial, record.saddleMaterial]) {
+            material.color.setRGB(light, light, light);
+            material.emissive.set(entity.body?.flashingColor || 0);
+            material.emissiveIntensity = entity.body?.flashingColor ? 0.65 : 0;
+        }
+    }
+
     createBoat(entity) {
         const group = new THREE.Group();
         // Point the vanilla boat's length along the 2D world's horizontal axis.
@@ -984,7 +1219,12 @@ export class VoxelEntities {
         const map = new THREE.TextureLoader().load(getSpriteUrl(key));
         map.magFilter = THREE.NearestFilter; map.colorSpace = THREE.SRGBColorSpace;
         const material = new THREE.MeshStandardMaterial({ map, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.9 });
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.65, 0.65), material);
+        const isSpear = item?.itemId >= Items.WoodSpear &&
+            item.itemId <= Items.NetheriteSpear;
+        const geometry = isSpear
+            ? new THREE.PlaneGeometry(0.9, 0.225)
+            : new THREE.PlaneGeometry(0.65, 0.65);
+        const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(0, heldItemHandOffsetY(record, armName), 0.28);
         mesh.rotation.y = -Math.PI / 2;
         mesh.castShadow = true;
@@ -993,7 +1233,7 @@ export class VoxelEntities {
         record.heldArmName = armName;
     }
 
-    update(entities, dimension, camera, seconds, lighting) {
+    update(entities, dimension, camera, seconds, lighting, caveFactor = 0) {
         const visible = new Set();
         for (const entity of entities) {
             if (entity.dimension !== dimension ||
@@ -1029,13 +1269,29 @@ export class VoxelEntities {
                 }
                 continue;
             }
+            const sunlit = entity.getSunLight?.() === true;
+            const sheltered = caveFactor * (sunlit ? 0 : 1);
+            const lightLevel = THREE.MathUtils.lerp(
+                entity.getLightLevel?.() ?? 1,
+                1,
+                sheltered,
+            );
+            const exposure = Number(
+                entity.getSkyExposure?.() ?? entity.getSunLight?.(),
+            ) || 0;
             const light = renderLightTint(
-                entity.getLightLevel?.(), entity.getSkyExposure?.() ?? entity.getSunLight?.(), lighting,
+                lightLevel,
+                THREE.MathUtils.lerp(exposure, 0, sheltered),
+                lighting,
             );
             const aquaticPhase = entity.swimPhase || 0;
             const aquaticBob = entity.isAquatic ? Math.sin(aquaticPhase * 2) * 0.015 : 0;
             record.group.position.set((entity.position.x + entity.hitbox.x / 2) / BLOCK_SIZE,
                 -(entity.position.y + entity.hitbox.y) / BLOCK_SIZE + aquaticBob, 0.05);
+            if (record.horseModel) {
+                this.updateHorseModel(record, entity, seconds, light);
+                continue;
+            }
             if (record.crocodileRig) {
                 updateAlexCrocodileRig(record, entity, seconds);
                 for (const material of record.materials) {
@@ -1206,6 +1462,7 @@ export class VoxelEntities {
             }
             if (record.bodylessSprite) {
                 record.group.rotation.y = 0;
+                record.group.rotation.z = entity.flightAngle || 0;
                 record.group.scale.x = entity.direction < 0 ? -1 : 1;
                 record.material.color.setRGB(light, light, light);
                 continue;
@@ -1321,6 +1578,16 @@ export class VoxelEntities {
             record.material.color.setRGB(light, light, light);
             record.material.emissive.set(entity.body.flashingColor || 0);
             record.material.emissiveIntensity = entity.body.flashingColor ? 0.65 : 0;
+            if (entity.horse) {
+                record.pivots.rightArm.rotation.x = -0.42;
+                record.pivots.leftArm.rotation.x = -0.42;
+                record.pivots.rightArm.rotation.z = -0.12;
+                record.pivots.leftArm.rotation.z = 0.12;
+                record.pivots.rightLeg.rotation.x = -0.9;
+                record.pivots.leftLeg.rotation.x = -0.9;
+                this.updateHeld(record, entity, heldArmName);
+                continue;
+            }
             if (record.enderman) {
                 const moving = Math.abs(entity.velocity?.x ?? 0) > 5;
                 const stride = moving ? Math.sin(seconds * 8) * 0.4 : 0;

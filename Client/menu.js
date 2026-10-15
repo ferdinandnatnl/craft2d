@@ -1465,7 +1465,7 @@ export function createNewWorld() {
         })
     );
 
-    window.location.href = "./game.html";
+    window.location.href = "./";
 }
 
 export function getSavedWorld(id) {
@@ -1636,7 +1636,7 @@ export function playSelectedWorld() {
     );
 
     setInterval(() => {
-        window.location.href = "game.html";
+        window.location.href = "./";
     }, 500);
 }
 
@@ -2270,7 +2270,7 @@ export async function connectToServer() {
             );
             if (!continueWithLanAddress) return;
 
-            const url = new URL(`http://${ip}:4173/game.html`);
+            const url = new URL(`http://${ip}:4173/`);
             url.searchParams.set("multiplayer", "true");
             url.searchParams.set("server", `${ip}:${portNumber}`);
             window.location.href = url.href;
@@ -2295,7 +2295,7 @@ export async function connectToServer() {
 
         localStorage.setItem("multiplayerIP", ip);
         localStorage.setItem("multiplayerPort", String(portNumber));
-        window.location.href = "game.html?multiplayer=true";
+        window.location.href = "./?multiplayer=true";
     } finally {
         connectingToServer = false;
         connectButton.disabled = connectButtonWasDisabled;

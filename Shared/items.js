@@ -13,6 +13,7 @@ const SPAWN_EGG_COLORS = Object.freeze({
     Cow: { baseColor: "#443626", overlayColor: "#A1A1A1" },
     Sheep: { baseColor: "#E7E7E7", overlayColor: "#FFB5B5" },
     Chicken: { baseColor: "#F0A5A2", overlayColor: "#E7E7E7" },
+    Horse: { baseColor: "#7A4B2A", overlayColor: "#38231A" },
     Zombie: { baseColor: "#00AFAF", overlayColor: "#799C65" },
     Creeper: { baseColor: "#0DA70B", overlayColor: "#000000" },
     Skeleton: { baseColor: "#C1C1C1", overlayColor: "#494949" },
@@ -118,6 +119,10 @@ export const Items = Object.freeze({
     Slimeball: 56,
     Sugar: 57,
     SugarCane: 58,
+    Paper: 59,
+    Book: 60,
+    Compass: 61,
+    EmptyMap: 62,
 
     Seeds: 100,
 
@@ -182,6 +187,12 @@ export const Items = Object.freeze({
     FishingRod: 2006,
     EchoShard: 2007,
     MasterStaff: 2009,
+    WoodSpear: 2010,
+    StoneSpear: 2011,
+    IronSpear: 2012,
+    GoldSpear: 2013,
+    DiamondSpear: 2014,
+    NetheriteSpear: 2015,
 
     RawCod: 1514,
     CookedCod: 1515,
@@ -196,6 +207,13 @@ export const Items = Object.freeze({
     PrismarineCrystals: 1534,
     // Reserved legacy IDs: older worlds may still contain these items.
     CentipedeLeg: 1535,
+    Saddle: 1536,
+    LeatherHorseArmor: 1537,
+    CopperHorseArmor: 1538,
+    IronHorseArmor: 1539,
+    GoldHorseArmor: 1540,
+    DiamondHorseArmor: 1541,
+    NetheriteHorseArmor: 1542,
 
     PigSpawnEgg: 3007,
     CowSpawnEgg: 3008,
@@ -229,6 +247,7 @@ export const Items = Object.freeze({
     LargeCatfishBucket: 3036,
     // Reserved legacy ID; older saves may still contain this inert egg.
     CentipedeSpawnEgg: 3037,
+    HorseSpawnEgg: 3038,
     MutantZombieSpawnEgg: 3000,
     MutantCreeperSpawnEgg: 3001,
     MutantSkeletonSpawnEgg: 3002,
@@ -246,6 +265,15 @@ export const Items = Object.freeze({
     Bed: 4006,
 });
 
+const SPEAR_DEFINITIONS = [
+    [Items.WoodSpear, "Wooden Spear", "spear_wood.svg", 0, 59],
+    [Items.StoneSpear, "Stone Spear", "spear_stone.svg", 1, 131],
+    [Items.IronSpear, "Iron Spear", "spear_iron.svg", 2, 250],
+    [Items.GoldSpear, "Golden Spear", "spear_gold.svg", 2, 32],
+    [Items.DiamondSpear, "Diamond Spear", "spear_diamond.svg", 3, 1561],
+    [Items.NetheriteSpear, "Netherite Spear", "spear_netherite.svg", 4, 2031],
+];
+
 export const items = [
     new Item({ itemId: 0, name: "Stick", sprite: "stick", fuelTime: 5 }),
     new Item({ itemId: Items.Boat, name: "Boat", sprite: "boat" }),
@@ -256,6 +284,13 @@ export const items = [
     new Item({ itemId: Items.AcaciaDoor, name: "Acacia Door", sprite: "door_acacia", placeBlock: 808 }),
     new Item({ itemId: Items.IronDoor, name: "Iron Door", sprite: "door_iron", placeBlock: 810 }),
     new Item({ itemId: Items.Bed, name: "Red Bed", sprite: "bed", placeBlock: 904 }),
+    new Item({ itemId: Items.Saddle, name: "Saddle", sprite: "saddle", stackSize: 1 }),
+    new Item({ itemId: Items.LeatherHorseArmor, name: "Leather Horse Armor", sprite: "leather_horse_armor", stackSize: 1 }),
+    new Item({ itemId: Items.CopperHorseArmor, name: "Copper Horse Armor", sprite: "copper_horse_armor", stackSize: 1 }),
+    new Item({ itemId: Items.IronHorseArmor, name: "Iron Horse Armor", sprite: "iron_horse_armor", stackSize: 1 }),
+    new Item({ itemId: Items.GoldHorseArmor, name: "Golden Horse Armor", sprite: "gold_horse_armor", stackSize: 1 }),
+    new Item({ itemId: Items.DiamondHorseArmor, name: "Diamond Horse Armor", sprite: "diamond_horse_armor", stackSize: 1 }),
+    new Item({ itemId: Items.NetheriteHorseArmor, name: "Netherite Horse Armor", sprite: "netherite_horse_armor", stackSize: 1 }),
 
     //#region Wooden Tools
     new Item({
@@ -614,6 +649,18 @@ export const items = [
 
         durability: 2031,
     }),
+    ...SPEAR_DEFINITIONS.map(([itemId, name, sprite, baseDamage, durability]) => new Item({
+        itemId,
+        name,
+        sprite,
+        toolType: ToolType.Sword,
+        heldInHand: true,
+        stackSize: 1,
+        baseDamage,
+        durability,
+        projectile: "SpearProjectile",
+        throwPower: 12,
+    })),
     new Item({
         itemId: Items.Shield,
         name: "Shield",
@@ -954,6 +1001,10 @@ export const items = [
     new Item({ itemId: Items.Slimeball, name: "Slimeball", sprite: "slimeball" }),
     new Item({ itemId: Items.Sugar, name: "Sugar", sprite: "sugar" }),
     new Item({ itemId: Items.SugarCane, name: "Sugar Cane", sprite: "reeds" }),
+    new Item({ itemId: Items.Paper, name: "Paper", sprite: "paper" }),
+    new Item({ itemId: Items.Book, name: "Book", sprite: "book_normal" }),
+    new Item({ itemId: Items.Compass, name: "Compass", sprite: "compass_00", stackSize: 1 }),
+    new Item({ itemId: Items.EmptyMap, name: "Empty Map", sprite: "map_empty", stackSize: 64 }),
     //#endregion
 
     //#region Seeds
@@ -1161,6 +1212,13 @@ export const items = [
         sprite: "spawn_egg",
         spawnEntity: "Chicken",
         spawnEggColors: SPAWN_EGG_COLORS.Chicken,
+    }),
+    new Item({
+        itemId: Items.HorseSpawnEgg,
+        name: "Horse Spawn Egg",
+        sprite: "spawn_egg",
+        spawnEntity: "Horse",
+        spawnEggColors: SPAWN_EGG_COLORS.Horse,
     }),
     new Item({
         itemId: Items.ZombieSpawnEgg,

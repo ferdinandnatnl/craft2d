@@ -12,7 +12,7 @@ import { Items } from "@2dcraft.com/shared/items.js";
 import { isLegacySkin } from "../game/skinPreview.js";
 import { Sounds, playPositionalSound, playRandomSoundFromArray, playSound } from "../game/sounds.js";
 import { Vector2, calculateDirection, lerp, randomRange, uuidv4 } from "../utils/classes.js";
-import { BLOCK_SIZE, CHUNK_HEIGHT, INTERACT_DISTANCE, ToolType, multiplayer } from "../utils/globals.js";
+import { BLOCK_SIZE, CHUNK_HEIGHT, GRAVITY, INTERACT_DISTANCE, ToolType, multiplayer } from "../utils/globals.js";
 import { input } from "../utils/input.js";
 import { camera, drawText, isColliding, mouseOverPosition } from "../utils/renderer.js";
 import {
@@ -136,6 +136,9 @@ export class Player extends Entity {
         this.boat = null;
         this.boatUUID = null;
         this.boatPhysics = null;
+        this.horse = null;
+        this.horseUUID = null;
+        this.horsePhysics = null;
 
         this.canMove = true;
         this.isDead = false;
@@ -695,6 +698,24 @@ export class Player extends Entity {
                 syncedBoat.passenger = this;
             }
         }
+
+        if (Object.hasOwn(data, "horseUUID")) {
+            this.horseUUID = typeof data.horseUUID === "string" &&
+                data.horseUUID.length <= 64 ? data.horseUUID : null;
+            if (this.horse && this.horse.UUID !== this.horseUUID) {
+                if (this.horse.passenger === this) this.horse.passenger = null;
+                if (this.horse.riderUUID === this.UUID) this.horse.riderUUID = null;
+                this.horse = null;
+            }
+            const horse = this.world?.entities?.find((entity) =>
+                entity.UUID === this.horseUUID && entity.isHorse,
+            );
+            if (horse) {
+                this.horse = horse;
+                horse.passenger = this;
+                horse.riderUUID = this.UUID;
+            }
+        }
     }
 
     mutliplayerSyncPlayerState() {
@@ -736,6 +757,7 @@ export class Player extends Entity {
             data.boatPosition = this.boat.position;
             data.boatSurfaceY = this.boat.surfaceY;
         }
+        data.horseUUID = this.horse?.UUID ?? null;
 
         runtime.server.send({
             type: "playerUpdate",
@@ -1188,10 +1210,17 @@ export class Player extends Entity {
     }
 
     isEntityInInteractionRange(entity) {
-        return (
-            Boolean(entity) &&
-            this.isPositionInInteractionRange(input.getMouseWorldPosition())
+        if (!entity) return false;
+        const left = entity.position.x + (entity.offset?.x ?? 0);
+        const top = entity.position.y + (entity.offset?.y ?? 0);
+        const playerCenter = new Vector2(
+            this.position.x + this.hitbox.x / 2,
+            this.position.y + this.hitbox.y / 2,
         );
+        return this.isPositionInInteractionRange(new Vector2(
+            Math.max(left, Math.min(playerCenter.x, left + entity.hitbox.x)),
+            Math.max(top, Math.min(playerCenter.y, top + entity.hitbox.y)),
+        ));
     }
 
     placeBoat() {
@@ -1250,6 +1279,46 @@ export class Player extends Entity {
         this.position.y = boat.surfaceY - this.hitbox.y + BLOCK_SIZE * 0.35;
         this.velocity = new Vector2(
             boat.velocity.x,
+            jump ? -this.abilities.jumpForce * BLOCK_SIZE : 0,
+        );
+        this.targetVelocity = new Vector2();
+        this.swimming = false;
+        this.wasSwimming = false;
+    }
+
+    mountHorse(horse) {
+        if (!this.isLocal() || !horse?.isHorse || this.horse || this.boat) return false;
+        this.horse = horse;
+        this.horseUUID = horse.UUID;
+        this.horsePhysics = {
+            noGravity: this.noGravity,
+            noCollision: this.noCollision,
+        };
+        horse.passenger = this;
+        horse.riderUUID = this.UUID;
+        this.noGravity = true;
+        this.noCollision = true;
+        this.velocity = new Vector2();
+        this.targetVelocity = new Vector2();
+        this.swimming = false;
+        this.wasSwimming = false;
+        this.grounded = false;
+        horse.attachRider(this);
+        return true;
+    }
+
+    dismountHorse(horse, jump = false) {
+        if (this.horse !== horse) return;
+        this.horse = null;
+        this.horseUUID = null;
+        this.noGravity = this.horsePhysics?.noGravity ?? false;
+        this.noCollision = this.horsePhysics?.noCollision ?? false;
+        this.horsePhysics = null;
+        this.position.x = horse.position.x +
+            (horse.hitbox.x - this.hitbox.x) / 2;
+        this.position.y = horse.position.y + horse.hitbox.y - this.hitbox.y;
+        this.velocity = new Vector2(
+            horse.velocity.x,
             jump ? -this.abilities.jumpForce * BLOCK_SIZE : 0,
         );
         this.targetVelocity = new Vector2();
@@ -1355,22 +1424,79 @@ export class Player extends Entity {
 
         if (!projectile) return;
 
+        const isSpear = item.projectile === "SpearProjectile";
+        if (isSpear) {
+            const target = this.checkForEntityOnMouse();
+            if (
+                target?.type !== EntityTypes.Mob ||
+                !target.isAquatic ||
+                target.name === "Squid" ||
+                target.health <= 0
+            ) return;
+            playPositionalSound(
+                this.position,
+                "mobs/mutant_skeleton/bow_shoot1.ogg",
+                12,
+                0.45,
+                1.15,
+            );
+        }
+
         this.playerSwing();
 
         const mousePos = input.getMouseWorldPosition();
+        const launchOrigin = isSpear
+            ? new Vector2(
+                this.position.x + this.hitbox.x / 2,
+                this.position.y + this.hitbox.y * 0.55,
+            )
+            : this.position;
 
-        const direction = calculateDirection(this.position, mousePos);
+        const direction = calculateDirection(launchOrigin, mousePos);
+        const position = isSpear
+            ? new Vector2(
+                launchOrigin.x - BLOCK_SIZE * 0.75,
+                launchOrigin.y - BLOCK_SIZE * 0.125,
+            )
+            : structuredClone(this.position);
+        const speed = item.throwPower * BLOCK_SIZE;
+        const velocity = new Vector2(direction.x * speed, direction.y * speed);
+        if (isSpear) {
+            const distance = Math.min(
+                Vector2.Distance(launchOrigin, mousePos),
+                BLOCK_SIZE * 5,
+            );
+            velocity.y -= GRAVITY * distance / speed / 2;
+        }
+        const projectileProps = { velocity };
 
-        this.world.summonEntity(projectile, structuredClone(this.position), {
-            velocity: new Vector2(
-                direction.x * item.throwPower * BLOCK_SIZE,
-                direction.y * item.throwPower * BLOCK_SIZE,
-            ),
-        });
+        if (isSpear) {
+            const durability = this.holdItem.getProp?.("durability");
+            const remainingDurability = Number.isFinite(durability)
+                ? durability - 1
+                : null;
+            const itemProps = structuredClone(this.holdItem.props || {});
+            if (remainingDurability > 0) {
+                itemProps.durability = remainingDurability;
+            }
+            Object.assign(projectileProps, {
+                damage: Math.max(1, 2 * (1 + (item.baseDamage || 0))),
+                ownerUUID: this.UUID,
+                itemId: item.itemId,
+                recoveryItemId: !this.abilities.instaBuild &&
+                    (remainingDurability === null || remainingDurability > 0)
+                    ? item.itemId : null,
+                itemProps,
+                dimension: this.dimension,
+            });
+        }
+
+        this.world.summonEntity(projectile, position, projectileProps);
 
         if (this.abilities.instaBuild) return;
 
         this.removeFromCurrentSlot();
+        this.inventory.syncInventoryMultiplayer();
     }
 
     useBucket() {
@@ -1629,6 +1755,7 @@ export class Player extends Entity {
     }
 
     dieEvent() {
+        if (this.horse) this.horse.dismount(this);
         if (this.boat) this.boat.dismount(this);
         if (!this.deathCause) {
             this.deathCause = `${this.name || "Player"} was killed`;
@@ -1690,13 +1817,29 @@ export class Player extends Entity {
             return;
         }
 
-        if (usePressed && !this.shieldBlocking) this.useItemInHand();
+        const targetEntity = usePressed ? this.checkForEntityOnMouse() : null;
+        if (usePressed && targetEntity?.isHorse &&
+            this.isEntityInInteractionRange(targetEntity)) {
+            this.tryEntityInteract();
+            return;
+        }
+        if (usePressed && targetEntity?.name === "Villager" &&
+            this.isEntityInInteractionRange(targetEntity)) {
+            this.tryEntityInteract();
+            return;
+        }
+        const feedingAnimal = targetEntity &&
+            targetEntity.breedingFoods?.has(this.holdItem?.itemId) &&
+            this.isEntityInInteractionRange(targetEntity);
+        if (usePressed && !this.shieldBlocking && !feedingAnimal) {
+            this.useItemInHand();
+        }
 
         // Placing a boat boards the player immediately. Do not treat the same
         // click as a second interaction with the newly created boat.
         if (usePressed && this.boat) return;
 
-        if (usePressed) this.tryEntityInteract();
+        if (usePressed && this.tryEntityInteract()) return;
 
         if (!this.hoverBlock) return;
 
@@ -1734,12 +1877,12 @@ export class Player extends Entity {
     tryEntityInteract() {
         const entity = this.checkForEntityOnMouse();
 
-        if (!entity) return;
-        if (!this.isEntityInInteractionRange(entity)) return;
+        if (!entity) return false;
+        if (!this.isEntityInInteractionRange(entity)) return false;
 
-        if (typeof entity.interact !== "function") return;
+        if (typeof entity.interact !== "function") return false;
 
-        entity.interact(this, this.holdItem);
+        return entity.interact(this, this.holdItem) === true;
     }
 
     interact(player, item) {
@@ -1861,6 +2004,19 @@ export class Player extends Entity {
         this.canMove = false;
 
         this.inventory.refreshInventory();
+    }
+
+    openVillagerTrade(villager) {
+        if (this.windowOpen || !villager?.tradeOffers?.length) return false;
+        this.inventory.openVillagerTrade(villager);
+        this.openInventory();
+        playRandomSoundFromArray({
+            array: Sounds.Villager_Trade,
+            positional: true,
+            origin: villager.position,
+            range: 8,
+        });
+        return true;
     }
 
     closeInventory() {
@@ -2013,7 +2169,8 @@ export class Player extends Entity {
         const attackPressed = input.isActionPressed("attack");
         const attackDown = input.isActionDown("attack");
         let meleeTargetInRange = false;
-        if (attackPressed || attackDown) {
+        const speargunSelected = heldItem?.projectile === "SpearProjectile";
+        if ((attackPressed || attackDown) && !speargunSelected) {
             const profile = getMeleeWeaponProfile(heldItem);
             const weaponKey = getMeleeWeaponKey(this.holdItem);
             const origin = new Vector2(
@@ -2113,6 +2270,9 @@ export class Player extends Entity {
     }
 
     resolveMeleeAttack(attack) {
+        if (getItem(attack.weaponItem?.itemId)?.projectile === "SpearProjectile") {
+            return;
+        }
         const origin = new Vector2(
             this.position.x + this.hitbox.x / 2,
             this.position.y + this.hitbox.y / 2,
@@ -2816,6 +2976,20 @@ export class Player extends Entity {
 
     movementLogic() {
         if (this.windowOpen) return;
+
+        if (this.horse) {
+            if (!this.canMove || runtime.game.pauseMenu?.getActive()) return;
+            const direction = Number(input.isActionDown("moveRight")) -
+                Number(input.isActionDown("moveLeft"));
+            this.horse.ride(
+                this,
+                direction,
+                input.isActionDown("jump"),
+                runtime.deltaTime,
+            );
+            this.lookAtCursor();
+            return;
+        }
 
         if (this.boat) {
             if (!this.canMove || runtime.game.pauseMenu?.getActive()) return;

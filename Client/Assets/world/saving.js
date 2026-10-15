@@ -8,6 +8,7 @@ import { Vector2 } from "../utils/classes.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, SPAWN_PLAYER, multiplayer } from "../utils/globals.js";
 import { resolveBiome } from "@2dcraft.com/shared/biome.js";
 import { randomMinecraftSeed } from "@2dcraft.com/shared/seed.js";
+import { Structures } from "@2dcraft.com/shared/structures.js";
 import { getBlock } from "./block.js";
 import { Chunk } from "./chunk.js";
 import { Dimensions, activeDimension, dimensions, getDimension, gotoDimension } from "./dimension.js";
@@ -25,6 +26,7 @@ import { Chicken } from "../entities/mobs/chicken.js";
 import { Cow } from "../entities/mobs/cow.js";
 import { Pig } from "../entities/mobs/pig.js";
 import { Sheep } from "../entities/mobs/sheep.js";
+import { Horse } from "../entities/mobs/horse.js";
 import { getBreedableAnimalSaveData } from "../entities/mobs/animalBehavior.js";
 import { Minion, normalizeMinionSaveData } from "../entities/mobs/minion.js";
 
@@ -62,10 +64,12 @@ export let currentSave = {
     boats: [],
     golems: [],
     playerBoatUUID: null,
+    playerHorseUUID: null,
     playerUUID: null,
     xpLevel: 0,
     minionProgress: { evilDeeds: 0, unlocked: false },
     minions: [],
+    villageDoorStateVersion: 1,
 };
 
 let saveQueue = Promise.resolve();
@@ -138,6 +142,7 @@ export function saveWorld(message = true, toFile = false) {
         currentSave.activeDimension = activeDimension;
         currentSave.flying = runtime.world.player.abilities.flying;
         currentSave.playerBoatUUID = runtime.world.player.boat?.UUID ?? null;
+        currentSave.playerHorseUUID = runtime.world.player.horse?.UUID ?? null;
         currentSave.playerUUID = runtime.world.player.UUID;
         currentSave.playerStatusEffects = runtime.world.player.getStatusEffectSaveData();
         currentSave.xpLevel = runtime.world.player.xpLevel;
@@ -151,6 +156,7 @@ export function saveWorld(message = true, toFile = false) {
 
     currentSave.seed = runtime.world.seed;
     currentSave.worldgenVersion = runtime.world.generator.worldgenVersion;
+    currentSave.villageDoorStateVersion = 1;
     currentSave.chunkHeight = CHUNK_HEIGHT;
     currentSave.dimensions = savedDimensions;
     currentSave.villagers = runtime.world.entities
@@ -160,6 +166,10 @@ export function saveWorld(message = true, toFile = false) {
             position: { x: entity.position.x, y: entity.position.y },
             health: entity.health,
             homeX: entity.homeX,
+            profession: entity.profession,
+            villagerType: entity.villagerType,
+            tradeCount: entity.tradeCount,
+            tradeUses: entity.tradeOffers?.map((offer) => offer.uses) ?? [],
             dimension: entity.dimension,
             statusEffects: entity.getStatusEffectSaveData(),
         }));
@@ -225,7 +235,7 @@ export function saveWorld(message = true, toFile = false) {
         .map(entity => entity.createSaveData());
     currentSave.animals = runtime.world.entities
         .filter(entity =>
-            ["Chicken", "Cow", "Pig", "Sheep"].includes(entity.name) &&
+            ["Chicken", "Cow", "Pig", "Sheep", "Horse"].includes(entity.name) &&
             entity.health > 0,
         )
         .map(getBreedableAnimalSaveData);
@@ -348,6 +358,56 @@ export function saveChunk(chunk) {
     };
 }
 
+function migrateVillageDoorStates(save) {
+    if (save.villageDoorStateVersion === 1) return;
+
+    const closeVillageEntrances = (savedChunk, dimensionIndex) => {
+        if (dimensionIndex !== Dimensions.Overworld ||
+            !Number.isFinite(savedChunk?.x)) return;
+        const chunkIndex = savedChunk.x / (CHUNK_WIDTH * BLOCK_SIZE);
+        const site = runtime.world.generator.villageSiteForChunk(chunkIndex);
+        if (!site || site.piece === "Square") return;
+
+        const structure = Structures[`${site.structureName}${site.piece}`];
+        const floorY = site.floors?.[site.index];
+        if (!structure?.villageEntrances || !Number.isInteger(floorY)) return;
+
+        const blocks = decodeChunkLayer(savedChunk.blocks);
+        if (blocks.length !== CHUNK_HEIGHT) return;
+
+        let changed = false;
+        for (const entranceX of structure.villageEntrances) {
+            for (const userY of [floorY + 1, floorY + 2]) {
+                const localY = CHUNK_HEIGHT - 1 - userY;
+                const structureRow = structure.blocks.length - 1 - (userY - floorY);
+                const cell = blocks[localY]?.[entranceX];
+                const expectedType = structure.blocks[structureRow]?.[entranceX];
+                if (!cell || typeof cell !== "object" ||
+                    cell.t !== expectedType || cell.m?.open !== true) continue;
+                blocks[localY][entranceX] = {
+                    ...cell,
+                    m: { ...cell.m, open: false },
+                };
+                changed = true;
+            }
+        }
+        if (changed) savedChunk.blocks = encodeChunkLayer(blocks);
+    };
+
+    if (Array.isArray(save.dimensions) && save.dimensions.length > 0) {
+        for (const dimension of save.dimensions) {
+            for (const chunk of dimension.chunks ?? []) {
+                closeVillageEntrances(chunk, dimension.index);
+            }
+        }
+    } else {
+        for (const chunk of save.chunks ?? []) {
+            closeVillageEntrances(chunk, Dimensions.Overworld);
+        }
+    }
+    save.villageDoorStateVersion = 1;
+}
+
 export async function loadWorldFromLocalStorage() {
     let selectedWorld = localStorage.getItem("selectedWorld");
 
@@ -427,6 +487,7 @@ export async function loadWorld(save) {
     runtime.world.generator.worldgenVersion = runtime.world.worldgenVersion;
 
     runtime.world.generator.loadCustomSeed(currentSave.seed);
+    migrateVillageDoorStates(currentSave);
     runtime.world.weather?.loadState(currentSave.weather, currentSave.seed);
 
     const requiredChunks = new Map();
@@ -664,7 +725,7 @@ export async function loadWorld(save) {
 
     const savedAnimals = Array.isArray(currentSave.animals)
         ? currentSave.animals : [];
-    const animalTypes = { Chicken, Cow, Pig, Sheep };
+    const animalTypes = { Chicken, Cow, Pig, Sheep, Horse };
     for (const saved of savedAnimals) {
         const AnimalType = animalTypes[saved?.type];
         if (!AnimalType || typeof saved.UUID !== "string" ||
@@ -677,17 +738,34 @@ export async function loadWorld(save) {
             CHUNK_WIDTH * BLOCK_SIZE;
         const chunk = getDimension(dimensionIndex).chunks.get(chunkX);
         if (!chunk) continue;
-        const maxHealth = saved.type === "Chicken" ? 4 : 10;
+        const maxHealth = saved.type === "Chicken" ? 4 :
+            saved.type === "Horse"
+                ? Number.isFinite(saved.maxHealth)
+                    ? Math.max(15, Math.min(30, saved.maxHealth)) : 20
+                : 10;
         const animal = runtime.world.summonEntity(
             AnimalType,
             new Vector2(saved.position.x, saved.position.y),
             {
                 health: Math.min(saved.health, maxHealth),
+                ...(saved.type === "Horse"
+                    ? {
+                        maxHealth,
+                        movementSpeed: saved.movementSpeed,
+                        jumpStrength: saved.jumpStrength,
+                        tamed: saved.tamed === true,
+                        temper: saved.temper,
+                        coat: saved.coat,
+                        markings: saved.markings,
+                        saddled: saved.saddled === true,
+                        armorType: saved.armorType,
+                    }
+                    : {}),
                 myChunkX: chunkX,
                 babyAgeTicks: Number.isFinite(saved.babyAgeTicks)
                     ? Math.max(0, Math.min(24_000, Math.floor(saved.babyAgeTicks))) : 0,
                 loveTicks: Number.isFinite(saved.loveTicks)
-                    ? Math.max(0, Math.min(6_000, Math.floor(saved.loveTicks))) : 0,
+                    ? Math.max(0, Math.min(600, Math.floor(saved.loveTicks))) : 0,
                 breedingCooldown: Number.isFinite(saved.breedingCooldown)
                     ? Math.max(0, Math.min(6_000, Math.floor(saved.breedingCooldown))) : 0,
                 hasWool: saved.hasWool !== false,
@@ -726,6 +804,12 @@ export async function loadWorld(save) {
                 myChunkX: chunkX,
                 homeX: Number.isFinite(saved.homeX)
                     ? saved.homeX : saved.position.x,
+                profession: saved.profession,
+                villagerType: saved.villagerType,
+                tradeCount: saved.tradeCount,
+                tradeUses: Array.isArray(saved.tradeUses)
+                    ? saved.tradeUses.slice(0, 3)
+                    : [],
             },
             false,
             saved.UUID,
@@ -1001,6 +1085,10 @@ export async function loadWorld(save) {
                 ? runtime.world.getEntityByUUID(currentSave.playerBoatUUID)
                 : null;
             if (savedBoat?.isBoat) savedBoat.mount(runtime.world.player);
+            const savedHorse = currentSave.playerHorseUUID
+                ? runtime.world.getEntityByUUID(currentSave.playerHorseUUID)
+                : null;
+            if (savedHorse?.isHorse) savedHorse.mount(runtime.world.player);
 
             saveWorld(false);
         }, 100);

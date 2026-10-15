@@ -135,5 +135,38 @@ export const Sounds = Object.freeze({
 
     // Blocks
     Wood_Click: ["blocks/wood_click"],
+    Wooden_Door_Open: ["block/wooden_door/open1", "block/wooden_door/open2"],
+    Wooden_Door_Close: [
+        "block/wooden_door/close1",
+        "block/wooden_door/close2",
+        "block/wooden_door/close3",
+    ],
+    Villager_Idle: [
+        "mobs/villager/idle1",
+        "mobs/villager/idle2",
+        "mobs/villager/idle3",
+    ],
+    Villager_Hurt: [
+        "mobs/villager/hit1",
+        "mobs/villager/hit2",
+        "mobs/villager/hit3",
+        "mobs/villager/hit4",
+    ],
+    Villager_Death: ["mobs/villager/death"],
+    Villager_Trade: [
+        "mobs/villager/haggle1",
+        "mobs/villager/haggle2",
+        "mobs/villager/haggle3",
+    ],
+    Villager_Yes: [
+        "mobs/villager/yes1",
+        "mobs/villager/yes2",
+        "mobs/villager/yes3",
+    ],
+    Villager_No: [
+        "mobs/villager/no1",
+        "mobs/villager/no2",
+        "mobs/villager/no3",
+    ],
     Fizz: ["blocks/fizz"],
 });

@@ -53,6 +53,36 @@ Sources:
 - [Project license metadata](https://www.curseforge.com/minecraft/mc-mods/alexs-mobs)
 - [LGPL v3 text from GNU](https://www.gnu.org/licenses/lgpl-3.0.html)
 
+## Minecraft Java 1.20.1 door sounds
+
+The wooden door open and close sounds in
+`Client/Assets/audio/sfx/block/wooden_door/` are unmodified Ogg assets from
+the official Minecraft Java 1.20.1 asset set. The asset index lists their
+hashes and sizes.
+
+Source: [Minecraft Java 1.20.1 asset index](https://piston-meta.mojang.com/v1/packages/50ce48459eb9e29836662862273d7b15d41c2c33/5.json).
+
+## Minecraft Java 1.20.1 villager assets
+
+The villager base, seven biome layers, profession layers, and five profession
+rank layers in `Client/Assets/sprites/entity/villager/`, plus the compass icon
+at `Client/Assets/sprites/items/compass_00.png`, are unmodified textures from
+the official Minecraft Java 1.20.1 client archive. The villager sound clips in
+`Client/Assets/audio/sfx/mobs/villager/` are unmodified Ogg assets from the
+same release's official asset set.
+
+Sources: [Minecraft Java 1.20.1 client archive (SHA-1 `0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838`)](https://piston-data.mojang.com/v1/objects/0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838/client.jar), [Minecraft Java 1.20.1 asset index](https://piston-meta.mojang.com/v1/packages/50ce48459eb9e29836662862273d7b15d41c2c33/5.json).
+
+## Minecraft Java 26.3 horse assets
+
+The horse coat and marking textures, saddle and armor layers, and horse item
+icons in `Client/Assets/sprites/` are unmodified assets from the official
+Minecraft Java 26.3 client archive. The horse cuboid geometry in
+`Client/Assets/models/entity/horse.json` is based on Mojang's Bedrock Samples
+`horse_v3.geo.json` model.
+
+Sources: [Minecraft Java 26.3 client archive (SHA-1 `e877b6a07acd633fb3bb475002175cec036e7b87`)](https://piston-data.mojang.com/v1/objects/e877b6a07acd633fb3bb475002175cec036e7b87/client.jar), [Mojang horse geometry](https://github.com/Mojang/bedrock-samples/blob/main/resource_pack/models/entity/horse_v3.geo.json).
+
 ## Caves & Cliffs generation materials
 
 The added moss, dripstone, cave-vine, azalea, spore-blossom, clay, deepslate,

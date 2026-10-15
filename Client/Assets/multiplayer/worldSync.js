@@ -11,6 +11,17 @@ const SYNCED_MOB_FIELDS = [
     "loveTicks",
     "breedingCooldown",
     "breedingOwnerUUID",
+    "maxHealth",
+    "movementSpeed",
+    "jumpStrength",
+    "temper",
+    "coat",
+    "markings",
+    "saddled",
+    "armorType",
+    "riderUUID",
+    "tamingTicks",
+    "jumpCharge",
     "hasWool",
     "woolTimer",
     "layEggTimer",
@@ -56,6 +67,15 @@ function copySyncFields(entity) {
         ) {
             fields[key] = value;
         }
+    }
+    if (entity.name === "Villager" && Array.isArray(entity.tradeOffers)) {
+        fields.profession = entity.profession;
+        fields.villagerType = entity.villagerType;
+        fields.tradeCount = entity.tradeCount;
+        fields.isSleeping = entity.isSleeping;
+        fields.tradeUses = entity.tradeOffers
+            .slice(0, 3)
+            .map((offer) => offer.uses);
     }
     return fields;
 }
@@ -166,6 +186,7 @@ export function applyWorldSnapshot(snapshot) {
                     entity[key] = value;
                 }
             }
+            entity.applyMultiplayerState?.(state.fields);
         }
         entity.multiplayerWorldEntity = true;
         entity.isMultiplayerRemoteMob = !world.isWorldAuthority && !entity.isMinion;

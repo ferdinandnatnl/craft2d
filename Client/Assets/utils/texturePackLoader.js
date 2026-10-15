@@ -78,6 +78,16 @@ export async function loadVanillaTextures(onProgress) {
     // Misc Entity Sprites
     spritePaths.push(`entity/sheep/sheep_fur`);
     spritePaths.push(`entity/warden-art/warden.svg`);
+    for (const coat of ["white", "creamy", "chestnut", "brown", "black", "gray", "darkbrown"]) {
+        spritePaths.push(`entity/horse/horse_${coat}`);
+    }
+    for (const markings of ["white", "whitefield", "whitedots", "blackdots"]) {
+        spritePaths.push(`entity/horse/horse_markings_${markings}`);
+    }
+    for (const armor of ["copper", "diamond", "gold", "iron", "leather", "netherite"]) {
+        spritePaths.push(`entity/equipment/horse_body/${armor}`);
+    }
+    spritePaths.push(`entity/equipment/horse_saddle/saddle`);
     spritePaths.push(`items/spawn_egg_overlay`);
     spritePaths.push(`items/mutantbeasts/spawn_egg_overlay`);
     spritePaths.push(`items/minecart_normal`);

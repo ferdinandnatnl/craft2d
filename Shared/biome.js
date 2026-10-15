@@ -70,6 +70,7 @@ export const BiomeMobs = Object.freeze({
 export const OverworldBiomes = Object.freeze({
     Plains: new Biome({
         name: "Plains",
+        mobs: [...BiomeMobs.CommonMobs, "Horse"],
         heightNoise: NoisePresets.Flat,
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,
@@ -153,6 +154,7 @@ export const OverworldBiomes = Object.freeze({
     }),
     Savanna: new Biome({
         name: "Savanna",
+        mobs: [...BiomeMobs.CommonMobs, "Horse"],
         heightNoise: NoisePresets.Flat,
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,
@@ -384,6 +386,7 @@ export const OverworldBiomes = Object.freeze({
     }),
     WindsweptSavanna: new Biome({
         name: "Windswept Savanna",
+        mobs: [...BiomeMobs.CommonMobs, "Horse"],
         heightNoise: NoisePresets.Mountains,
         topLayer: Blocks.GrassBlock,
         secondLayer: Blocks.Dirt,

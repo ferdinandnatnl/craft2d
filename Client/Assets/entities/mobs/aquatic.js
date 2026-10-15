@@ -128,6 +128,12 @@ export class AquaticMob extends Mob {
     }
 
     swimLogic() {
+        if (this.isBeingHarpooned) {
+            this.velocity.x = 0;
+            this.velocity.y = 0;
+            this.targetPosition = null;
+            return;
+        }
         const deltaTime = Math.min(runtimeDeltaTime(), 0.1);
         this.swimPhase = (this.swimPhase + deltaTime * 10) % (Math.PI * 2);
         if (this.body?.parts.body) {

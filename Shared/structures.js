@@ -158,6 +158,17 @@ function villageTemplate({
     }
     if (kind === "Cottage") blocks[13][left + 5] = Blocks.Chest;
 
+    const bedPositions = {
+        Cottage: [left + 2, left + 7],
+        Smithy: [left + 2, left + 7],
+        BigHouse: [left + 1, left + 9],
+        FarmShack: [left + 1, left + 5],
+    }[kind] ?? [];
+    for (const bedX of bedPositions) {
+        blocks[13][bedX] = Blocks.BedFoot;
+        blocks[13][bedX + 1] = Blocks.BedHead;
+    }
+
     return new Structure({
         biome, blocks, walls, shift: { x: 0, y: 0 },
         villageGround: biome.secondLayer,

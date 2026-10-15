@@ -38,6 +38,7 @@ const MUTANT_VARIANTS = {
     Enderman: "MutantEnderman",
 };
 const MUTANT_SPAWN_CHANCE = 1 / 4;
+const WATER_SAND_DEPTH = 4;
 
 function getMutantVariant(entityType) {
     const mutantVariant = MUTANT_VARIANTS[entityType];
@@ -467,6 +468,27 @@ export class Chunk {
 
         for (let x = 0; x < this.width; x++) {
             const terrainHeight = this.getHeight(x); // Get terrain height at this x
+
+            if (
+                terrainHeight < maxWaterLevel &&
+                this.getBlockType(x, terrainHeight) === this.biome.topLayer
+            ) {
+                for (
+                    let depth = 0;
+                    depth < WATER_SAND_DEPTH && terrainHeight - depth > 0;
+                    depth++
+                ) {
+                    const y = terrainHeight - depth;
+                    const blockType = this.getBlockType(x, y);
+                    if (
+                        blockType !== this.biome.topLayer &&
+                        blockType !== this.biome.secondLayer &&
+                        blockType !== this.biome.waterSandType
+                    ) break;
+
+                    this.setBlockType(x, y, this.biome.waterSandType);
+                }
+            }
 
             // Loop from one level above the terrain up to the max water level
             for (let y = terrainHeight + 1; y <= maxWaterLevel; y++) {

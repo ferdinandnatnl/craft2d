@@ -6,9 +6,9 @@ import { PARTICLE } from "../../world/particle.js";
 import { createParticleEmitter } from "../../world/particleEmitter.js";
 
 export const ANIMAL_BABY_AGE_TICKS = 24_000;
-const BREEDING_LOVE_TICKS = 6_000;
+const BREEDING_LOVE_TICKS = 600;
 const BREEDING_COOLDOWN_TICKS = 6_000;
-const BREEDING_DISTANCE = 4 * BLOCK_SIZE;
+const BREEDING_DISTANCE = 8 * BLOCK_SIZE;
 
 export function initializeBreedableAnimal(
     animal,
@@ -34,13 +34,26 @@ export function initializeBreedableAnimal(
 
 export function followAnimalFood(animal) {
     if (animal.noAi || !animal.breedingFoods?.size) return false;
-    const player = animal.world?.entities?.find((candidate) =>
-        candidate.type === EntityTypes.Player &&
-        candidate.dimension === animal.dimension &&
-        candidate.abilities?.hasHealth &&
-        animal.breedingFoods.has(candidate.holdItem?.itemId) &&
-        animalDistance(animal, candidate) <= 8 * BLOCK_SIZE,
-    );
+    let player = null;
+    let nearestDistance = 8 * BLOCK_SIZE;
+    for (const candidate of animal.world?.entities ?? []) {
+        if (
+            candidate.type !== EntityTypes.Player ||
+            candidate.dimension !== animal.dimension ||
+            candidate.health <= 0 ||
+            candidate.isDead ||
+            candidate.gamemode === 3 ||
+            !animal.breedingFoods.has(
+                candidate.holdItem?.itemId ??
+                candidate.getSelectedSlotItem?.()?.itemId,
+            )
+        ) continue;
+
+        const distance = animalDistance(animal, candidate);
+        if (distance > nearestDistance) continue;
+        nearestDistance = distance;
+        player = candidate;
+    }
     if (!player) return false;
 
     const animalCenter = animal.position.x + animal.hitbox.x / 2;
@@ -80,7 +93,7 @@ export function interactWithBreedableAnimal(animal, player, item, foodItems) {
     return true;
 }
 
-export function tickBreedableAnimal(animal, AnimalType) {
+export function tickBreedableAnimal(animal, AnimalType, childProperties = null) {
     if (animal.babyAgeTicks > 0) {
         animal.babyAgeTicks--;
         applyAnimalAgeScale(animal);
@@ -131,6 +144,9 @@ export function tickBreedableAnimal(animal, AnimalType) {
             myChunkX: chunk.x,
             babyAgeTicks: ANIMAL_BABY_AGE_TICKS,
             dimension: animal.dimension,
+            ...(typeof childProperties === "function"
+                ? childProperties(animal, partner)
+                : {}),
             ...(animal.name === "Chicken"
                 ? { layEggTimer: randomRange(6_000, 12_000) }
                 : {}),
@@ -174,6 +190,19 @@ export function getBreedableAnimalSaveData(animal) {
             ? { hasWool: animal.hasWool, woolTimer: animal.woolTimer }
             : {}),
         ...(animal.name === "Chicken" ? { layEggTimer: animal.layEggTimer } : {}),
+        ...(animal.isHorse
+            ? {
+                maxHealth: animal.maxHealth,
+                movementSpeed: animal.movementSpeed,
+                jumpStrength: animal.jumpStrength,
+                tamed: animal.tamed,
+                temper: animal.temper,
+                coat: animal.coat,
+                markings: animal.markings,
+                saddled: animal.saddled,
+                armorType: animal.armorType,
+            }
+            : {}),
     };
 }
 
@@ -194,7 +223,7 @@ export function syncBreedableAnimalState(animal) {
     });
 }
 
-function applyAnimalAgeScale(animal) {
+export function applyAnimalAgeScale(animal) {
     const scale = animal.isBaby ? 0.5 : 1;
     if (animal.appliedBabyScale === scale) return;
     animal.appliedBabyScale = scale;
@@ -235,7 +264,7 @@ function clampTicks(value, max) {
     return Math.max(0, Math.min(max, Math.floor(value || 0)));
 }
 
-function showLoveParticles(animal) {
+export function showLoveParticles(animal) {
     createParticleEmitter({
         x: animal.position.x + animal.hitbox.x / 2,
         y: animal.position.y - BLOCK_SIZE * 0.2,

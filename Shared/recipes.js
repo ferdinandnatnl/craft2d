@@ -22,6 +22,25 @@ export const recipes = [
         ],
         output: new InventoryItem({ itemId: Items.Boat, count: 1 }),
     }),
+    // Saddle
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [new RecipeItem({ count: 0 }), new RecipeItem({ itemId: Items.Leather }), new RecipeItem({ count: 0 })],
+            [new RecipeItem({ itemId: Items.Leather }), new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ itemId: Items.Leather })],
+        ],
+        output: new InventoryItem({ itemId: Items.Saddle, count: 1 }),
+    }),
+    // Leather Horse Armor
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [new RecipeItem({ itemId: Items.Leather }), new RecipeItem({ count: 0 }), new RecipeItem({ itemId: Items.Leather })],
+            [new RecipeItem({ itemId: Items.Leather }), new RecipeItem({ itemId: Items.Leather }), new RecipeItem({ itemId: Items.Leather })],
+            [new RecipeItem({ itemId: Items.Leather }), new RecipeItem({ count: 0 }), new RecipeItem({ itemId: Items.Leather })],
+        ],
+        output: new InventoryItem({ itemId: Items.LeatherHorseArmor, count: 1 }),
+    }),
 
     // Doors
     ...[
@@ -47,6 +66,47 @@ export const recipes = [
             [new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ itemId: Items.IronIngot })],
         ],
         output: new InventoryItem({ itemId: Items.IronDoor, count: 3 }),
+    }),
+    // Paper
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [[
+            new RecipeItem({ itemId: Items.SugarCane }),
+            new RecipeItem({ itemId: Items.SugarCane }),
+            new RecipeItem({ itemId: Items.SugarCane }),
+        ]],
+        output: new InventoryItem({ itemId: Items.Paper, count: 3 }),
+    }),
+    // Book
+    new Recipe({
+        type: RecipeType.Shapeless,
+        input: [
+            new RecipeItem({ itemId: Items.Paper }),
+            new RecipeItem({ itemId: Items.Paper }),
+            new RecipeItem({ itemId: Items.Paper }),
+            new RecipeItem({ itemId: Items.Leather }),
+        ],
+        output: new InventoryItem({ itemId: Items.Book, count: 1 }),
+    }),
+    // Compass
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [new RecipeItem({ count: 0 }), new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ count: 0 })],
+            [new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ itemId: Items.RedstoneDust }), new RecipeItem({ itemId: Items.IronIngot })],
+            [new RecipeItem({ count: 0 }), new RecipeItem({ itemId: Items.IronIngot }), new RecipeItem({ count: 0 })],
+        ],
+        output: new InventoryItem({ itemId: Items.Compass, count: 1 }),
+    }),
+    // Empty Map
+    new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [new RecipeItem({ itemId: Items.Paper }), new RecipeItem({ itemId: Items.Paper }), new RecipeItem({ itemId: Items.Paper })],
+            [new RecipeItem({ itemId: Items.Paper }), new RecipeItem({ itemId: Items.Compass }), new RecipeItem({ itemId: Items.Paper })],
+            [new RecipeItem({ itemId: Items.Paper }), new RecipeItem({ itemId: Items.Paper }), new RecipeItem({ itemId: Items.Paper })],
+        ],
+        output: new InventoryItem({ itemId: Items.EmptyMap, count: 1 }),
     }),
     // Red Bed
     new Recipe({
@@ -183,6 +243,31 @@ export const recipes = [
             ],
         ],
         output: new InventoryItem({ itemId: Items.FishingRod, count: 1 }),
+    }),
+    ...[
+        [new RecipeItem({ blockCategory: BlockCategory.Planks }), Items.WoodSpear],
+        [new RecipeItem({ blockId: Blocks.Cobblestone }), Items.StoneSpear],
+        [new RecipeItem({ itemId: Items.IronIngot }), Items.IronSpear],
+        [new RecipeItem({ itemId: Items.GoldIngot }), Items.GoldSpear],
+        [new RecipeItem({ itemId: Items.Diamond }), Items.DiamondSpear],
+    ].map(([tip, spear]) => new Recipe({
+        type: RecipeType.Shaped,
+        input: [
+            [tip],
+            [new RecipeItem({ itemId: Items.Stick })],
+            [new RecipeItem({ itemId: Items.Stick })],
+        ],
+        output: new InventoryItem({ itemId: spear, count: 1 }),
+    })),
+    // Use the existing netherite sword as the upgrade material; this project
+    // does not define netherite ingots or a smithing table.
+    new Recipe({
+        type: RecipeType.Shapeless,
+        input: [
+            new RecipeItem({ itemId: Items.DiamondSpear }),
+            new RecipeItem({ itemId: Items.NetheriteSword }),
+        ],
+        output: new InventoryItem({ itemId: Items.NetheriteSpear, count: 1 }),
     }),
     //#region Wooden Tools
     // Wooden Axe
