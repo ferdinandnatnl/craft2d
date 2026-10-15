@@ -4,75 +4,143 @@ import { ChestLoot } from "./chestLoot.js";
 import { Dimensions } from "./dimensions.js";
 import { Structure } from "./structure.js";
 
+const VILLAGE_THEMES = {
+    VillagePlains: {
+        biome: OverworldBiomes.Plains, planks: Blocks.OakPlanks,
+        timber: Blocks.OakLog, roof: Blocks.OakSlab,
+        foundation: Blocks.Cobblestone, path: Blocks.Cobblestone,
+        doorLower: Blocks.OakDoorLower, doorUpper: Blocks.OakDoorUpper,
+        canopy: Blocks.YellowWool,
+    },
+    VillageDesert: {
+        biome: OverworldBiomes.Desert, planks: Blocks.SmoothSandstone,
+        timber: Blocks.CarvedSandstone, roof: Blocks.SandstoneSlab,
+        foundation: Blocks.SandStone, path: Blocks.SandStone,
+        doorLower: Blocks.OakDoorLower, doorUpper: Blocks.OakDoorUpper,
+        canopy: Blocks.OrangeWool,
+    },
+    VillageTaiga: {
+        biome: OverworldBiomes.Taiga, planks: Blocks.SprucePlanks,
+        timber: Blocks.SpruceLog, roof: Blocks.SpruceSlab,
+        foundation: Blocks.Cobblestone, path: Blocks.Gravel,
+        doorLower: Blocks.SpruceDoorLower, doorUpper: Blocks.SpruceDoorUpper,
+        canopy: Blocks.RedWool,
+    },
+    VillageSavanna: {
+        biome: OverworldBiomes.Savanna, planks: Blocks.AcaciaPlanks,
+        timber: Blocks.AcaciaLog, roof: Blocks.AcaciaSlab,
+        foundation: Blocks.Cobblestone, path: Blocks.SandStone,
+        doorLower: Blocks.AcaciaDoorLower, doorUpper: Blocks.AcaciaDoorUpper,
+        canopy: Blocks.OrangeWool,
+    },
+    VillageSnowy: {
+        biome: OverworldBiomes.SnowyPlains, planks: Blocks.SprucePlanks,
+        timber: Blocks.SpruceLog, roof: Blocks.SpruceSlab,
+        foundation: Blocks.Cobblestone, path: Blocks.Cobblestone,
+        doorLower: Blocks.SpruceDoorLower, doorUpper: Blocks.SpruceDoorUpper,
+        roofCap: Blocks.SnowBlock,
+        canopy: Blocks.RedWool,
+    },
+};
+
+const VILLAGE_BUILDINGS = {
+    Cottage: { left: 3, right: 12, roofY: 5, workstation: Blocks.CraftingTable },
+    Smithy: { left: 2, right: 13, roofY: 4, workstation: Blocks.Furnace },
+    BigHouse: { left: 1, right: 14, roofY: 3 },
+    FarmShack: { left: 4, right: 11, roofY: 6, workstation: Blocks.HayBale },
+};
+
 function villageTemplate({
-    biome,
-    planks,
-    timber,
-    roof,
-    foundation,
-    path,
-    doorLower,
-    doorUpper,
-    roofCap = null,
-}) {
+    biome, planks, timber, roof, foundation, path,
+    doorLower, doorUpper, roofCap = null, canopy,
+}, kind) {
     const width = 16;
-    const height = 10;
-    const blocks = Array.from({ length: height }, () =>
-        Array(width).fill(Blocks.Air),
-    );
-    const walls = Array.from({ length: height }, () =>
-        Array(width).fill(Blocks.Air),
-    );
+    const height = 11;
+    const blocks = Array.from({ length: height }, () => Array(width).fill(Blocks.Air));
+    const walls = Array.from({ length: height }, () => Array(width).fill(Blocks.Air));
+    const { left, right, roofY, workstation } = VILLAGE_BUILDINGS[kind];
+    const desert = biome === OverworldBiomes.Desert;
+    const roofBlock = desert ? foundation : roof;
 
     for (let x = 0; x < width; x++) blocks[height - 1][x] = path;
-
-    const addHouse = (startX, workstation) => {
-        const groundY = height - 1;
-        for (let x = 0; x < 6; x++) {
-            blocks[groundY][startX + x] = foundation;
-            blocks[4][startX + x] = planks;
+    for (let x = left; x <= right; x++) blocks[height - 1][x] = foundation;
+    for (let x = left - 1; x <= right + 1; x++) blocks[roofY][x] = roofBlock;
+    if (kind === "BigHouse") {
+        for (let x = left + 1; x <= right - 1; x++) blocks[roofY - 1][x] = planks;
+        for (let x = left + 4; x <= right - 4; x++) {
+            blocks[roofY - 2][x] = roofCap ?? roofBlock;
         }
-        for (let x = 1; x <= 4; x++) {
-            blocks[3][startX + x] = planks;
-            walls[3][startX + x] = planks;
+    } else if (kind === "FarmShack") {
+        for (let x = left; x <= right; x++) {
+            blocks[roofY - 1][x] = roofCap ?? roof;
         }
-        for (let x = 2; x <= 3; x++) {
-            blocks[2][startX + x] = roofCap ?? roof;
+    } else if (desert) {
+        blocks[roofY - 1][left - 1] = timber;
+        blocks[roofY - 1][right + 1] = timber;
+    } else {
+        for (let x = left + 1; x <= right - 1; x++) blocks[roofY - 1][x] = roofBlock;
+        for (let x = left + 3; x <= right - 3; x++) {
+            blocks[roofY - 2][x] = kind === "Smithy" ? roofBlock : roofCap ?? roof;
         }
+    }
 
-        for (let y = 5; y <= 8; y++) {
-            blocks[y][startX] = timber;
-            blocks[y][startX + 5] = timber;
-            for (let x = 1; x <= 4; x++) {
-                blocks[y][startX + x] = Blocks.StructureAir;
-                walls[y][startX + x] = planks;
-            }
+    for (let y = roofY + 1; y < height - 1; y++) {
+        blocks[y][left] = kind === "Smithy" && y >= 7 ? foundation : timber;
+        blocks[y][right] = kind === "Smithy" && y >= 7 ? foundation : timber;
+        for (let x = left + 1; x < right; x++) {
+            blocks[y][x] = Blocks.StructureAir;
+            walls[y][x] = kind === "Smithy" && y >= 7 ? foundation
+                : kind === "Cottage" && biome === OverworldBiomes.Plains
+                    ? Blocks.WhiteWool : kind === "BigHouse" && y >= 8
+                        ? foundation : planks;
         }
+    }
 
-        blocks[6][startX + 1] = Blocks.Glass;
-        blocks[6][startX + 4] = Blocks.Glass;
-        blocks[7][startX + 2] = doorUpper;
-        blocks[8][startX + 2] = doorLower;
-        walls[7][startX + 2] = Blocks.Air;
-        walls[8][startX + 2] = Blocks.Air;
-        blocks[8][startX + 3] = workstation;
-    };
-
-    addHouse(0, Blocks.CraftingTable);
-    addHouse(10, Blocks.Furnace);
-
-    // Keep the center lane clear so villagers and players can pass the houses.
-    blocks[6][5] = Blocks.Torch;
-    blocks[6][10] = Blocks.Torch;
+    // Side doors lead through the cutaway room; windows are in its rear wall.
+    for (const x of [left, right]) {
+        blocks[8][x] = doorUpper;
+        blocks[9][x] = doorLower;
+    }
+    const windowRows = kind === "BigHouse" ? [5, 8]
+        : kind === "FarmShack" ? [8] : [7];
+    for (const y of windowRows) {
+        walls[y][left + 2] = Blocks.Glass;
+        if (kind !== "FarmShack") walls[y][right - 2] = Blocks.Glass;
+    }
+    if (workstation) blocks[9][left + 3] = workstation;
+    if (kind === "Smithy") {
+        for (let y = 0; y < roofY; y++) blocks[y][right - 2] = foundation;
+        blocks[9][left + 5] = Blocks.CobblestoneSlab;
+    }
+    if (kind === "BigHouse") {
+        for (let x = left + 2; x <= right - 2; x++) {
+            if (x !== 8) blocks[6][x] = planks;
+        }
+        for (let y = 7; y <= 9; y++) blocks[y][8] = Blocks.Ladder;
+        blocks[9][left + 4] = Blocks.Chest;
+    }
+    if (kind === "Cottage") blocks[9][left + 5] = Blocks.Chest;
+    if (kind === "FarmShack") {
+        walls[8][left - 2] = Blocks.HayBale;
+        walls[9][left - 2] = Blocks.HayBale;
+    }
 
     return new Structure({
-        biome,
-        blocks,
-        walls,
-        shift: { x: 0, y: 0 },
+        biome, blocks, walls, shift: { x: 0, y: 0 },
         villageGround: biome.secondLayer,
+        villagePath: path,
+        villageFoundation: foundation,
+        villageEntrances: [left, right],
+        villageCanopy: canopy,
+        villageTimber: timber,
     });
 }
+
+const VILLAGE_VARIANTS = Object.fromEntries(
+    Object.entries(VILLAGE_THEMES).flatMap(([name, theme]) =>
+        Object.keys(VILLAGE_BUILDINGS).map(kind =>
+            [`${name}${kind}`, villageTemplate(theme, kind)])),
+);
 
 export const Structures = Object.freeze({
     Village: new Structure({
@@ -115,57 +183,12 @@ export const Structures = Object.freeze({
             Array(16).fill(Blocks.Air),
         ],
     }),
-    VillagePlains: villageTemplate({
-        biome: OverworldBiomes.Plains,
-        planks: Blocks.OakPlanks,
-        timber: Blocks.OakLog,
-        roof: Blocks.OakSlab,
-        foundation: Blocks.Cobblestone,
-        path: Blocks.Cobblestone,
-        doorLower: Blocks.OakDoorLower,
-        doorUpper: Blocks.OakDoorUpper,
-    }),
-    VillageDesert: villageTemplate({
-        biome: OverworldBiomes.Desert,
-        planks: Blocks.SmoothSandstone,
-        timber: Blocks.CarvedSandstone,
-        roof: Blocks.SandstoneSlab,
-        foundation: Blocks.Sandstone,
-        path: Blocks.Sandstone,
-        doorLower: Blocks.OakDoorLower,
-        doorUpper: Blocks.OakDoorUpper,
-    }),
-    VillageTaiga: villageTemplate({
-        biome: OverworldBiomes.Taiga,
-        planks: Blocks.SprucePlanks,
-        timber: Blocks.SpruceLog,
-        roof: Blocks.SpruceSlab,
-        foundation: Blocks.Cobblestone,
-        path: Blocks.Gravel,
-        doorLower: Blocks.SpruceDoorLower,
-        doorUpper: Blocks.SpruceDoorUpper,
-    }),
-    VillageSavanna: villageTemplate({
-        biome: OverworldBiomes.Savanna,
-        planks: Blocks.AcaciaPlanks,
-        timber: Blocks.AcaciaLog,
-        roof: Blocks.AcaciaSlab,
-        foundation: Blocks.Cobblestone,
-        path: Blocks.Sandstone,
-        doorLower: Blocks.AcaciaDoorLower,
-        doorUpper: Blocks.AcaciaDoorUpper,
-    }),
-    VillageSnowy: villageTemplate({
-        biome: OverworldBiomes.SnowyPlains,
-        planks: Blocks.SprucePlanks,
-        timber: Blocks.SpruceLog,
-        roof: Blocks.SpruceSlab,
-        foundation: Blocks.Cobblestone,
-        path: Blocks.Cobblestone,
-        doorLower: Blocks.SpruceDoorLower,
-        doorUpper: Blocks.SpruceDoorUpper,
-        roofCap: Blocks.SnowBlock,
-    }),
+    VillagePlains: VILLAGE_VARIANTS.VillagePlainsCottage,
+    VillageDesert: VILLAGE_VARIANTS.VillageDesertCottage,
+    VillageTaiga: VILLAGE_VARIANTS.VillageTaigaCottage,
+    VillageSavanna: VILLAGE_VARIANTS.VillageSavannaCottage,
+    VillageSnowy: VILLAGE_VARIANTS.VillageSnowyCottage,
+    ...VILLAGE_VARIANTS,
     RuinedPortal: new Structure({
         blocks: [
             [Blocks.Air, Blocks.Obsidian, Blocks.StructureAir, Blocks.Obsidian, Blocks.Obsidian, Blocks.Air, Blocks.Air],

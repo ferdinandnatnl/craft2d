@@ -15,7 +15,7 @@ import { loadChunk, saveChunk } from "./saving.js";
 import { Structures } from "@2dcraft.com/shared/structures.js";
 import { terrainHeightAt } from "@2dcraft.com/shared/terrainHeight.js";
 import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
-import { isVillageChunk, villageStructureForBiome } from "@2dcraft.com/shared/village.js";
+import { VILLAGE_CENTER, VILLAGE_PIECES, isVillageChunk, villageStructureForBiome } from "@2dcraft.com/shared/village.js";
 import { createSeededRandom, perlinSeed, randomInt, randomMinecraftSeed, seedHash } from "@2dcraft.com/shared/seed.js";
 import { isRandomSpreadChunk } from "@2dcraft.com/shared/randomSpread.js";
 import { Entities } from "../entities/entities.js";
@@ -79,11 +79,13 @@ export class WorldGenerator {
         this.world.worldgenVersion = this.worldgenVersion;
         this.forceToBiome = null;
         this.loadingWorld = true;
+        this.villageSites = new Map();
 
         this.setNoiseSeed();
     }
 
     setNoiseSeed() {
+        this.villageSites?.clear();
         const seed = this.worldgenVersion < 2
             ? this.world.seed
             : perlinSeed(this.world.seed);
@@ -129,47 +131,138 @@ export class WorldGenerator {
         return false;
     }
 
+    villageSiteAt(anchorChunkIndex) {
+        const structureName = villageStructureForBiome(this.calculateChunkBiome(
+            anchorChunkIndex, Dimensions.Overworld,
+        ));
+        if (!structureName) return null;
+
+        const floors = [];
+        const levels = [];
+        const waterlines = [];
+        for (let index = 0; index < VILLAGE_PIECES.length; index++) {
+            const chunkIndex = anchorChunkIndex + index - VILLAGE_CENTER;
+            const biome = this.calculateChunkBiome(chunkIndex, Dimensions.Overworld);
+
+            const columnLevels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
+                this.getTerrainHeight(chunkIndex * CHUNK_WIDTH + x, Dimensions.Overworld) + 1);
+            const surface = Math.max(...columnLevels);
+            const waterline = seaLevelForVersion(this.worldgenVersion) +
+                biome.waterLevel - WATER_LEVEL + 1;
+            const floor = Math.max(surface, waterline + 2);
+            // Villages need one walkable terrace. Reject cliffs and deep stilts
+            // rather than spanning them with disconnected raised platforms.
+            if (VILLAGE_PIECES[index] !== "Square" &&
+                (floor - Math.min(...columnLevels) > 7 ||
+                    surface - Math.min(...columnLevels) > 7)) return null;
+            floors.push(floor);
+            levels.push(columnLevels);
+            waterlines.push(waterline);
+        }
+
+        const allLevels = levels.flat();
+        const villageFloor = Math.round(
+            (Math.min(...allLevels) + Math.max(...allLevels)) / 2,
+        );
+        if (allLevels.some(level => Math.abs(villageFloor - level) > 4))
+            return null;
+        if (waterlines.some(waterline => villageFloor <= waterline + 1))
+            return null;
+        floors.fill(villageFloor);
+
+        return { anchorChunkIndex, structureName, floors };
+    }
+
+    villageSiteForRegion(region) {
+        if (this.villageSites.has(region)) return this.villageSites.get(region);
+        const spacing = this.worldgenVersion >= 4 ? 96 : 24;
+        const start = region * spacing;
+        const end = start + spacing - 1;
+        let candidateChunkIndex = null;
+        for (let index = start; index <= end; index++) {
+            if (isVillageChunk(this.world.seed, index, this.worldgenVersion)) {
+                candidateChunkIndex = index;
+                break;
+            }
+        }
+        if (candidateChunkIndex === null) return null;
+
+        const firstCenter = start + VILLAGE_CENTER;
+        const lastCenter = end - VILLAGE_CENTER;
+        for (let radius = 0; radius < spacing; radius++) {
+            const centers = radius === 0
+                ? [candidateChunkIndex]
+                : [candidateChunkIndex + radius, candidateChunkIndex - radius];
+            for (const center of centers) {
+                if (center < firstCenter || center > lastCenter) continue;
+                const site = this.villageSiteAt(center);
+                if (site) {
+                    this.villageSites.set(region, site);
+                    return site;
+                }
+            }
+        }
+        this.villageSites.set(region, null);
+        return null;
+    }
+
+    villageSiteForCandidate(candidateChunkIndex) {
+        if (!isVillageChunk(this.world.seed, candidateChunkIndex, this.worldgenVersion))
+            return null;
+        const spacing = this.worldgenVersion >= 4 ? 96 : 24;
+        return this.villageSiteForRegion(Math.floor(candidateChunkIndex / spacing));
+    }
+
+    villagePathHeight(site, index) {
+        return site.floors[index];
+    }
+
+    villageSiteForChunk(chunkIndex) {
+        const spacing = this.worldgenVersion >= 4 ? 96 : 24;
+        const firstRegion = Math.floor((chunkIndex - VILLAGE_CENTER) / spacing);
+        const lastRegion = Math.floor((chunkIndex + VILLAGE_CENTER) / spacing);
+        for (let region = firstRegion; region <= lastRegion; region++) {
+            const site = this.villageSiteForRegion(region);
+            if (!site) continue;
+            const index = chunkIndex - site.anchorChunkIndex + VILLAGE_CENTER;
+            if (index >= 0 && index < VILLAGE_PIECES.length) {
+                return { ...site, index, piece: VILLAGE_PIECES[index] };
+            }
+        }
+        return null;
+    }
+
     locateVillage() {
         if (this.specialWorldProps.noStructures || this.specialWorldProps.void)
             return null;
 
         const playerX = runtime.world?.player?.position.x ?? 0;
         const center = Math.floor(playerX / (CHUNK_WIDTH * BLOCK_SIZE));
+        const spacing = this.worldgenVersion >= 4 ? 96 : 24;
+        let nearestSite = null;
+        let nearestDistance = Infinity;
         for (let radius = 0; radius < 10000; radius++) {
+            if (nearestSite && radius > nearestDistance + spacing) break;
             const candidates = radius === 0
                 ? [center]
                 : [center + radius, center - radius];
 
             for (const chunkIndex of candidates) {
-                if (!isVillageChunk(this.world.seed, chunkIndex, this.worldgenVersion)) continue;
-
-                const biome = this.calculateChunkBiome(
-                    chunkIndex,
-                    Dimensions.Overworld,
-                );
-                if (!villageStructureForBiome(biome)) continue;
-
-                const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
-                    this.getTerrainHeight(
-                        chunkIndex * CHUNK_WIDTH + x,
-                        Dimensions.Overworld,
-                    ) + 1,
-                );
-                const floorY = Math.max(...levels);
-                if (
-                    floorY <= seaLevelForVersion(this.worldgenVersion) + biome.waterLevel - WATER_LEVEL + 1 ||
-                    floorY - Math.min(...levels) > 4
-                ) continue;
-
-                return {
-                    chunkIndex,
-                    x: chunkIndex * CHUNK_WIDTH + 8,
-                    y: floorY,
-                };
+                const site = this.villageSiteForCandidate(chunkIndex);
+                if (!site) continue;
+                const distance = Math.abs(site.anchorChunkIndex - center);
+                if (distance < nearestDistance) {
+                    nearestSite = site;
+                    nearestDistance = distance;
+                }
             }
         }
 
-        return null;
+        return nearestSite ? {
+            chunkIndex: nearestSite.anchorChunkIndex,
+            x: nearestSite.anchorChunkIndex * CHUNK_WIDTH + 8,
+            y: this.villagePathHeight(nearestSite, VILLAGE_CENTER, 8) + 1,
+        } : null;
     }
 
     loadCustomSeed(seedInput) {
@@ -784,20 +877,21 @@ export class WorldGenerator {
     generateStructures(dimensionIndex = activeDimension) {
         const dimension = dimensions[dimensionIndex];
         dimension.chunks.forEach((chunk, chunkX) => {
-            if (chunk.generated) {
+            if (chunk.generated || chunk.hasVillage) {
                 return;
             }
 
             const chunkIndex = chunkX / (CHUNK_WIDTH * BLOCK_SIZE);
-            const villageStructure = villageStructureForBiome(chunk.biome);
+            const villageSite = dimensionIndex === Dimensions.Overworld
+                ? this.villageSiteForChunk(chunkIndex) : null;
             if (dimensionIndex === Dimensions.Overworld &&
-                villageStructure &&
-                isVillageChunk(this.world.seed, chunkIndex, this.worldgenVersion) &&
+                villageSite &&
                 this.generateVillage(
                     chunk,
                     dimensionIndex,
-                    villageStructure,
-                    createSeededRandom(this.world.seed, `structure:village:${chunkIndex}`),
+                    villageSite,
+                    createSeededRandom(this.world.seed,
+                        `structure:village:${villageSite.anchorChunkIndex}:${chunkIndex}`),
                 )) {
                 return;
             }
@@ -860,45 +954,86 @@ export class WorldGenerator {
     generateVillage(
         chunk,
         dimensionIndex,
-        structureName,
+        site,
         random = Math.random,
     ) {
+        const { structureName, index, piece } = site;
+        const villageStructure = Structures[structureName];
+        if (!villageStructure) return false;
         const levels = Array.from({ length: CHUNK_WIDTH }, (_, x) =>
             chunk.findGroundLevel(x, false, true));
-        const floorY = Math.max(...levels);
-        if (
-            floorY <= seaLevelForVersion(this.worldgenVersion) + chunk.biome.waterLevel - WATER_LEVEL + 1 ||
-            floorY - Math.min(...levels) > 4
-        ) {
-            return false;
-        }
-
-        // Support the lane and floors where the ground dips below the village.
-        const villageGround = Structures[structureName]?.villageGround ??
-            Blocks.Cobblestone;
-        levels.forEach((level, x) => {
-            for (let y = level; y < floorY; y++) {
-                chunk.setBlockType(x, y, villageGround);
+        const villageGround = villageStructure.villageGround;
+        if (piece === "Square") {
+            levels.forEach((level, x) => {
+                const pathY = this.villagePathHeight(site, index, x);
+                for (let y = level; y < pathY; y++) {
+                    chunk.setBlockType(x, y, villageGround);
+                }
+                for (let y = pathY; y < level; y++) {
+                    chunk.setBlockType(x, y, Blocks.StructureAir);
+                }
+                chunk.setBlockType(x, pathY, villageStructure.villagePath);
+            });
+            if (piece === "Square") {
+                for (const [start, canopy] of [
+                    [2, villageStructure.villageCanopy], [10, Blocks.WhiteWool],
+                ]) {
+                    const marketY = Math.max(...Array.from({ length: 4 }, (_, i) =>
+                        this.villagePathHeight(site, index, start + i)));
+                    for (const x of [start, start + 3]) {
+                        for (let y = this.villagePathHeight(site, index, x) + 1;
+                            y <= marketY + 2; y++) {
+                            chunk.setBlockType(x, y, villageStructure.villageTimber, true);
+                        }
+                    }
+                    for (let x = start; x <= start + 3; x++) {
+                        chunk.setBlockType(x, marketY + 3, canopy, true);
+                    }
+                    for (let x = start + 1; x <= start + 2; x++) {
+                        chunk.setBlockType(x, marketY + 1, Blocks.OakPlanks, true);
+                    }
+                }
+                for (const x of [0, 15]) {
+                    chunk.setBlockType(x, this.villagePathHeight(site, index, x) + 1,
+                        Blocks.Torch);
+                }
             }
-        });
-        this.generateStructure(
-            structureName,
-            chunk.x,
-            floorY * BLOCK_SIZE,
-            dimensionIndex,
-            random,
-        );
+        } else {
+            const floorY = site.floors[index];
+            const building = Structures[`${structureName}${piece}`];
+            levels.forEach((level, x) => {
+                for (let y = level; y < floorY; y++) {
+                    chunk.setBlockType(x, y, villageGround);
+                }
+                for (let y = floorY; y < level; y++) {
+                    chunk.setBlockType(x, y, Blocks.StructureAir);
+                }
+            });
+            this.generateStructure(`${structureName}${piece}`, chunk.x,
+                floorY * BLOCK_SIZE, dimensionIndex, random);
+            for (const x of building.villageEntrances) {
+                for (const y of [floorY + 1, floorY + 2]) {
+                    const door = chunk.getBlock(x, y);
+                    const expected = building.blocks[10 - (y - floorY)][x];
+                    if (door?.blockType === expected) {
+                        door.setBlockMetaData({ open: true });
+                    }
+                }
+            }
+        }
         chunk.hasVillage = true;
 
         if (!this.specialWorldProps.noMobs && runtime.GAMERULES.doMobSpawning) {
-            for (const x of [6, 9]) {
+            const villagers = piece === "Square" ? [6, 9] : [8];
+            for (const x of villagers) {
+                const floorY = this.villagePathHeight(site, index, x);
                 const villager = this.world.summonEntity(
                     Entities.Villager,
                     new Vector2(chunk.x + (x + 0.2) * BLOCK_SIZE, 0),
                     { myChunkX: chunk.x, homeX: chunk.x + 8 * BLOCK_SIZE },
                 );
                 villager.dimension = dimensionIndex;
-                villager.position.y = this.world.userBlockYToWorld(floorY) -
+                villager.position.y = this.world.userBlockYToWorld(floorY + 1) -
                     villager.hitbox.y;
                 chunk.entities.push(villager);
             }

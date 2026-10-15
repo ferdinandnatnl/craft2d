@@ -10,6 +10,12 @@ const VILLAGE_STRUCTURES = new Map([
     [OverworldBiomes.SnowyPlains, "VillageSnowy"],
 ]);
 
+// A village is a line of distinct, traversable pieces in the 2D play plane.
+export const VILLAGE_PIECES = Object.freeze([
+    "Cottage", "Smithy", "Square", "BigHouse", "FarmShack",
+]);
+export const VILLAGE_CENTER = 2;
+
 export function villageStructureForBiome(biome) {
     return VILLAGE_STRUCTURES.get(biome) ?? null;
 }

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Blocks } from "../../Shared/blocks.js";
 import { Structures } from "../../Shared/structures.js";
-import { isVillageChunk } from "../../Shared/village.js";
+import { VILLAGE_CENTER, VILLAGE_PIECES, isVillageChunk } from "../../Shared/village.js";
 
 test("villages have stable, sparse locations that depend on the seed", () => {
     const locations = seed => Array.from({ length: 401 }, (_, i) => i - 200)
@@ -43,28 +43,36 @@ test("village cottages have roofs, open entrances, rear windows, and a clear lan
     assert.equal(rows[5][14], Blocks.Furnace);
 });
 
-test("biome village roofs connect and the center lane stays walkable", () => {
+test("villages use four distinct side-view buildings around a square", () => {
+    assert.deepEqual(VILLAGE_PIECES,
+        ["Cottage", "Smithy", "Square", "BigHouse", "FarmShack"]);
+    assert.equal(VILLAGE_PIECES[VILLAGE_CENTER], "Square");
+
     for (const name of ["VillagePlains", "VillageDesert", "VillageTaiga",
         "VillageSavanna", "VillageSnowy"]) {
-        const village = Structures[name];
-        const rows = village.blocks;
-        assert.equal(rows.length, 10, name);
-        assert.ok(rows.every(row => row.length === 16), name);
-        for (const start of [0, 10]) {
-            for (const x of [start + 2, start + 3]) {
-                assert.notEqual(rows[2][x], Blocks.Air, name);
-                assert.equal(rows[3][x], rows[4][x], name);
-                assert.equal(rows[4][x], village.walls[3][x], name);
-            }
+        const profiles = new Set();
+        for (const kind of ["Cottage", "Smithy", "BigHouse", "FarmShack"]) {
+            const structure = Structures[`${name}${kind}`];
+            const rows = structure.blocks;
+            const doors = rows[9].flatMap((block, x) =>
+                block === Structures[name].blocks[9][3] ? [x] : []);
+            assert.equal(rows.length, 11, `${name}${kind}`);
+            assert.ok(rows.every(row => row.length === 16), `${name}${kind}`);
+            assert.ok([...rows.flat(), ...structure.walls.flat()].every(Number.isInteger),
+                `${name}${kind} has an undefined block`);
+            assert.ok(doors.length === 2 && doors[0] < 7 && doors[1] > 8,
+                `${name}${kind} needs side entrances`);
+            assert.equal(rows[7][7], Blocks.StructureAir, `${name}${kind}`);
+            assert.notEqual(structure.walls[7][7], Blocks.Glass,
+                `${name}${kind} has a centered window`);
+            assert.equal(structure.villageGround, structure.biome.secondLayer);
+            assert.ok(structure.villagePath !== Blocks.Water);
+            profiles.add(rows.slice(0, 7).map(row => row.join(",")).join("|"));
         }
-        for (let x = 6; x <= 9; x++) {
-            assert.equal(rows[9][x], rows[9][6], name);
-            assert.notEqual(rows[9][x], Blocks.Water, name);
-            assert.notEqual(rows[9][x], Blocks.Farmland, name);
-            for (let y = 6; y <= 8; y++) {
-                assert.equal(rows[y][x], Blocks.Air, name);
-            }
-        }
-        assert.equal(village.villageGround, village.biome.secondLayer, name);
+        assert.equal(profiles.size, 4, `${name} buildings share a silhouette`);
+        assert.equal(Structures[`${name}Smithy`].blocks[0][11],
+            Structures[name].villageFoundation, `${name} smithy needs a chimney`);
+        assert.equal(Structures[`${name}BigHouse`].blocks[7][8], Blocks.Ladder);
+        assert.equal(Structures[`${name}FarmShack`].walls[8][2], Blocks.HayBale);
     }
 });
