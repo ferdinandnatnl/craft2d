@@ -1154,7 +1154,7 @@ export class Inventory {
             );
         }
         const isCombatItem = ({ name }) =>
-            /sword|bow|arrow|armor|helmet|chestplate|leggings|boots|shield/i.test(name);
+            /sword|spear|bow|arrow|armor|helmet|chestplate|leggings|boots|shield/i.test(name);
         const isMaterial = ({ name }) =>
             /ingot|diamond|emerald|coal|charcoal|redstone|quartz|lapis|nugget|dye|leather|bone|gunpowder|feather|string|slime|sugar/i.test(name);
 
