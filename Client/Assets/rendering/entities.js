@@ -213,7 +213,7 @@ export class VoxelEntities {
         const bodylessSprite = !entity.body && entity.voxelSprite;
         const portraitSprite = spriteName.includes("-art/") ||
             species === "golem" || entity.isAquatic ||
-            entity.isCrocodile || bodylessSprite;
+            entity.isCrocodile || entity.isSpider || bodylessSprite;
         if (bodylessSprite) {
             material.side = THREE.DoubleSide;
             const width = entity.hitbox.x / BLOCK_SIZE;
@@ -231,13 +231,16 @@ export class VoxelEntities {
             // Complete entity art stays on one camera-facing plane instead
             // of being sampled as a Minecraft skin atlas.
             material.side = THREE.DoubleSide;
-            const width = entity.isAquatic || entity.isCrocodile
+            const width = entity.isAquatic || entity.isCrocodile ||
+                entity.isSpider
                 ? entity.hitbox.x / BLOCK_SIZE
                 : image.width / 16;
-            const height = entity.isAquatic || entity.isCrocodile
+            const height = entity.isAquatic || entity.isCrocodile ||
+                entity.isSpider
                 ? entity.hitbox.y / BLOCK_SIZE
                 : image.height / 16;
-            const spriteCenterY = entity.isAquatic || entity.isCrocodile
+            const spriteCenterY = entity.isAquatic || entity.isCrocodile ||
+                entity.isSpider
                 ? entity.hitbox.y / (2 * BLOCK_SIZE)
                 : height / 2;
             const sprite = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
@@ -1085,6 +1088,9 @@ export class VoxelEntities {
         record.pivots.LegBL.rotation.x = -Math.sin(phase) * gait + airborne * 0.5;
         record.pivots.LegBR.rotation.x = Math.sin(phase) * gait + airborne * 0.5;
         record.pivots.Tail.rotation.x = Math.sin(seconds * 2.2) * 0.1;
+        record.pivots.Neck.rotation.x = entity.jumpButtonWasDown
+            ? -0.08 - entity.jumpCharge * 0.12
+            : -0.05 + Math.sin(seconds * 1.5) * 0.015;
         record.pivots.Head.rotation.x = entity.jumpButtonWasDown
             ? -0.08 - entity.jumpCharge * 0.18
             : airborne * -0.12;
@@ -1583,8 +1589,8 @@ export class VoxelEntities {
                 record.pivots.leftArm.rotation.x = -0.42;
                 record.pivots.rightArm.rotation.z = -0.12;
                 record.pivots.leftArm.rotation.z = 0.12;
-                record.pivots.rightLeg.rotation.x = -0.9;
-                record.pivots.leftLeg.rotation.x = -0.9;
+                record.pivots.rightLeg.rotation.x = -0.45;
+                record.pivots.leftLeg.rotation.x = -0.45;
                 this.updateHeld(record, entity, heldArmName);
                 continue;
             }

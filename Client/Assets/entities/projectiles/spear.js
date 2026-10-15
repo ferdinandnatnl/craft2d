@@ -38,6 +38,7 @@ export class SpearProjectile extends Projectile {
         itemId = null,
         recoveryItemId = null,
         itemProps = {},
+        maxRange = null,
         dimension,
     } = {}) {
         const spritePath = itemId == null
@@ -64,13 +65,19 @@ export class SpearProjectile extends Projectile {
             position.x + this.hitbox.x / 2,
             position.y + this.hitbox.y / 2,
         );
-        this.maxRange = 5 * BLOCK_SIZE;
+        this.maxRange = Number.isFinite(maxRange)
+            ? Math.max(BLOCK_SIZE, maxRange)
+            : 5 * BLOCK_SIZE;
         this.expiresAt = (runtime.passedTime || 0) + 1.5;
         this.reelSpeed = Math.max(BLOCK_SIZE * 8, Math.hypot(velocity.x, velocity.y));
         this.flightAngle = 0;
         this.rotation = 0;
         this.retracting = false;
         this.finished = false;
+        this.harpoonedTarget = null;
+        this.harpoonOffset = null;
+        this.harpoonDamage = null;
+        this.harpoonHitFromX = null;
     }
 
     draw(ctx, viewCamera = { x: 0, y: 0 }) {
@@ -183,7 +190,6 @@ export class SpearProjectile extends Projectile {
         });
 
         if (target) {
-            const damage = Math.max(1, target.health + 1);
             const hitfromX = this.position.x + this.hitbox.x / 2;
             playRandomSoundFromArray({
                 array: Sounds.Water_Enter,
@@ -196,7 +202,13 @@ export class SpearProjectile extends Projectile {
                 runtime.server?.send({
                     type: "mobHit",
                     sender: this.ownerUUID,
-                    message: { targetUUID: target.UUID, damage, hitfromX, knockback: 2 },
+                    message: {
+                        targetUUID: target.UUID,
+                        damage: this.damage,
+                        hitfromX,
+                        knockback: 2,
+                        weaponItemId: this.itemId,
+                    },
                 });
             } else if (!target.invulnerable) {
                 this.beginRetraction(target);
@@ -230,6 +242,8 @@ export class SpearProjectile extends Projectile {
             }
             : null;
         if (target) {
+            this.harpoonDamage = this.damage;
+            this.harpoonHitFromX = this.position.x + this.hitbox.x / 2;
             target.isBeingHarpooned = true;
             target.velocity.x = 0;
             target.velocity.y = 0;
@@ -264,7 +278,17 @@ export class SpearProjectile extends Projectile {
                 target.position.x = this.position.x + this.harpoonOffset.x;
                 target.position.y = this.position.y + this.harpoonOffset.y;
                 target.isBeingHarpooned = false;
-                target.forceDamage(target.health);
+                const previousHealth = target.health;
+                target.hit(
+                    this.harpoonDamage,
+                    this.harpoonHitFromX,
+                    2,
+                    undefined,
+                    owner,
+                );
+                if (previousHealth > 0 && target.health <= 0 && owner.isLocal?.()) {
+                    owner.gainExperienceLevel?.(1);
+                }
             }
             this.dieEvent();
             return;

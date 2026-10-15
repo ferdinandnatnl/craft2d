@@ -34,6 +34,7 @@ const SPAWN_EGG_COLORS = Object.freeze({
     Crocodile: { baseColor: "#738940", overlayColor: "#A6A15E" },
     Caiman: { baseColor: "#5C5631", overlayColor: "#BBC45C" },
     Catfish: { baseColor: "#807757", overlayColor: "#8A7466" },
+    Spider: { baseColor: "#30262F", overlayColor: "#884B55" },
     Centipede: { baseColor: "#342B2E", overlayColor: "#733449" },
 });
 
@@ -248,6 +249,7 @@ export const Items = Object.freeze({
     // Reserved legacy ID; older saves may still contain this inert egg.
     CentipedeSpawnEgg: 3037,
     HorseSpawnEgg: 3038,
+    SpiderSpawnEgg: 3039,
     MutantZombieSpawnEgg: 3000,
     MutantCreeperSpawnEgg: 3001,
     MutantSkeletonSpawnEgg: 3002,
@@ -265,13 +267,14 @@ export const Items = Object.freeze({
     Bed: 4006,
 });
 
+// Spear-specific projectile damage uses health points; range uses blocks.
 const SPEAR_DEFINITIONS = [
-    [Items.WoodSpear, "Wooden Spear", "spear_wood.svg", 0, 59],
-    [Items.StoneSpear, "Stone Spear", "spear_stone.svg", 1, 131],
-    [Items.IronSpear, "Iron Spear", "spear_iron.svg", 2, 250],
-    [Items.GoldSpear, "Golden Spear", "spear_gold.svg", 2, 32],
-    [Items.DiamondSpear, "Diamond Spear", "spear_diamond.svg", 3, 1561],
-    [Items.NetheriteSpear, "Netherite Spear", "spear_netherite.svg", 4, 2031],
+    [Items.WoodSpear, "Wooden Spear", "spear_wood.svg", 0, 59, 2, 4],
+    [Items.StoneSpear, "Stone Spear", "spear_stone.svg", 1, 131, 4, 5],
+    [Items.IronSpear, "Iron Spear", "spear_iron.svg", 2, 250, 6, 6],
+    [Items.GoldSpear, "Golden Spear", "spear_gold.svg", 2, 32, 6, 5],
+    [Items.DiamondSpear, "Diamond Spear", "spear_diamond.svg", 3, 1561, 10, 8],
+    [Items.NetheriteSpear, "Netherite Spear", "spear_netherite.svg", 4, 2031, 12, 10],
 ];
 
 export const items = [
@@ -649,7 +652,15 @@ export const items = [
 
         durability: 2031,
     }),
-    ...SPEAR_DEFINITIONS.map(([itemId, name, sprite, baseDamage, durability]) => new Item({
+    ...SPEAR_DEFINITIONS.map(([
+        itemId,
+        name,
+        sprite,
+        baseDamage,
+        durability,
+        projectileDamage,
+        projectileRange,
+    ]) => new Item({
         itemId,
         name,
         sprite,
@@ -659,6 +670,8 @@ export const items = [
         baseDamage,
         durability,
         projectile: "SpearProjectile",
+        projectileDamage,
+        projectileRange,
         throwPower: 12,
     })),
     new Item({
@@ -1219,6 +1232,13 @@ export const items = [
         sprite: "spawn_egg",
         spawnEntity: "Horse",
         spawnEggColors: SPAWN_EGG_COLORS.Horse,
+    }),
+    new Item({
+        itemId: Items.SpiderSpawnEgg,
+        name: "Spider Spawn Egg",
+        sprite: "spawn_egg",
+        spawnEntity: "Spider",
+        spawnEggColors: SPAWN_EGG_COLORS.Spider,
     }),
     new Item({
         itemId: Items.ZombieSpawnEgg,

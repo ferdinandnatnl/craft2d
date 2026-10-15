@@ -6,6 +6,7 @@ import { createInterface } from "readline";
 import fs from "fs";
 import { BLOCK_SIZE, CHUNK_HEIGHT, TICK_SPEED } from "@2dcraft.com/shared/constants.js";
 import { randomMinecraftSeed } from "@2dcraft.com/shared/seed.js";
+import { itemMap } from "@2dcraft.com/shared/items.js";
 
 const propertiesFile = "server.properties";
 const lanMode = process.argv.includes("--lan");
@@ -947,11 +948,20 @@ function processMessage(message, ws) {
             const mob = lastWorldSnapshot?.mobs?.find(
                 (entry) => entry.UUID === hit.targetUUID,
             );
+            const weaponItem = Number.isInteger(hit.weaponItemId)
+                ? itemMap.get(hit.weaponItemId)
+                : null;
+            const spearHit = weaponItem?.projectile === "SpearProjectile";
+            const maxRange = spearHit
+                ? weaponItem.projectileRange * BLOCK_SIZE
+                : 5 * BLOCK_SIZE;
             if (
                 attacker?.ws !== ws || !worldAuthorityUUID || !mob ||
                 attacker.health <= 0 || attacker.gamemode === 3 ||
                 attacker.dimension !== mob.dimension ||
                 !Number.isFinite(hit.damage) || hit.damage <= 0 || hit.damage > 100 ||
+                (hit.weaponItemId != null && !spearHit) ||
+                (spearHit && hit.damage !== weaponItem.projectileDamage) ||
                 !Number.isFinite(hit.hitfromX) || Math.abs(hit.hitfromX) > 1_000_000_000 ||
                 !Number.isFinite(hit.knockback) || hit.knockback < 0 || hit.knockback > 20 ||
                 !Number.isFinite(attacker.position?.x) ||
@@ -962,7 +972,7 @@ function processMessage(message, ws) {
                 attacker.position.x - mob.position.x,
                 attacker.position.y - mob.position.y,
             );
-            if (distance > 5 * BLOCK_SIZE) break;
+            if (distance > maxRange) break;
 
             sendToPlayer(worldAuthorityUUID, {
                 type: "mobHit",
@@ -972,6 +982,7 @@ function processMessage(message, ws) {
                     damage: hit.damage,
                     hitfromX: hit.hitfromX,
                     knockback: hit.knockback,
+                    ...(spearHit ? { weaponItemId: weaponItem.itemId } : {}),
                 },
             });
             break;

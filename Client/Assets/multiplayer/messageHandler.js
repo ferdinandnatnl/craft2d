@@ -1,4 +1,5 @@
 import { savedWorldgenVersion } from "@2dcraft.com/shared/overworldGeneration.js";
+import { itemMap } from "@2dcraft.com/shared/items.js";
 import { runtime } from "../utils/runtime.js";
 import { Drop } from "../entities/drop.js";
 import { Entities } from "../entities/entities.js";
@@ -264,11 +265,20 @@ export function processMessage(data) {
             const world = runtime.world;
             const mob = world?.getEntityByUUID(message?.targetUUID);
             const attacker = world?.getEntityByUUID(data.sender);
+            const weaponItem = Number.isInteger(message?.weaponItemId)
+                ? itemMap.get(message.weaponItemId)
+                : null;
+            const spearHit = weaponItem?.projectile === "SpearProjectile";
+            const maxRange = spearHit
+                ? weaponItem.projectileRange * BLOCK_SIZE
+                : 5 * BLOCK_SIZE;
             if (
                 !world?.isWorldAuthority || !mob || mob.type !== EntityTypes.Mob ||
                 mob.isMinion || mob.health <= 0 || !attacker ||
                 attacker.type !== EntityTypes.Player || attacker.dimension !== mob.dimension ||
                 !Number.isFinite(message.damage) || message.damage <= 0 ||
+                (message.weaponItemId != null && !spearHit) ||
+                (spearHit && message.damage !== weaponItem.projectileDamage) ||
                 !Number.isFinite(message.hitfromX) || !Number.isFinite(message.knockback)
             ) break;
             const distance = Math.hypot(
@@ -277,7 +287,7 @@ export function processMessage(data) {
                 attacker.position.y + attacker.hitbox.y / 2 -
                     (mob.position.y + mob.hitbox.y / 2),
             );
-            if (distance > 5 * BLOCK_SIZE) break;
+            if (distance > maxRange) break;
 
             const previousHealth = mob.health;
             mob.hit(message.damage, message.hitfromX, message.knockback, "Player attack", attacker);

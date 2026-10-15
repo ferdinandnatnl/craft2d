@@ -1314,8 +1314,9 @@ export class Player extends Entity {
         this.noGravity = this.horsePhysics?.noGravity ?? false;
         this.noCollision = this.horsePhysics?.noCollision ?? false;
         this.horsePhysics = null;
-        this.position.x = horse.position.x +
-            (horse.hitbox.x - this.hitbox.x) / 2;
+        this.position.x = horse.direction < 0
+            ? horse.position.x + horse.hitbox.x
+            : horse.position.x - this.hitbox.x;
         this.position.y = horse.position.y + horse.hitbox.y - this.hitbox.y;
         this.velocity = new Vector2(
             horse.velocity.x,
@@ -1462,9 +1463,12 @@ export class Player extends Entity {
         const speed = item.throwPower * BLOCK_SIZE;
         const velocity = new Vector2(direction.x * speed, direction.y * speed);
         if (isSpear) {
+            const spearRange = Number.isFinite(item.projectileRange)
+                ? item.projectileRange
+                : 5;
             const distance = Math.min(
                 Vector2.Distance(launchOrigin, mousePos),
-                BLOCK_SIZE * 5,
+                BLOCK_SIZE * spearRange,
             );
             velocity.y -= GRAVITY * distance / speed / 2;
         }
@@ -1480,7 +1484,12 @@ export class Player extends Entity {
                 itemProps.durability = remainingDurability;
             }
             Object.assign(projectileProps, {
-                damage: Math.max(1, 2 * (1 + (item.baseDamage || 0))),
+                damage: Number.isFinite(item.projectileDamage)
+                    ? item.projectileDamage
+                    : Math.max(1, 2 * (1 + (item.baseDamage || 0))),
+                maxRange: (Number.isFinite(item.projectileRange)
+                    ? item.projectileRange
+                    : 5) * BLOCK_SIZE,
                 ownerUUID: this.UUID,
                 itemId: item.itemId,
                 recoveryItemId: !this.abilities.instaBuild &&
@@ -2980,7 +2989,12 @@ export class Player extends Entity {
         if (this.windowOpen) return;
 
         if (this.horse) {
-            if (!this.canMove || runtime.game.pauseMenu?.getActive()) return;
+            if (runtime.game.pauseMenu?.getActive()) return;
+            if (input.isActionPressed("sprint")) {
+                this.horse.dismount(this);
+                return;
+            }
+            if (!this.canMove) return;
             const direction = Number(input.isActionDown("moveRight")) -
                 Number(input.isActionDown("moveLeft"));
             this.horse.ride(

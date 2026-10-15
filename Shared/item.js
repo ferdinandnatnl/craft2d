@@ -16,6 +16,8 @@ export class Item {
         foodSaturation = 0,
         playMusicInJukebox = null,
         projectile = null,
+        projectileDamage = null,
+        projectileRange = null,
         throwPower = 0,
         spawnEntity = null,
         spawnEggColors = null,
@@ -42,6 +44,8 @@ export class Item {
         this.playMusicInJukebox = playMusicInJukebox;
 
         this.projectile = projectile;
+        this.projectileDamage = projectileDamage;
+        this.projectileRange = projectileRange;
         this.throwPower = throwPower;
         this.spawnEntity = spawnEntity;
         this.spawnEggColors = spawnEggColors;

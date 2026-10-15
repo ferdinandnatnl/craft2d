@@ -36,6 +36,7 @@ import { Crocodile } from "./mobs/crocodile.js";
 import { Caiman } from "./mobs/caiman.js";
 import { Minion } from "./mobs/minion.js";
 import { Catfish } from "./mobs/catfish.js";
+import { Spider } from "./mobs/spider.js";
 
 export const Entities = Object.freeze({
     Pig: Pig,
@@ -75,6 +76,7 @@ export const Entities = Object.freeze({
     Caiman: Caiman,
     Minion: Minion,
     Catfish: Catfish,
+    Spider: Spider,
     MutantSkeleton: MutantSkeleton,
     MutantEnderman: MutantEnderman,
     MutantSnowGolem: MutantSnowGolem,

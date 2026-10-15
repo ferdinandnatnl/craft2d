@@ -50,6 +50,7 @@ const HORSE_FOOD = new Map([
 ]);
 const HAY_BALE_FOOD = { heal: 20, temper: 0, growth: 600 };
 const RIDE_HEIGHT = 1.35;
+const RIDER_BACK_OFFSET = 0.4;
 const JUMP_CHARGE_SECONDS = 0.9;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -274,7 +275,10 @@ export class Horse extends Mob {
 
     attachRider(player) {
         if (!player) return;
-        player.position.x = this.position.x + (this.hitbox.x - player.hitbox.x) / 2;
+        const direction = this.direction < 0 ? -1 : 1;
+        player.position.x = this.position.x +
+            (this.hitbox.x - player.hitbox.x) / 2 -
+            direction * RIDER_BACK_OFFSET * BLOCK_SIZE;
         player.position.y = this.position.y + this.hitbox.y -
             RIDE_HEIGHT * BLOCK_SIZE - player.hitbox.y;
         player.direction = this.direction;
@@ -285,7 +289,9 @@ export class Horse extends Mob {
     followRemoteRider() {
         const rider = this.passenger;
         if (!rider || rider.dimension !== this.dimension) return;
-        this.position.x = rider.position.x + rider.hitbox.x / 2 - this.hitbox.x / 2;
+        const direction = rider.direction < 0 ? -1 : 1;
+        this.position.x = rider.position.x + rider.hitbox.x / 2 +
+            direction * RIDER_BACK_OFFSET * BLOCK_SIZE - this.hitbox.x / 2;
         this.position.y = rider.position.y + rider.hitbox.y +
             RIDE_HEIGHT * BLOCK_SIZE - this.hitbox.y;
         this.direction = rider.direction < 0 ? -1 : 1;

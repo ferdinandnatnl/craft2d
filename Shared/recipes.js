@@ -259,13 +259,13 @@ export const recipes = [
         ],
         output: new InventoryItem({ itemId: spear, count: 1 }),
     })),
-    // Use the existing netherite sword as the upgrade material; this project
-    // does not define netherite ingots or a smithing table.
+    // Use a craftable diamond sword as the upgrade material because this
+    // project does not define netherite ingots or a smithing table.
     new Recipe({
         type: RecipeType.Shapeless,
         input: [
             new RecipeItem({ itemId: Items.DiamondSpear }),
-            new RecipeItem({ itemId: Items.NetheriteSword }),
+            new RecipeItem({ itemId: Items.DiamondSword }),
         ],
         output: new InventoryItem({ itemId: Items.NetheriteSpear, count: 1 }),
     }),
