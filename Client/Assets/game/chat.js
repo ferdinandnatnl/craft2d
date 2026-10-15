@@ -275,8 +275,8 @@ export class Chat {
             { name: "clear", args: [] },
             { name: "clearlog", args: [] },
             { name: "gamemode", args: ["mode"] },
-            { name: "tp", args: ["playerOrX", "y"], usage: "<player> | <x> <y>" },
-            { name: "teleport", args: ["playerOrX", "y"], usage: "<player> | <x> <y>" },
+            { name: "tp", args: ["playerOrX", "y"], usage: "<player> | <x> <y> | nearest village" },
+            { name: "teleport", args: ["playerOrX", "y"], usage: "<player> | <x> <y> | nearest village" },
             { name: "spawnpoint", args: ["x", "y"] },
             { name: "summon", args: ["entity", "x", "y", "count"] },
             { name: "kill", args: [] },
@@ -382,6 +382,25 @@ export class Chat {
 
             const argType = command.args[argIndex - 1];
             const prefix = currentPrefix.toLowerCase();
+
+            if (["tp", "teleport"].includes(commandName) && argIndex === 1) {
+                const players = [
+                    "~",
+                    "0",
+                    runtime.world?.player
+                        ? runtime.world.worldToBlocks(runtime.world.player.position).x.toString()
+                        : "0",
+                    ...this.getOnlinePlayers().map((player) => player.name),
+                ];
+                return [...new Set(["nearest", ...players])].filter((suggestion) =>
+                    suggestion.toLowerCase().startsWith(prefix),
+                );
+            }
+
+            if (["tp", "teleport"].includes(commandName) && argIndex === 2 &&
+                parts[1]?.toLowerCase() === "nearest") {
+                return "village".startsWith(prefix) ? ["village"] : [];
+            }
 
             if (
                 commandName === "time" &&
@@ -1284,8 +1303,31 @@ export class Chat {
     }
 
     teleport(messageArray) {
-        if (!runtime.world.player) {
+        const player = runtime.world?.player;
+        if (!player) {
             this.message("No player found.");
+            return;
+        }
+
+        if (messageArray[1]?.toLowerCase() === "nearest") {
+            if (messageArray.length !== 3 || messageArray[2]?.toLowerCase() !== "village") {
+                this.invalidCommand("/tp <player> or /tp <x> <y> or /tp nearest village");
+                return;
+            }
+
+            const village = runtime.world.generator?.locateVillage();
+            if (!village) {
+                this.message("No village found in this world.", "", Colors.Red);
+                return;
+            }
+
+            gotoDimension(Dimensions.Overworld);
+            player.teleport(new Vector2(
+                village.x * BLOCK_SIZE,
+                runtime.world.userBlockYToWorld(village.y) - player.hitbox.y,
+            ));
+            player.mutliplayerSyncPlayerState?.();
+            this.cheatMessage(`Teleported to nearest village at x ${village.x}.`);
             return;
         }
 
@@ -1324,7 +1366,7 @@ export class Chat {
 
         // Check if x and y coordinates are provided
         if (!messageArray[1] || !messageArray[2]) {
-            this.invalidCommand("/tp <player> or /tp <x> <y>");
+            this.invalidCommand("/tp <player> or /tp <x> <y> or /tp nearest village");
             return;
         }
 
@@ -1334,7 +1376,7 @@ export class Chat {
         const targetPosition = this.getWorldPosition(new Vector2(x, y));
 
         if (!targetPosition) {
-            this.invalidCommand("/tp <player> or /tp <x> <y>");
+            this.invalidCommand("/tp <player> or /tp <x> <y> or /tp nearest village");
             return;
         }
 
