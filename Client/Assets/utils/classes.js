@@ -2,6 +2,7 @@ import { runtime } from "./runtime.js";
 import { BLOCK_SIZE } from "./globals.js";
 import { ctx, drawSimpleImage } from "./drawHelpers.js";
 import { getSpriteSize, getSpriteUrl } from "./texturePackLoader.js";
+import { isUpperSlab } from "@2dcraft.com/shared/slabs.js";
 
 export class Vector2 {
     constructor(x = 0, y = 0) {
@@ -115,13 +116,16 @@ export class Square {
     }
 
     drawBrightness(ctx, camera) {
+        const cutoff = this.cutoff || 0;
+        const topOffset = isUpperSlab(this) ? 0 : cutoff;
         ctx.globalAlpha = 1 - this.getBrightness();
         ctx.fillStyle = "black";
         ctx.fillRect(
             Math.round(-this.transform.size.x / 2 - camera.x),
-            Math.round(-this.transform.size.y / 2 - camera.y),
+            Math.round(-this.transform.size.y / 2 - camera.y +
+                topOffset * this.transform.size.y),
             Math.round(this.transform.size.x),
-            Math.round(this.transform.size.y),
+            Math.round(this.transform.size.y * (1 - cutoff)),
         );
         ctx.globalAlpha = this.alpha;
     }
@@ -202,12 +206,9 @@ export class Square {
                 ctx.save();
                 ctx.beginPath();
                 // // Clip away the top part so that only the lower visibleHeight is drawn
-                ctx.rect(
-                    drawX,
-                    drawY + (drawHeight - visibleHeight),
-                    drawWidth,
-                    visibleHeight,
-                );
+                ctx.rect(drawX,
+                    drawY + (isUpperSlab(this) ? 0 : drawHeight - visibleHeight),
+                    drawWidth, visibleHeight);
                 ctx.clip();
 
                 ctx.drawImage(this.img, drawX, drawY, drawWidth, drawHeight);
@@ -260,12 +261,9 @@ export class Square {
         // and spans the full width and visibleHeight.
         ctx.save();
         ctx.beginPath();
-        ctx.rect(
-            drawX,
-            drawY + (drawHeight - visibleHeight),
-            drawWidth,
-            visibleHeight,
-        );
+        ctx.rect(drawX,
+            drawY + (isUpperSlab(this) ? 0 : drawHeight - visibleHeight),
+            drawWidth, visibleHeight);
         ctx.clip();
 
         // Draw the entire sprite frame normally.
@@ -287,7 +285,7 @@ export class Square {
             ctx.fillStyle = "black";
             ctx.fillRect(
                 drawX,
-                drawY + (drawHeight - visibleHeight),
+                drawY + (isUpperSlab(this) ? 0 : drawHeight - visibleHeight),
                 drawWidth,
                 visibleHeight,
             );

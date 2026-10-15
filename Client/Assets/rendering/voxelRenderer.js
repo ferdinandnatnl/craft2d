@@ -5,6 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { isUpperSlab } from "@2dcraft.com/shared/slabs.js";
 import tooloud from "@2dcraft.com/shared/tooloud.js";
 import { BLOCK_SIZE, CHUNK_HEIGHT, CHUNK_WIDTH, RENDER_DISTANCE, TERRAIN_HEIGHT, WATER_LEVEL } from "../utils/globals.js";
 import { getBlock, SpecialType } from "../world/block.js";
@@ -257,7 +258,8 @@ export class VoxelRenderer {
                     if (def.air) continue;
                     hash = Math.imul(hash ^ (block.blockType + x * 31 + y * 7919 + (wall ? 5 : 0)), 16777619);
                     hash = Math.imul(hash ^ Math.round((block.cutoff || 0) * 1000) ^ Math.round(block.lightLevel || 0) ^ (def.states?.indexOf(block.spriteName) || 0), 16777619);
-                    hash = Math.imul(hash ^ (block.metaData?.open ? 1 : 0), 16777619);
+                    hash = Math.imul(hash ^ (block.metaData?.open ? 1 : 0) ^
+                        (isUpperSlab(block) ? 2 : 0), 16777619);
                     blocks.push({ block, def, x, y, wall });
                     if (block.lightSourceLevel > 2) this.sources.push({ x, y, wall, block, def });
                 }
@@ -270,6 +272,7 @@ export class VoxelRenderer {
         const water = [];
         for (const { block, def, x, y, wall } of blocks) {
             const h = Math.max(0.02, 1 - (block.cutoff || 0));
+            const slabOffset = isUpperSlab(block) ? 1 - h : 0;
             const z = wall ? -1.5 : -0.5;
             const exposureBlock = wall
                 ? world.getBlockAtWorldPosition(x * BLOCK_SIZE, y * BLOCK_SIZE, false)
@@ -344,7 +347,8 @@ export class VoxelRenderer {
             const neighbor = (dx, dy) => solid(world.getBlockAtWorldPosition((x + dx) * BLOCK_SIZE, (y + dy) * BLOCK_SIZE, wall));
             const frame = def.specialType === SpecialType.EndPortalFrame;
             batch.box(sprite, { plant: def.transparent, emissive: !!block.lightSourceLevel },
-                x + ox, -y - 1 - oy, z, 1, frame ? h * 13 / 16 : h, 1, shade,
+                x + ox, -y - 1 - oy + slabOffset, z,
+                1, frame ? h * 13 / 16 : h, 1, shade,
                 { left: !neighbor(-1,0), right: !neighbor(1,0), top: frame || !neighbor(0,-1) || h < 1,
                     bottom: !neighbor(0,1), back: false }, def.faceSprites || {});
             if (frame && sprite === "endframe_eye") addEndFrameEye(batch, x + ox, -y - 1 - oy, z, shade);

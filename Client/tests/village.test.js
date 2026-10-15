@@ -54,25 +54,35 @@ test("villages use four distinct side-view buildings around a square", () => {
         for (const kind of ["Cottage", "Smithy", "BigHouse", "FarmShack"]) {
             const structure = Structures[`${name}${kind}`];
             const rows = structure.blocks;
-            const doors = rows[9].flatMap((block, x) =>
-                block === Structures[name].blocks[9][3] ? [x] : []);
-            assert.equal(rows.length, 11, `${name}${kind}`);
+            const doors = structure.villageEntrances;
+            assert.equal(rows.length, 15, `${name}${kind}`);
             assert.ok(rows.every(row => row.length === 16), `${name}${kind}`);
             assert.ok([...rows.flat(), ...structure.walls.flat()].every(Number.isInteger),
                 `${name}${kind} has an undefined block`);
             assert.ok(doors.length === 2 && doors[0] < 7 && doors[1] > 8,
                 `${name}${kind} needs side entrances`);
-            assert.equal(rows[7][7], Blocks.StructureAir, `${name}${kind}`);
-            assert.notEqual(structure.walls[7][7], Blocks.Glass,
+            assert.equal(rows[13][doors[0]], rows[13][doors[1]]);
+            assert.equal(rows[12][doors[0]], rows[12][doors[1]]);
+            assert.equal(rows[12][9], Blocks.StructureAir, `${name}${kind}`);
+            assert.notEqual(structure.walls[10][9], Blocks.Glass,
                 `${name}${kind} has a centered window`);
             assert.equal(structure.villageGround, structure.biome.secondLayer);
             assert.ok(structure.villagePath !== Blocks.Water);
-            profiles.add(rows.slice(0, 7).map(row => row.join(",")).join("|"));
+            profiles.add(rows.slice(0, 10).map(row => row.join(",")).join("|"));
         }
         assert.equal(profiles.size, 4, `${name} buildings share a silhouette`);
-        assert.equal(Structures[`${name}Smithy`].blocks[0][11],
+        assert.equal(Structures[`${name}Smithy`].blocks[1][3],
             Structures[name].villageFoundation, `${name} smithy needs a chimney`);
-        assert.equal(Structures[`${name}BigHouse`].blocks[7][8], Blocks.Ladder);
-        assert.equal(Structures[`${name}FarmShack`].walls[8][2], Blocks.HayBale);
+        assert.equal(Structures[`${name}BigHouse`].blocks[9][8], Blocks.Ladder);
+        assert.equal(Structures[`${name}FarmShack`].walls[13][1], Blocks.Wheat);
+        assert.equal(Structures[`${name}FarmShack`].walls[13][2], Blocks.HayBale);
     }
+
+    const cottage = Structures.VillagePlainsCottage;
+    const roofSteps = Array.from({ length: 11 }, (_, x) =>
+        cottage.blocks.findIndex(row => row[x + 1] === Blocks.OakPlanks));
+    assert.ok(new Set(roofSteps).size >= 3, "plains roof needs visible tiers");
+    assert.equal(cottage.blocks[10][14], Blocks.Torch, "porch needs a light");
+    assert.equal(cottage.walls[12][5], Blocks.FlowerRose,
+        "window needs a planter");
 });

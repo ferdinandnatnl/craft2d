@@ -10,6 +10,7 @@ import { BLOCK_SIZE, CHUNK_HEIGHT, TICK_SPEED, ToolType, multiplayer, updatingBl
 import { getSpriteAverageColor, getSpriteSize, getSpriteUrl } from "../utils/texturePackLoader.js";
 import { blockRegistry } from "@2dcraft.com/shared/blockRegistry.js";
 import { doorBlockPairs } from "@2dcraft.com/shared/blocks.js";
+import { slabVerticalBounds } from "@2dcraft.com/shared/slabs.js";
 import { Dimensions } from "@2dcraft.com/shared/dimensions.js";
 import {
     activeDimension,
@@ -2590,10 +2591,21 @@ export function hasBlockCollision(block) {
 export function getBlockCollisionTop(block) {
     if (!block) return 0;
     const definition = getBlock(block.blockType);
+    const slabBounds = slabVerticalBounds(block);
+    if (slabBounds) {
+        return block.transform.position.y + BLOCK_SIZE * slabBounds.top;
+    }
     const height = definition.specialType === SpecialType.Bed
         ? 9 / 16
         : Math.max(0, Math.min(1, 1 - (block.cutoff || 0)));
     return block.transform.position.y + BLOCK_SIZE * (1 - height);
+}
+
+export function getBlockCollisionBottom(block) {
+    if (!block) return 0;
+    const slabBounds = slabVerticalBounds(block);
+    return block.transform.position.y +
+        (slabBounds ? BLOCK_SIZE * slabBounds.bottom : BLOCK_SIZE);
 }
 
 runtime.getBlock = getBlock;

@@ -22,6 +22,7 @@ import {
     hasBlockCollision,
 } from "../world/block.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
+import { isSlabBlock, slabHalfAt } from "@2dcraft.com/shared/slabs.js";
 import { activeDimension, getDimensionChunks, gotoDimension } from "../world/dimension.js";
 import { nearestEndShrineX } from "@2dcraft.com/shared/endProgression.js";
 import { createParticleEmitter } from "../world/particleEmitter.js";
@@ -2225,6 +2226,10 @@ export class Player extends Entity {
         }
 
         const placingSeaPickle = blockToPlace.blockId === Blocks.SeaPickle;
+        const slabHalf = isSlabBlock(blockToPlace.blockId)
+            ? slabHalfAt(input.getMouseWorldPosition().y,
+                this.hoverBlock.transform.position.y, BLOCK_SIZE)
+            : null;
         const placingSeaLanternInWater =
             blockToPlace.blockId === Blocks.SeaLantern &&
             this.hoverBlock.blockType === Blocks.Water;
@@ -2246,7 +2251,7 @@ export class Player extends Entity {
         if (!isWall) {
             if (placingSeaPickle && this.hoverBlock.blockType !== Blocks.Water) return;
             if (!placingSeaPickle && !placingSeaLanternInWater &&
-                !this.checkBlockForPlacing(blockToPlace)) {
+                !this.checkBlockForPlacing(blockToPlace, slabHalf)) {
                 return;
             }
         } else {
@@ -2267,7 +2272,8 @@ export class Player extends Entity {
             : placingSeaPickle
               ? { waterlogged: true, pickles: 1 }
               : blockToPlace.specialType === SpecialType.Door
-                ? { open: false } : null;
+                ? { open: false }
+                : slabHalf === "top" ? { half: "top" } : null;
         const newBlock = chunk.setBlockTypeLocal(
             this.hoverBlock.x,
             this.hoverBlock.y,
@@ -2292,7 +2298,7 @@ export class Player extends Entity {
             isWall,
             activeDimension,
         );
-        if (placingSeaPickle) newBlock.syncMetaData(false);
+        if (placingSeaPickle || slabHalf === "top") newBlock.syncMetaData(false);
 
         // Play appropriate break sound
         if (!isWall) {
@@ -2414,7 +2420,7 @@ export class Player extends Entity {
         return this.inventory.items[3][this.inventory.currentSlot].item;
     }
 
-    checkBlockForPlacing(block) {
+    checkBlockForPlacing(block, slabHalf = null) {
         const isAir = getBlock(this.hoverBlock.blockType).air;
         const isFluid = getBlock(this.hoverBlock.blockType).fluid;
 
@@ -2434,28 +2440,31 @@ export class Player extends Entity {
 
         let collidingWithEntity = false;
         const collisionCells = block.collision
-            ? [new Vector2(mousePos.x, mousePos.y)]
+            ? [{ position: new Vector2(mousePos.x,
+                mousePos.y + (slabHalf === "bottom" ? BLOCK_SIZE / 2 : 0)),
+                size: new Vector2(BLOCK_SIZE,
+                    slabHalf ? BLOCK_SIZE / 2 : BLOCK_SIZE) }]
             : [];
         for (const extended of block.extendedBlock || []) {
             if (!getBlock(extended.blockId).collision) continue;
-            collisionCells.push(
-                new Vector2(
+            collisionCells.push({
+                position: new Vector2(
                     mousePos.x + extended.offset.x * BLOCK_SIZE,
                     mousePos.y - extended.offset.y * BLOCK_SIZE,
                 ),
-            );
+                size: new Vector2(BLOCK_SIZE, BLOCK_SIZE),
+            });
         }
 
         if (collisionCells.length > 0) {
             for (let i = 0; i < this.entities.length; i++) {
                 const entity = this.entities[i];
                 if (entity.type === 0) continue;
-                if (collisionCells.some((position) =>
+                if (collisionCells.some(({ position, size }) =>
                     isColliding(
                         new Vector2(entity.position.x, entity.position.y),
                         new Vector2(entity.hitbox.x, entity.hitbox.y),
-                        position,
-                        new Vector2(BLOCK_SIZE, BLOCK_SIZE),
+                        position, size,
                     )
                 )) {
                     collidingWithEntity = true;

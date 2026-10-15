@@ -890,8 +890,6 @@ export class WorldGenerator {
                     chunk,
                     dimensionIndex,
                     villageSite,
-                    createSeededRandom(this.world.seed,
-                        `structure:village:${villageSite.anchorChunkIndex}:${chunkIndex}`),
                 )) {
                 return;
             }
@@ -955,7 +953,6 @@ export class WorldGenerator {
         chunk,
         dimensionIndex,
         site,
-        random = Math.random,
     ) {
         const { structureName, index, piece } = site;
         const villageStructure = Structures[structureName];
@@ -1010,11 +1007,12 @@ export class WorldGenerator {
                 }
             });
             this.generateStructure(`${structureName}${piece}`, chunk.x,
-                floorY * BLOCK_SIZE, dimensionIndex, random);
+                floorY * BLOCK_SIZE, dimensionIndex, () => 1);
             for (const x of building.villageEntrances) {
                 for (const y of [floorY + 1, floorY + 2]) {
                     const door = chunk.getBlock(x, y);
-                    const expected = building.blocks[10 - (y - floorY)][x];
+                    const expected = building.blocks[building.blocks.length - 1 -
+                        (y - floorY)][x];
                     if (door?.blockType === expected) {
                         door.setBlockMetaData({ open: true });
                     }

@@ -44,10 +44,10 @@ const VILLAGE_THEMES = {
 };
 
 const VILLAGE_BUILDINGS = {
-    Cottage: { left: 3, right: 12, roofY: 5, workstation: Blocks.CraftingTable },
-    Smithy: { left: 2, right: 13, roofY: 4, workstation: Blocks.Furnace },
-    BigHouse: { left: 1, right: 14, roofY: 3 },
-    FarmShack: { left: 4, right: 11, roofY: 6, workstation: Blocks.HayBale },
+    Cottage: { left: 2, right: 11, roofY: 4, workstation: Blocks.CraftingTable },
+    Smithy: { left: 2, right: 11, roofY: 3, workstation: Blocks.Furnace },
+    BigHouse: { left: 1, right: 12, roofY: 2 },
+    FarmShack: { left: 6, right: 13, roofY: 7, workstation: Blocks.HayBale },
 };
 
 function villageTemplate({
@@ -55,75 +55,108 @@ function villageTemplate({
     doorLower, doorUpper, roofCap = null, canopy,
 }, kind) {
     const width = 16;
-    const height = 11;
+    const height = 15;
     const blocks = Array.from({ length: height }, () => Array(width).fill(Blocks.Air));
     const walls = Array.from({ length: height }, () => Array(width).fill(Blocks.Air));
     const { left, right, roofY, workstation } = VILLAGE_BUILDINGS[kind];
     const desert = biome === OverworldBiomes.Desert;
-    const roofBlock = desert ? foundation : roof;
+    const planted = !desert && biome !== OverworldBiomes.SnowyPlains;
+    const roofAt = x => desert ? roofY : roofY +
+        Math.floor((x - left + 1) / (kind === "FarmShack" ? 6 : 3));
 
-    for (let x = 0; x < width; x++) blocks[height - 1][x] = path;
-    for (let x = left; x <= right; x++) blocks[height - 1][x] = foundation;
-    for (let x = left - 1; x <= right + 1; x++) blocks[roofY][x] = roofBlock;
-    if (kind === "BigHouse") {
-        for (let x = left + 1; x <= right - 1; x++) blocks[roofY - 1][x] = planks;
-        for (let x = left + 4; x <= right - 4; x++) {
-            blocks[roofY - 2][x] = roofCap ?? roofBlock;
+    for (let x = 0; x < width; x++) blocks[14][x] = path;
+    for (let x = left; x <= right; x++) blocks[14][x] = foundation;
+    for (let x = left - 1; x <= right + 1; x++) {
+        const y = roofAt(x);
+        blocks[y][x] = desert ? foundation : roofCap ?? planks;
+        if (y + 1 < 10) blocks[y + 1][x] = desert ? foundation : planks;
+        if (x > left - 1 && x < right + 1 && y + 1 < 14) {
+            walls[y + 1][x] = planks;
         }
-    } else if (kind === "FarmShack") {
-        for (let x = left; x <= right; x++) {
-            blocks[roofY - 1][x] = roofCap ?? roof;
-        }
-    } else if (desert) {
-        blocks[roofY - 1][left - 1] = timber;
-        blocks[roofY - 1][right + 1] = timber;
-    } else {
-        for (let x = left + 1; x <= right - 1; x++) blocks[roofY - 1][x] = roofBlock;
-        for (let x = left + 3; x <= right - 3; x++) {
-            blocks[roofY - 2][x] = kind === "Smithy" ? roofBlock : roofCap ?? roof;
+    }
+    if (!desert) {
+        blocks[roofAt(left - 1) + 1][left - 1] = roof;
+        blocks[roofAt(right + 1) + 1][right + 1] = roof;
+        if (kind !== "FarmShack") {
+            for (let x = right + 1; x <= 15; x++) blocks[8][x] = roof;
+            walls[9][14] = timber;
+            walls[10][14] = timber;
+            walls[11][14] = timber;
+            blocks[10][14] = Blocks.Torch;
         }
     }
 
-    for (let y = roofY + 1; y < height - 1; y++) {
-        blocks[y][left] = kind === "Smithy" && y >= 7 ? foundation : timber;
-        blocks[y][right] = kind === "Smithy" && y >= 7 ? foundation : timber;
-        for (let x = left + 1; x < right; x++) {
-            blocks[y][x] = Blocks.StructureAir;
-            walls[y][x] = kind === "Smithy" && y >= 7 ? foundation
-                : kind === "Cottage" && biome === OverworldBiomes.Plains
-                    ? Blocks.WhiteWool : kind === "BigHouse" && y >= 8
-                        ? foundation : planks;
+    for (let x = left; x <= right; x++) {
+        for (let y = roofAt(x) + 1; y < 14; y++) {
+            walls[y][x] = (kind === "Smithy" && y >= 11 ||
+                kind === "BigHouse" && y >= 12 || y === 13) ? foundation : planks;
+            if (x > left && x < right && y > roofAt(x) + 1) {
+                blocks[y][x] = Blocks.StructureAir;
+            }
         }
     }
-
-    // Side doors lead through the cutaway room; windows are in its rear wall.
+    if (!desert && kind !== "FarmShack") {
+        for (let x = left + 1; x < right; x++) walls[8][x] = timber;
+        for (const x of [left + 2, right - 2]) {
+            for (let y = 7; y <= 10; y++) {
+                if (y > roofAt(x) + 1) walls[y][x] = timber;
+            }
+        }
+    }
     for (const x of [left, right]) {
-        blocks[8][x] = doorUpper;
-        blocks[9][x] = doorLower;
+        for (let y = 9; y < 14; y++) blocks[y][x] = timber;
+        blocks[12][x] = doorUpper;
+        blocks[13][x] = doorLower;
+        walls[12][x] = Blocks.Air;
+        walls[13][x] = Blocks.Air;
     }
-    const windowRows = kind === "BigHouse" ? [5, 8]
-        : kind === "FarmShack" ? [8] : [7];
-    for (const y of windowRows) {
-        walls[y][left + 2] = Blocks.Glass;
-        if (kind !== "FarmShack") walls[y][right - 2] = Blocks.Glass;
+
+    if (kind !== "FarmShack") {
+        for (const x of [left + 3, left + 6]) {
+            walls[10][x] = Blocks.Glass;
+            walls[11][x] = Blocks.Glass;
+            if (planted) {
+                walls[12][x] = Blocks.FlowerRose;
+                walls[13][x] = roof;
+            }
+        }
+    } else {
+        walls[11][left + 3] = Blocks.Glass;
+        for (let x = 1; x <= 4; x++) {
+            walls[14][x] = Blocks.Farmland;
+            walls[13][x] = x % 2 ? Blocks.Wheat : Blocks.Carrot;
+        }
+        walls[12][0] = timber;
+        walls[12][5] = timber;
+        walls[13][2] = Blocks.HayBale;
     }
-    if (workstation) blocks[9][left + 3] = workstation;
-    if (kind === "Smithy") {
-        for (let y = 0; y < roofY; y++) blocks[y][right - 2] = foundation;
-        blocks[9][left + 5] = Blocks.CobblestoneSlab;
+    if (workstation) blocks[13][left + 4] = workstation;
+    if (kind === "Smithy" || kind === "Cottage") {
+        const chimneyX = left + 1;
+        for (let y = 0; y <= roofY + 1; y++) {
+            blocks[y][chimneyX] = y === 0 ? roof : foundation;
+        }
+        if (planted) {
+            walls[roofY + 1][chimneyX + 1] = Blocks.OakLeaves;
+            walls[9][right - 1] = Blocks.Vines;
+            walls[10][left + 1] = Blocks.Vines;
+            walls[11][left + 1] = Blocks.Vines;
+            walls[roofY + 2][chimneyX + 1] = Blocks.Vines;
+            walls[13][left + 2] = Blocks.MossyCobblestone;
+            walls[13][right - 2] = Blocks.MossyCobblestone;
+        }
     }
+    if (kind === "Smithy") blocks[13][left + 6] = Blocks.CobblestoneSlab;
     if (kind === "BigHouse") {
         for (let x = left + 2; x <= right - 2; x++) {
-            if (x !== 8) blocks[6][x] = planks;
+            if (x !== 8) blocks[8][x] = planks;
         }
-        for (let y = 7; y <= 9; y++) blocks[y][8] = Blocks.Ladder;
-        blocks[9][left + 4] = Blocks.Chest;
+        for (let y = 9; y <= 13; y++) blocks[y][8] = Blocks.Ladder;
+        walls[6][left + 4] = Blocks.Glass;
+        walls[7][left + 4] = Blocks.Glass;
+        blocks[13][left + 4] = Blocks.Chest;
     }
-    if (kind === "Cottage") blocks[9][left + 5] = Blocks.Chest;
-    if (kind === "FarmShack") {
-        walls[8][left - 2] = Blocks.HayBale;
-        walls[9][left - 2] = Blocks.HayBale;
-    }
+    if (kind === "Cottage") blocks[13][left + 5] = Blocks.Chest;
 
     return new Structure({
         biome, blocks, walls, shift: { x: 0, y: 0 },

@@ -13,6 +13,7 @@ import {
 import { input } from "./input.js";
 import { getSpriteSize, getSpriteUrl } from "./texturePackLoader.js";
 import { Blocks } from "@2dcraft.com/shared/blocks.js";
+import { isSlabBlock, slabHalfAt } from "@2dcraft.com/shared/slabs.js";
 import {
     activeDimension,
     Dimensions,
@@ -370,11 +371,13 @@ export function drawBreakAndPlaceCursor(inRange = false) {
         const spritePath = "blocks/" + selectedBlock.sprite;
 
         const spriteSize = getSpriteSize(spritePath).width;
+        const upperSlab = isSlabBlock(selectedBlock.blockId) &&
+            slabHalfAt(input.getMouseWorldPosition().y, mouseY, BLOCK_SIZE) === "top";
 
         drawImage({
             url: getSpriteUrl(spritePath),
             x: mouseX - Math.floor(camera.x),
-            y: mouseY - Math.floor(camera.y),
+            y: mouseY - Math.floor(camera.y) - (upperSlab ? BLOCK_SIZE / 2 : 0),
             scale: BLOCK_SIZE / spriteSize,
             centerX: false,
             opacity: 0.5,

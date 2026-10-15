@@ -12,6 +12,7 @@ import { getSpriteAverageColor } from "../utils/texturePackLoader.js";
 import {
     SpecialType,
     getBlock,
+    getBlockCollisionBottom,
     getBlockCollisionTop,
     hasBlockCollision,
 } from "../world/block.js";
@@ -238,7 +239,7 @@ export class Entity {
             }
             if (
                 y >= blockTopY &&
-                y <= block.transform.position.y + BLOCK_SIZE
+                y <= getBlockCollisionBottom(block)
             ) {
                 return block;
             }
@@ -281,7 +282,7 @@ export class Entity {
             const blockTopY = getBlockCollisionTop(block);
             if (
                 this.position.y + this.hitbox.y > blockTopY &&
-                this.position.y < block.transform.position.y + BLOCK_SIZE &&
+                this.position.y < getBlockCollisionBottom(block) &&
                 x < block.transform.position.x + BLOCK_SIZE
             ) {
                 return block;
@@ -327,7 +328,7 @@ export class Entity {
             const blockTopY = getBlockCollisionTop(block);
             if (
                 this.position.y + this.hitbox.y > blockTopY &&
-                this.position.y < block.transform.position.y + BLOCK_SIZE &&
+                this.position.y < getBlockCollisionBottom(block) &&
                 x > block.transform.position.x
             ) {
                 return block;
@@ -373,11 +374,13 @@ export class Entity {
         const blockUpLeft = this.getBlockAtPosition(this.position.x, futureY);
 
         if (blockUpLeft && this.isSolid(blockUpLeft) &&
-            futureY >= getBlockCollisionTop(blockUpLeft)) {
+            futureY < getBlockCollisionBottom(blockUpLeft) &&
+            futureY + this.hitbox.y > getBlockCollisionTop(blockUpLeft)) {
             return blockUpLeft;
         }
         if (blockUpRight && this.isSolid(blockUpRight) &&
-            futureY >= getBlockCollisionTop(blockUpRight)) {
+            futureY < getBlockCollisionBottom(blockUpRight) &&
+            futureY + this.hitbox.y > getBlockCollisionTop(blockUpRight)) {
             return blockUpRight;
         }
         return null;
